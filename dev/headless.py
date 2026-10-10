@@ -5,10 +5,13 @@ place of the focused app, so nothing is typed into real windows. Audio comes fro
 
 Each step is a wav name in <dir>/wav (the hotkey held while it is spoken), sel:WORD (select the last WORD in the
 box), click (the user clicks: ends what the app knows about the text), tap (one tap of the hotkey), undo / tap2
-(double tap), tap2:WAV (double tap, the second press held while WAV is spoken), at:WORD (put the caret right after
-the last WORD; at: puts it at the end), say:TEXT (dictate TEXT as if recognized), set:NAME=VALUE (change a setting
-in memory only) or key:BACK (the user presses Backspace n times: key:BACK*3).
+(double tap), tap2:WAV (double tap, the second press held while WAV is spoken), toggle:WAV (tap, speak, tap),
+hotkey:NAME (the key or button the next steps press, default mouse_middle), rules:default (the default operations),
+rule:JSON (add an operation, rules.Rule.from_dict), at:WORD (put the caret right after the last WORD; at: puts it at
+the end), say:TEXT (dictate TEXT as if recognized), set:NAME=VALUE (change a setting in memory only) or key:BACK (the
+user presses Backspace n times: key:BACK*3). Settings are never saved.
 """
+import json
 import shutil
 import sys
 import time
@@ -19,7 +22,7 @@ import numpy as np
 from PySide6.QtWidgets import QApplication
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from voiceinput import app as appmod, output, selection, session  # noqa: E402
+from voiceinput import app as appmod, output, rules, selection, session  # noqa: E402
 
 S = sys.argv[1]
 HWND = 4242
@@ -64,12 +67,14 @@ class Box:
         return self.text[start:self.caret], self.text[self.caret:len(self.text) if end < 0 else end]
 
     def keys(self, *vks):
-        """Shift+Enter types a newline; Enter sends the text (the box is emptied)."""
+        """Shift+Enter types a newline; Enter sends the text (the box is emptied); others are printed."""
         if vks == (0x10, 0x0D):
             self.paste("\n")
-        elif vks == (0x0D, 1):
+        elif vks == (0x0D,):
             print(f"      [送出] {self.text!r}")
             self.text, self.caret = "", 0
+        else:
+            print(f"      [按鍵] {[hex(v) for v in vks]}")
 
 
 box = Box()
@@ -80,9 +85,9 @@ appmod.press_delete = box.delete
 appmod.press_chord = box.keys
 appmod.press_key = box.keys
 appmod.foreground = session.foreground = lambda: HWND
-appmod.PushToTalk.start = lambda self: None        # no real hotkey / keyboard hook
-replayed = []                                      # hotkey taps passed on to the app (CapsLock toggles)
-appmod.PushToTalk.tap = lambda self: replayed.append(1)
+appmod.Hotkeys.start = lambda self: None           # no real hotkey / keyboard hook
+replayed = []                                      # gestures given back to the key (key name per press)
+appmod.Hotkeys.replay = lambda self, name, times=1: replayed.extend([name] * times)
 appmod.App._watch_mouse = lambda self: None       # the user's real clicks must not end the simulated session
 
 
@@ -128,12 +133,36 @@ def load(name):
     return np.frombuffer(w.readframes(w.getnframes()), np.int16).astype(np.float32) / 32768
 
 
+KEY = "mouse_middle"
+
+
+def _steps(arg: str) -> list[str]:
+    """Split on commas outside the braces of rule:JSON."""
+    out, depth, cur = [], 0, ""
+    for c in arg:
+        depth += (c in "{[") - (c in "}]")
+        if c == "," and depth == 0:
+            out.append(cur)
+            cur = ""
+        else:
+            cur += c
+    return out + [cur]
+
+
+def down():
+    A.on_key_down(KEY, time.monotonic())
+
+
+def up():
+    A.on_key_up(KEY, time.monotonic())
+
+
 t0 = time.monotonic()
 while time.monotonic() - t0 < 120 and not A.recognizer:
     pump(0.3)
 pump(2)
 try:
-    for step in sys.argv[2].split(","):
+    for step in _steps(sys.argv[2]):
         if step.startswith("sel:"):
             w = step[4:]
             i = box.text.rfind(w)
@@ -141,20 +170,37 @@ try:
             A.session.on_input()
             print(f"[選取 {w}]")
             continue
-        if step in ("tap", "undo", "tap2") or step.startswith("tap2:"):
+        if step in ("tap", "undo", "tap2") or step.startswith(("tap2:", "toggle:")):
             replayed.clear()
-            A.recorder.audio = None
-            A.on_press(False)
-            A.on_release(0.1, False)
-            if step != "tap":
+            wav = step.split(":", 1)[1] if ":" in step else ""
+            A.recorder.audio = load(wav) if step.startswith("toggle:") else None
+            down(), pump(0.05), up()
+            if step.startswith("toggle:"):
+                pump(1.0)       # speaking
+                down(), pump(0.05), up()
+            elif step != "tap":
                 pump(0.05)
-                wav = step[5:] if step.startswith("tap2:") else ""
                 A.recorder.audio = load(wav) if wav else None
-                A.on_press(True)
-                A.on_release(1.0 if wav else 0.1, True)
-            pump(2.5 if step.startswith("tap2:") else 1.0)
-            caps = "CapsLock 切換" if len(replayed) % 2 else "CapsLock 不變"
-            print(f"[{step}] → 文字框：{box.text[:box.caret] + '|' + box.text[box.caret:]!r}  ({caps})")
+                down()
+                pump(0.6 if wav else 0.05)
+                up()
+            pump(2.5 if wav else 1.0)
+            given = f"  (還給按鍵：{replayed})" if replayed else ""
+            print(f"[{step}] → 文字框：{box.text[:box.caret] + '|' + box.text[box.caret:]!r}{given}")
+            continue
+        if step.startswith("hotkey:"):
+            KEY = step[7:]
+            print(f"[按鍵 {KEY}]")
+            continue
+        if step == "rules:default":
+            A.cfg.rules = rules.defaults()
+            A.hotkeys.set_keys(rules.bound_keys(A.cfg.rules))
+            print("[預設操作]")
+            continue
+        if step.startswith("rule:"):
+            A.cfg.rules.append(rules.Rule.from_dict(json.loads(step[5:])))
+            A.hotkeys.set_keys(rules.bound_keys(A.cfg.rules))
+            print(f"[新增操作] {A.cfg.rules[-1]}  {rules.problems(A.cfg.rules[-1], A.cfg.rules) or ''}")
             continue
         if step.startswith("set:"):
             name, value = step[4:].split("=")
@@ -162,7 +208,7 @@ try:
             print(f"[設定 {name} = {getattr(A.cfg, name)!r}]（只改記憶體，不存檔）")
             continue
         if step.startswith("say:"):
-            A._dictate(step[4:], None, HWND)
+            A._dictate(step[4:], None, HWND, appmod._Press("", Probe(), 0, False))
             pump(0.5)
             print(f"[說 {step[4:]}（跳過辨識）] → 文字框：{box.text[:box.caret] + '|' + box.text[box.caret:]!r}")
             continue
@@ -185,9 +231,9 @@ try:
             print(f"[按 Backspace ×{n}]")
             continue
         A.recorder.audio = load(step)
-        A.on_press(False)
-        pump(0.5)
-        A.on_release(1.0, False)
+        down()
+        pump(0.6)
+        up()
         pump(2.5)
         shown = box.text[:box.caret] + "|" + box.text[box.caret:]
         print(f"[{step}] {A._records[-1]['fmt'] if A._records else ''!r:32} → 文字框：{shown!r}")

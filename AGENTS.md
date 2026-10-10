@@ -29,7 +29,7 @@ biasing), `picker.py`, `picks.py`, re-dictation and hand-made-edit detection, an
 menus (fix menu, fuzzy readings, menu timeout). The user plans to redesign popups from scratch. The second opinion is
 off: SenseVoice is not loaded and the suspects code in `app.py` is commented out (`suspects.py` and
 `candidates.homophones`, which it needs, are kept). Tray error notices (model not ready, mic failure, terminal
-selection lost) stay. A single tap of the hotkey is a plain key press, also on a selection. Sections below describe
+selection lost) stay. Sections below describe
 the branch; history of the removed features is in git (main, up to 71e5516).
 
 ## Platform
@@ -94,24 +94,39 @@ CJK/ASCII spacing → trailing punctuation.
 - `百分之X` and `<number> percent` → `X%`. English number words (eighty) are not converted.
 - 點 becomes `.` only when both sides are digits or both are letters (三點 meeting stays).
 
-## Settings (2026-09-29)
+## Settings window (tabs since 2026-10-11)
 
-Only microphone, hotkey (CapsLock / right Alt / right Ctrl / F12 / the mouse's upper or lower side button XButton2 /
-XButton1, added 2026-10-06, or the middle button, 2026-10-08: suppressed by a mouse hook and never replayed: the
-button's own action is replaced entirely), the 換行 / 送出 commands and "selected 。 → ，" (all three on by default,
-2026-10-07), autostart and "mute the speakers while recording" (off by default, added 2026-10-06, `mute.py`: Core
-Audio via comtypes; muted when the recording indicator shows, unmuted once the text is pasted or the press ends in
-nothing; a mute the user set is left alone). Selection edits and on-screen terms are always on.
+Three tabs, sized for the log: 一般 (microphone, "mute the speakers while recording", "selected 。 → ，", autostart),
+辨識紀錄 (the transcript log) and 自訂操作 (custom operations, below). Mute (2026-10-06, `mute.py`): Core Audio via
+comtypes; muted when the recording indicator shows, unmuted once the text is pasted or the press ends in nothing; a
+mute the user set is left alone. Selection edits and on-screen terms are always on.
+
+## Custom operations (自訂操作, 2026-10-11)
+
+`rules.py`, stored as `rules` in config.json; they replaced the single hotkey setting and the 換行 / 送出 switches
+(migrated by `Config.load`). A rule: trigger (滑鼠鍵: middle / upper / lower side button; 鍵盤鍵: CapsLock, right Alt,
+right Ctrl, Insert, ScrollLock, Pause, F1-F24; 說出: an utterance that is exactly the phrase) → 按法 (按一下 / 連按兩下
+/ 按住; not for speech) → 情境 (不限 / 剛輸入完 / 有選取文字; the most specific wins) → steps run in order: 命令 (錄音,
+刪除), 按鍵 (a captured combination such as Ctrl+Z, sent with SendInput), 輸入文字 (pasted, counts as a dictation),
+等待 (ms). Steps before 錄音 run at the start, those after it once the text is pasted (skipped if nothing was said).
+Hold + 錄音 records while held; tap / double tap + 錄音 starts there and the next press of any bound key stops it.
+刪除: the selection (terminals too, which is why it is a command and not the Delete key), else the last dictation.
+When a key's double tap is a non-recording rule and its hold records, a held second press records after the double
+tap's steps (delete and say it again; the user's choice). 復原 is not a command: the user adds Ctrl+Z if wanted.
+Defaults: hold middle = 錄音, double middle = 刪除, 說出 換行 = Shift+Enter, 說出 送出 = Enter.
+Gestures (`app.py`, `hotkey.Hotkeys`): bound keys are suppressed by the hooks; the microphone starts at key-down when
+the press may record; a single tap waits DOUBLE_TAP_GAP only when that key has a double-tap rule; a gesture no rule
+takes is given back (keyboard key replayed, mouse button clicked: the user's choice, so an unbound middle click
+still works, 0.35s late when a double tap is bound; a hold is given back as one click). Invalid rules (two 錄音,
+錄音 in a speech rule, empty combination, a duplicate of an earlier rule) are flagged in red and skipped. When no
+rule records any more, a tray notice warns that dictation is impossible (the user's request).
 
 ## Voice edits on selected text
 
 Plan agreed 2026-09-27, cut down 2026-09-29, spoken triggers replaced by the hotkey 2026-09-30. The selection is
-read when the hotkey goes down (`selection.py`, UI Automation TextPattern, on a background thread). On a selection:
-double tap → Delete key; hold and speak → replaces it; double tap with the second press held → Delete at the second
-press, then the dictation is pasted there. A single tap is a plain key press (lean branch). There are no spoken
-commands on a selection. CapsLock: the app, not `hotkey.py`, decides replays (`PushToTalk.tap()`): a single tap is
-replayed at once; on a double tap one more tap is replayed (undoing the first tap's toggle). Other hotkeys: a
-single tap is replayed, a tapped second press only when there is no selection.
+read when a bound key goes down (`selection.py`, UI Automation TextPattern, on a background thread). Speaking with
+text selected replaces it; 刪除 deletes it; with the default operations a double tap held deletes it and the
+dictation is pasted there.
 UIA probe (2026-09-27): Chrome/Edge inputs, Win11 Notepad, LINE give selection + line context; LINE's first read ~1.2s.
 Terminals: Claude Code / Codex / agy in Windows Terminal (inside herdr) hide their mouse selection from UIA,
 Shift+arrow does not select, and a paste goes to the caret. Since 2026-10-01 a mouse drag there works like a
@@ -150,8 +165,7 @@ removed the same day they were built: the user corrects by selecting with the mo
 - **Punctuation names** (restored 2026-09-30, `edit.symbol`): an utterance that is exactly 逗號 / 句號 / 句點 / 問號 /
   驚嘆號 / 感嘆號 / 頓號 / 分號 / 冒號 / 點點點 / 刪節號 / 省略號 types the mark, appended after any existing
   punctuation (the user chose not to replace it). Exact text only: 都好 is not 逗號. On a selection it replaces it.
-  Commands (2026-10-07, each a setting, `edit.command`): an utterance of exactly 換行 presses Shift+Enter, 送出
-  presses Enter; same exact-text rule.
+  換行 / 送出 are custom operations since 2026-10-11 (speech rules, checked before punctuation names).
 - **Selected 。** (setting, 2026-10-07): speaking on a selected 。 replaces it with ， + the utterance + 。
   (今天很好。明天見 → 今天很好，我們去公園。明天見).
 
@@ -159,15 +173,12 @@ removed the same day they were built: the user corrects by selecting with the mo
   presses a key (keyboard hook, injected keys ignored), clicks (mouse hook) or another
   window comes to the front. Changes to it are Backspace up to the edit point (one `SendInput` burst) + paste of
   the new tail; works in terminals too.
-- **Double tap of the hotkey (`hotkey.py`)**, nothing selected, deletes the last dictation while it is
-  still the last change and the caret has not moved; only that one (2026-10-04: the user had undo of picked
-  suggestions and repeated undo removed). Text spoken over a selection counts as a dictation (2026-10-07, the
-  user's model: like typing over it): a double tap deletes it, the selected text stays gone (a selected 。 turned
-  into ，…。 gets its 。 back). Otherwise the taps are plain. Holding the second
-  press records again. CapsLock: the
-  two replayed taps cancel out; a held second press replays one extra tap to undo the first tap's toggle.
-  Recording starts at key-down, but the indicator (overlay, tray icon) only after 0.1s (0.3s = TAP_THRESHOLD, then 0.2s,
-  felt slow), so taps and double taps do not flash it.
+- **刪除 without a selection** deletes the last dictation while it is still the last change and the caret has not
+  moved; only that one (2026-10-04: the user had undo of picked suggestions and repeated undo removed). Text spoken
+  over a selection counts as a dictation (2026-10-07, the user's model: like typing over it): 刪除 removes it, the
+  selected text stays gone (a selected 。 turned into ，…。 gets its 。 back). Recording starts at key-down, but the
+  indicator (overlay, tray icon) only after 0.1s (0.3s = TAP_THRESHOLD, then 0.2s, felt slow), so taps and double
+  taps do not flash it.
 - **X-ASR biasing** (`asr.py`, used for on-screen terms): modified beam search + per-stream hotwords, same speed as greedy (0.11-0.22s
   on 3s clips). The model's vocab is pure BPE with CJK as "▁X" pieces: `modeling_unit="bpe"`, CJK hotwords
   space-separated and converted to Simplified, and a `bpe.vocab` exported from `bpe.model` by a tiny protobuf reader

@@ -1,5 +1,5 @@
-"""Insert text into the focused app: put it on the clipboard, send paste, restore clipboard. Plus Delete (a voice
-刪除 on a selection) and Backspace (undoing or rewriting what was just dictated)."""
+"""Insert text into the focused app: put it on the clipboard, send paste, restore clipboard. Plus Delete (deleting
+a selection), Backspace (deleting what was just dictated) and key combinations (custom operations)."""
 import ctypes
 import ctypes.wintypes as wt
 import time
@@ -7,6 +7,8 @@ import time
 from pynput import keyboard
 from PySide6.QtCore import QMimeData, QTimer
 from PySide6.QtGui import QGuiApplication
+
+from .keys import EXTENDED
 
 _kb = keyboard.Controller()
 
@@ -64,7 +66,7 @@ def press_key(vk: int, n: int) -> None:
     as one burst, before the paste that usually follows."""
     if n <= 0:
         return
-    ext = 1 if vk in ARROWS.values() else 0   # KEYEVENTF_EXTENDEDKEY: the arrow keys, not the keypad's
+    ext = 1 if vk in EXTENDED else 0   # KEYEVENTF_EXTENDEDKEY: the arrow keys, not the keypad's
     events = (_INPUT * (2 * n))()
     for i in range(2 * n):
         events[i].type = 1   # INPUT_KEYBOARD
@@ -77,7 +79,7 @@ def press_chord(*vks: int) -> None:
     events = (_INPUT * (2 * len(vks)))()
     for i, (vk, up) in enumerate([(vk, 0) for vk in vks] + [(vk, 2) for vk in reversed(vks)]):
         events[i].type = 1   # INPUT_KEYBOARD
-        events[i].ki = _KEYBDINPUT(vk, 0, up, 0, None)
+        events[i].ki = _KEYBDINPUT(vk, 0, up | (1 if vk in EXTENDED else 0), 0, None)
     ctypes.windll.user32.SendInput(len(events), events, ctypes.sizeof(_INPUT))
 
 
