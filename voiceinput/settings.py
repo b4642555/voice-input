@@ -3,7 +3,7 @@ rules.py). Every change is applied and saved immediately."""
 import html
 
 from PySide6.QtCore import QEvent, Qt, QTimer, Signal
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QFrame, QHBoxLayout,
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QFrame, QHBoxLayout,
                                QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea, QSpinBox, QTabWidget,
                                QTextBrowser, QVBoxLayout, QWidget)
 
@@ -22,8 +22,28 @@ _STEP_DEFAULTS = {rules.COMMAND: rules.DELETE_SELECTION, rules.KEYS: "", rules.T
 _CARD_STYLE = "QFrame#card { border: 1px solid palette(mid); border-radius: 6px; }"
 
 
+def _scroll_instead(widget, e):
+    """Give a wheel event to the scroll area around widget: on the list of operations the wheel scrolls and never
+    changes a value (the user kept changing them by accident); only a click opens a drop-down."""
+    area = widget.parentWidget()
+    while area is not None and not isinstance(area, QScrollArea):
+        area = area.parentWidget()
+    if area is not None:
+        QApplication.sendEvent(area.viewport(), e)
+
+
+class _NoWheelCombo(QComboBox):
+    def wheelEvent(self, e):
+        _scroll_instead(self, e)
+
+
+class _NoWheelSpin(QSpinBox):
+    def wheelEvent(self, e):
+        _scroll_instead(self, e)
+
+
 def _combo(items, value, tip="") -> QComboBox:
-    c = QComboBox()
+    c = _NoWheelCombo()
     for key, label in items:
         c.addItem(label, key)
     c.setCurrentIndex(max(0, c.findData(value)))
@@ -283,7 +303,7 @@ class SettingsDialog(QDialog):
             value = QLineEdit(step.value, placeholderText="要輸入的文字")
             value.textEdited.connect(lambda t: self._set_value(step, t))
         else:
-            value = QSpinBox(minimum=0, maximum=10000, singleStep=50, suffix=" 毫秒", value=int(step.value or 0))
+            value = _NoWheelSpin(minimum=0, maximum=10000, singleStep=50, suffix=" 毫秒", value=int(step.value or 0))
             value.valueChanged.connect(lambda n: self._set_value(step, n))
         row.addWidget(value, 1)
         for text, tip, delta in (("↑", "上移", -1), ("↓", "下移", 1)):
