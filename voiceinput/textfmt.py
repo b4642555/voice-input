@@ -1,4 +1,4 @@
-"""Text formatting applied to every result (after ASR, before hotwords)."""
+"""Text formatting applied to every result (after ASR, before pasting)."""
 import logging
 import re
 

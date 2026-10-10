@@ -11,7 +11,7 @@ BASE_URL = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/"
 # Fixed set (decided 2026-09-29: the app stays light, no model choice). "files" are the paths that must exist for
 # the model to count as installed.
 MAIN_MODEL = "xasr"            # recognition
-SECOND_MODEL = "sensevoice"    # second opinion for suspects and 選字
+SECOND_MODEL = "sensevoice"    # second opinion for suspects (not loaded for now)
 MODELS = {
     MAIN_MODEL: {
         "short": "X-ASR",

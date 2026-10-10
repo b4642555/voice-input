@@ -10,9 +10,6 @@ class Config:
     mic: str = ""                  # input device name, "" = system default
     hotkey: str = "caps_lock"      # key in hotkey.HOTKEYS
     autostart: bool = False
-    fix_menu: bool = True          # a replacement that sounds alike opens the candidate menu (else the ✓ box)
-    menu_seconds: int = 10         # menus and the ✓ box close after this many seconds
-    loose_homophones: bool = True  # menus also list other tones and fuzzy readings (else exact readings only)
     mute_while_recording: bool = False  # mute the speakers while recording, until the text is pasted
     newline_command: bool = True   # an utterance of just 換行 presses Shift+Enter
     send_command: bool = True      # an utterance of just 送出 presses Enter

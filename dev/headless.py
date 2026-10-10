@@ -1,17 +1,13 @@
-r"""Headless end-to-end test: the real App (models, selection edits, hotwords, menus, double tap) with a simulated text box in
+r"""Headless end-to-end test: the real App (model, selection edits, double tap) with a simulated text box in
 place of the focused app, so nothing is typed into real windows. Audio comes from TTS wav files.
 
   .venv\Scripts\python.exe dev\headless.py <dir> step,step,...
 
 Each step is a wav name in <dir>/wav (the hotkey held while it is spoken), sel:WORD (select the last WORD in the
-box), click (the user clicks: ends what the app knows about the text), tick (click ✓ in the add-hotword box), pick:N
-(click row N of an open menu, 1-based), pickw:WORD (click the row showing WORD), keep (click 保留「X」 in a context
-hotword question), tap (one tap of the hotkey), undo / tap2 (double tap), tap2:WAV (double tap, the second press
-held while WAV is spoken), at:WORD (put the caret right after the last WORD; at: puts it at the end), say:TEXT (dictate TEXT as if recognized), set:NAME=VALUE (change a setting
-in memory only), type:TEXT
-(the user replaces the last dictation's copy of its first differing word by hand: type:城市=程式, then the idle
-check runs at once) or key:BACK (the user presses Backspace n times: key:BACK*3).
-It works on a copy of hotwords.json (<dir>/hotwords.test.json) and its own picks.test.json, never on the real files.
+box), click (the user clicks: ends what the app knows about the text), tap (one tap of the hotkey), undo / tap2
+(double tap), tap2:WAV (double tap, the second press held while WAV is spoken), at:WORD (put the caret right after
+the last WORD; at: puts it at the end), say:TEXT (dictate TEXT as if recognized), set:NAME=VALUE (change a setting
+in memory only) or key:BACK (the user presses Backspace n times: key:BACK*3).
 """
 import shutil
 import sys
@@ -23,7 +19,7 @@ import numpy as np
 from PySide6.QtWidgets import QApplication
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from voiceinput import app as appmod, output, paths, selection, session  # noqa: E402
+from voiceinput import app as appmod, output, selection, session  # noqa: E402
 
 S = sys.argv[1]
 HWND = 4242
@@ -58,7 +54,7 @@ class Box:
         line_start = self.text.rfind("\n", 0, a) + 1
         line_end = self.text.find("\n", b)
         line_end = len(self.text) if line_end < 0 else line_end
-        return selection.Selection(self.text[a:b], self.text[line_start:a], self.text[b:line_end], "fake.exe", None)
+        return selection.Selection(self.text[a:b], self.text[line_start:a], self.text[b:line_end], "fake.exe")
 
     def caret_context(self):
         if self.sel:
@@ -84,8 +80,6 @@ appmod.press_delete = box.delete
 appmod.press_chord = box.keys
 appmod.press_key = box.keys
 appmod.foreground = session.foreground = lambda: HWND
-appmod.caret_rect = lambda: None
-appmod.visible_text = lambda: box.text
 appmod.PushToTalk.start = lambda self: None        # no real hotkey / keyboard hook
 replayed = []                                      # hotkey taps passed on to the app (CapsLock toggles)
 appmod.PushToTalk.tap = lambda self: replayed.append(1)
@@ -101,13 +95,6 @@ class Probe:
 
 
 appmod.ContextProbe = Probe
-# A private copy of hotwords.json: the real one may be in use by a running VoiceInput at the same time
-_hotwords = Path(S) / "hotwords.test.json"
-_hotwords.write_bytes(paths.HOTWORDS_PATH.read_bytes() if paths.HOTWORDS_PATH.exists() else b"[]")
-_Store = appmod.HotwordStore
-appmod.HotwordStore = lambda: _Store(_hotwords)
-_Picks = appmod.PickHistory
-appmod.PickHistory = lambda: _Picks(Path(S) / "picks.test.json")
 qapp = QApplication(sys.argv)
 qapp.setQuitOnLastWindowClosed(False)
 A = appmod.App(qapp)
@@ -142,7 +129,7 @@ def load(name):
 
 
 t0 = time.monotonic()
-while time.monotonic() - t0 < 120 and not (A.recognizer and A.second):
+while time.monotonic() - t0 < 120 and not A.recognizer:
     pump(0.3)
 pump(2)
 try:
@@ -151,31 +138,8 @@ try:
             w = step[4:]
             i = box.text.rfind(w)
             box.sel, box.caret = (i, i + len(w)), i + len(w)
-            A.session.on_click(0, 0)
+            A.session.on_input()
             print(f"[選取 {w}]")
-            continue
-        if step == "tick":
-            shown = A.picker.isVisible() and A._menu is not None and A._menu[0] == "learn"
-            if shown:
-                A.picker._confirm()
-            pump(0.3)
-            print(f"[點 ✓] {'加入' if shown else '（沒有方塊）'}  熱詞：{[(h.key, h.value) for h in A.hotwords.items]}")
-            continue
-        if step.startswith("pickw:"):
-            w = step[6:]
-            if A.picker.isVisible() and w in A.picker.candidates:
-                A.picker._pick(A.picker.candidates.index(w))
-            pump(0.3)
-            offer = f"   ✓ 框：{A._menu[1:3]}" if A._menu and A._menu[0] == "learn" and A.picker.isVisible() else ""
-            print(f"[點 {w}] → 文字框：{box.text[:box.caret] + '|' + box.text[box.caret:]!r}{offer}")
-            continue
-        if step.startswith("pick:") or step == "keep":
-            shown = A.picker.isVisible()
-            if shown:
-                A.picker._pick(int(step[5:]) - 1) if step != "keep" else A.picker._decline()
-            pump(0.3)
-            shown_text = box.text[:box.caret] + "|" + box.text[box.caret:]
-            print(f"[點 {step}] {'' if shown else '（沒有選單）'} → 文字框：{shown_text!r}")
             continue
         if step in ("tap", "undo", "tap2") or step.startswith("tap2:"):
             replayed.clear()
@@ -189,20 +153,8 @@ try:
                 A.on_press(True)
                 A.on_release(1.0 if wav else 0.1, True)
             pump(2.5 if step.startswith("tap2:") else 1.0)
-            menu = f"   選單：{A.picker.title.text()} {A.picker.candidates}" if A.picker.isVisible() else ""
             caps = "CapsLock 切換" if len(replayed) % 2 else "CapsLock 不變"
-            print(f"[{step}] → 文字框：{box.text[:box.caret] + '|' + box.text[box.caret:]!r}  ({caps}){menu}")
-            continue
-        if step.startswith("type:"):
-            old, new = step[5:].split("=")
-            i = box.text.rfind(old)
-            box.text = box.text[:i] + new + box.text[i + len(old):]
-            box.caret = len(box.text)
-            A.session.on_key(0x41)
-            A._check_typed_fix()
-            pump(0.5)
-            offer = f"   ✓ 框：{A.picker.title.text()} {A._menu[1:3]}" if A._menu and A._menu[0] == "learn" else ""
-            print(f"[手動改 {old} → {new}] → 文字框：{box.text!r}{offer}")
+            print(f"[{step}] → 文字框：{box.text[:box.caret] + '|' + box.text[box.caret:]!r}  ({caps})")
             continue
         if step.startswith("set:"):
             name, value = step[4:].split("=")
@@ -211,26 +163,25 @@ try:
             continue
         if step.startswith("say:"):
             A._dictate(step[4:], None, HWND)
-            pump(1.5)
-            menu = f"   選單：{A.picker.title.text()} {A.picker.candidates}" if A.picker.isVisible() else ""
-            print(f"[說 {step[4:]}（跳過辨識）] → 文字框：{box.text[:box.caret] + '|' + box.text[box.caret:]!r}{menu}")
+            pump(0.5)
+            print(f"[說 {step[4:]}（跳過辨識）] → 文字框：{box.text[:box.caret] + '|' + box.text[box.caret:]!r}")
             continue
         if step.startswith("at:"):
             w = step[3:]
             box.sel = None
             box.caret = box.text.rfind(w) + len(w) if w else len(box.text)
-            A.session.on_click(0, 0)
+            A.session.on_input()
             print(f"[游標移到] → 文字框：{box.text[:box.caret] + '|' + box.text[box.caret:]!r}")
             continue
         if step == "click":
-            A.session.on_click(0, 0)
+            A.session.on_input()
             print("[點滑鼠]")
             continue
         if step.startswith("key:BACK"):
             n = int(step.split("*")[1]) if "*" in step else 1
             box.back(n)
             for _ in range(n):
-                A.session.on_key(0x08)
+                A.session.on_input()
             print(f"[按 Backspace ×{n}]")
             continue
         A.recorder.audio = load(step)
@@ -238,9 +189,8 @@ try:
         pump(0.5)
         A.on_release(1.0, False)
         pump(2.5)
-        menu = f"   選單：{A.picker.title.text()} {A.picker.candidates}" if A.picker.isVisible() else ""
         shown = box.text[:box.caret] + "|" + box.text[box.caret:]
-        print(f"[{step}] {A._records[-1]['fmt'] if A._records else ''!r:32} → 文字框：{shown!r}{menu}")
+        print(f"[{step}] {A._records[-1]['fmt'] if A._records else ''!r:32} → 文字框：{shown!r}")
 finally:
     A.quit()
     shutil.rmtree(Path(S) / "__pycache__", ignore_errors=True)

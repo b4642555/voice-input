@@ -17,7 +17,7 @@ _TAGS = re.compile(r"<\|[^|]*\|>")
 # Hotword biasing (X-ASR only). Modified beam search with per-utterance hotwords costs about the same as greedy
 # search (tested 2026-09-29: 0.11-0.22s either way on 3s clips). Latin terms work well (L M -> LLM,
 # work tree -> worktree; cloud code -> Claude Code needs score 3). Chinese biasing is weak (張雨薇 -> 張玉薇 at
-# score 3, 城市 never became 程式), so Chinese words still rely on the text-level hotwords.
+# score 3, 城市 never became 程式). Used for the English terms visible on screen (app.py).
 _HOTWORD_SCORE = 2.0
 _LATIN_TERM = re.compile(r"^[A-Za-z][A-Za-z0-9 .'+#-]*$")
 

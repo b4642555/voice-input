@@ -1,6 +1,5 @@
 r"""End-to-end test without a microphone: run the real App, feed TTS audio instead of the microphone, and type into a
-fresh Notepad or Windows Terminal window. It types into real windows and may learn hotwords: back up
-%LOCALAPPDATA%\VoiceInput\hotwords.json first.
+fresh Notepad or Windows Terminal window. It types into real windows.
 
   powershell -File dev\tts.ps1 -out <dir>\wav\claude.wav -text "我想請你用 Claude Code 來執行任務"
   .venv\Scripts\python.exe dev\e2e.py <dir> notepad|terminal claude,undo,sel:城市,...
@@ -17,11 +16,10 @@ import wave
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from voiceinput import app as appmod, paths, selection  # noqa: E402
+from voiceinput import app as appmod, selection  # noqa: E402
 from voiceinput.session import foreground  # noqa: E402
 
 S = sys.argv[1]
@@ -65,18 +63,17 @@ def say(name, wait=6.0):
         print("!! focus lost, aborting")
         sys.exit(1)
     audio = load(name)
-    probe = selection.ContextProbe()
-    A.worker.submit(A._transcribe_job, A.recognizer, audio, probe, HWND)
+    press = appmod._Press(selection.ContextProbe())
+    A.worker.submit(A._transcribe_job, A.recognizer, audio, press, HWND)
     pump(wait)
-    menu = A.picker.title.text() if A.picker.isVisible() else ""
-    print(f"[{name}] -> {target_text()!r}" + (f"   MENU: {menu} {A.picker.candidates}" if menu else ""))
+    print(f"[{name}] -> {target_text()!r}")
 
 
 # wait for everything to load
 t0 = time.monotonic()
 while time.monotonic() - t0 < 180:
     pump(0.5)
-    if A.recognizer and A.second:
+    if A.recognizer:
         break
 print(f"loaded in {time.monotonic() - t0:.1f}s: asr={bool(A.recognizer)} second={bool(A.second)}")
 

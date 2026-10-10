@@ -12,18 +12,18 @@ If you move the folder, run the installer again (the venv records absolute paths
 
 User data lives outside the app folder, so it survives moving or reinstalling the app:
 
-`%LOCALAPPDATA%\VoiceInput` holds settings, hotwords, logs and `models\`.
+`%LOCALAPPDATA%\VoiceInput` holds settings, logs and `models\`.
 
 Data from the old layout (`config.json`, `models/` inside the app folder) is moved there automatically on first launch.
 
 ## Usage
 
-- Hold the hotkey (default CapsLock; right Alt / right Ctrl / F12 / a mouse side or middle button can be chosen) ≥ 0.3s to record; a quick tap still toggles CapsLock (except on selected text).
+- Hold the hotkey (default CapsLock; right Alt / right Ctrl / F12 / a mouse side or middle button can be chosen) ≥ 0.3s to record; a quick tap still toggles CapsLock.
 - Double-tap the hotkey to delete what you just dictated, or just spoke over a selection (the last one only, before
   the caret moves); hold the second press to say it again.
 - Say only 逗號 / 句號 / 問號 / 驚嘆號 / 頓號 / 分號 / 冒號 / 點點點 to type that mark, 換行 for Shift+Enter, 送出 for Enter.
 - Left-click the tray icon to open settings (microphone, hotkey, muting the speakers while recording, the 換行 / 送出
-  commands, selected 。 → ，, launch at login, how long menus stay open, hotwords) and a per-utterance log for this session. Changes apply immediately.
+  commands, selected 。 → ，, launch at login) and a per-utterance log for this session. Changes apply immediately.
 - Missing models are downloaded automatically on launch (progress shown in settings / tray tooltip).
 
 ## Correcting
@@ -32,31 +32,22 @@ Select text with the mouse, then:
 
 | Hotkey | Does |
 |---|---|
-| tap once | a menu of same-sounding words; click one |
 | double tap | delete the selection |
 | hold and speak | replaces the selection |
 | double tap, hold the second press and speak | deletes the selection, then types what you say |
 
-When what you say sounds like what it replaced (城市 → 程式), or you delete a sentence and say it again with a word
-changed, the new text is typed and a menu of same-sounding words opens for it. Words you picked before come first.
-
-After a dictation a small menu may offer a likely misheard word (a second model heard it differently), or ask whether
-a learned correction applies here (「城市」換成？ with a 保留「城市」 row). Menus are answered with the mouse only.
-Corrections are offered as hotwords (click ✓ to add) after you pick a word in a menu, or when you fix a word by typing.
-A bar on the menu's bottom edge shows the time left before it closes. A hotword remembers the words around it to decide next time.
-
 ## Models
 
-Fixed, all [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) models, ~285MB in total, no LLM:
+Fixed [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) models, no LLM:
 
 | Model | Size | Role |
 |---|---|---|
 | X-ASR int8 | 130MB | Recognition (~0.75s for 18s of audio on CPU); punctuation, good English |
-| SenseVoice Small | 155MB | Second opinion in the background (~0.1s per sentence) |
+| SenseVoice Small | 155MB | Second opinion (off for now, not downloaded) |
 
 ## Pipeline
 
-ASR (biased toward learned hotwords and English terms on screen) → formatting (`textfmt.py`) → hotwords → paste.
+ASR (biased toward English terms on screen) → formatting (`textfmt.py`) → paste.
 
 - **Formatting**: Traditional Chinese glyphs (OpenCC `s2tw`, wording kept), repeated words and restarts removed
   (我們我們, 先打開那個，先打開設定頁), multi-character Chinese numerals → digits (single-character ones like 一個 / 兩個
@@ -71,16 +62,13 @@ voiceinput/
   app.py       tray, wiring, push-to-talk flow
   hotkey.py    global hotkey, double tap (pynput; a low-level hook suppresses CapsLock)
   audio.py     microphone capture
-  asr.py       sherpa-onnx recognizers, hotword biasing
+  asr.py       sherpa-onnx recognizers, biasing toward on-screen terms
   textfmt.py   final text formatting (incl. repeated-word removal)
-  session.py   what was just typed at the caret, deleting the last dictation, learning from re-dictation and hand edits
-  edit.py      replacing a selection, punctuation names, "sounds alike" test
-  suspects.py  second-opinion check for misheard words
+  session.py   what was just typed at the caret, deleting the last dictation
+  edit.py      replacing a selection, punctuation names, 換行 / 送出
+  suspects.py  second-opinion check for misheard words (off for now)
   selection.py selection / on-screen terms via UI Automation
-  hotwords.py  learned corrections; ASR biasing words
-  candidates.py same-sounding words (McBopomofo word list)
-  picks.py     words picked in menus, listed first next time
-  picker.py    candidate / suggestion menu
+  candidates.py word list (McBopomofo): is-a-word / frequency, same-sounding words
   overlay.py   floating recording / thinking indicator
   settings.py  settings dialog + transcript log
   output.py    clipboard paste, Delete / Backspace

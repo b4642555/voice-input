@@ -1,5 +1,5 @@
-"""Same-sounding word candidates for a selected Chinese word (城市 -> 程式, 誠實, 乘勢 …), and the word list
-the rest of the app asks "is this a word / how common is it".
+"""The word list the app asks "is this a word / how common is it" (disfluency removal), and same-sounding
+word candidates (城市 -> 程式, 誠實, 乘勢 …) for suspects.py, which is off for now.
 
 The words come from McBopomofo (小麥注音, MIT): ~146k Taiwanese phrases of 2-6 characters and the Big5 single
 characters, each with its Bopomofo reading and a frequency counted in a Taiwanese corpus (dict/words.tsv.gz, built
@@ -35,18 +35,6 @@ _ENG = re.compile("(?<![ㄨㄩ])ㄥ")   # eng/en and ing/in, but not ong/un or i
 _index: dict[str, list[tuple[str, str, int]]] | None = None   # fuzzy key -> [(word, toned reading, frequency)]
 _words: dict[str, tuple[int, list[str]]] = {}                  # word -> (frequency, toned readings)
 _lock = threading.Lock()
-
-
-def fuzzy(p: str) -> str:
-    """Pinyin fuzzy form, for comparing two texts by sound (edit.similar, hotwords, picks)."""
-    for a, b in (("zh", "z"), ("ch", "c"), ("sh", "s"), ("ing", "in"), ("eng", "en"), ("ang", "an")):
-        p = p.replace(a, b)
-    return "n" + p[1:] if p.startswith("l") else p
-
-
-def syllables(s: str) -> list[str]:
-    """Fuzzy toneless pinyin per character."""
-    return [fuzzy(p) for p in lazy_pinyin(s, style=Style.NORMAL)]
 
 
 def _toned(syllable: str) -> str:
@@ -134,9 +122,6 @@ def _readings(word: str) -> list[str]:
     return [" ".join(_words[c][1][0] if c in _words else _pypinyin_reading(c) for c in word)]
 
 
-loose = True   # also other tones and fuzzy readings (setting loose_homophones); False: the same reading only
-
-
 def homophones(word: str, limit: int = 8) -> list[str]:
     """Words that sound like word (Traditional Chinese), best first; word itself excluded."""
     word = word.strip()
@@ -149,6 +134,6 @@ def homophones(word: str, limit: int = 8) -> list[str]:
         toneless = _TONES.sub("", reading)
         for w, r, freq in index.get(_key(reading), []):
             rank = 0 if r == reading else 1 if _TONES.sub("", r) == toneless else 2
-            if w != word and (loose or rank == 0) and (w not in found or rank < found[w][0]):
+            if w != word and (w not in found or rank < found[w][0]):
                 found[w] = (rank, -freq)
     return sorted(found, key=found.get)[:limit]

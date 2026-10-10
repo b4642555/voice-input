@@ -9,8 +9,6 @@ APP_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "VoiceInput"
 
 CONFIG_PATH = DATA_DIR / "config.json"
-HOTWORDS_PATH = DATA_DIR / "hotwords.json"
-PICKS_PATH = DATA_DIR / "picks.json"
 LOG_PATH = DATA_DIR / "voiceinput.log"
 LOCK_PATH = DATA_DIR / ".voiceinput.lock"
 DEFAULT_MODELS_DIR = DATA_DIR / "models"
