@@ -23,7 +23,7 @@ class Config:
         known = {k: v for k, v in data.items() if k in cls.__dataclass_fields__ and k != "rules"}
         cfg = cls(**known)
         if "rules" in data:
-            cfg.rules = [rules.Rule.from_dict(d) for d in data["rules"]]
+            cfg.rules = rules.migrate([rules.Rule.from_dict(d) for d in data["rules"]])
         else:   # before custom operations (2026-10-11): one hotkey and the 換行 / 送出 switches
             cfg.rules = rules.defaults(data.get("hotkey", "mouse_middle"), data.get("newline_command", True),
                                        data.get("send_command", True))

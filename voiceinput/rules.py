@@ -2,10 +2,11 @@
 
 A rule is a trigger (a mouse button or keyboard key with a gesture: tap, double tap or hold; or an utterance that is
 exactly a phrase), a situation (any, right after a dictation, text selected) and a list of steps run in order:
-a command (錄音 record, 刪除 delete), a key combination, text to type, or a wait. A rule's steps before 錄音 run
-when it starts, the ones after it once the dictated text is pasted. Hold + 錄音 records while held; tap or double
-tap + 錄音 starts on that gesture and stops at the next press. 刪除 deletes the selected text (terminals too), else
-the last dictation while the caret is still after it.
+a command (錄音 record, 刪除選取的文字, 刪除剛輸入的文字), a key combination, text to type, or a wait. A rule's
+steps before 錄音 run when it starts, the ones after it once the dictated text is pasted. Hold + 錄音 records while
+held; tap or double tap + 錄音 starts on that gesture and stops at the next press. 刪除選取的文字 works in terminals
+too; 刪除剛輸入的文字 deletes the last dictation while the caret is still after it (split from one 刪除 command
+2026-10-11, the user's choice).
 
 For one trigger and gesture the most specific situation wins: selected text, then right after a dictation, then
 any. Unbound gestures are given back to the key (a keyboard key is replayed, a mouse button clicked).
@@ -17,7 +18,7 @@ MOUSE, KEY, SPEECH = "mouse", "key", "speech"
 TAP, DOUBLE, HOLD = "tap", "double", "hold"
 ANY, DICTATED, SELECTION = "any", "dictated", "selection"
 COMMAND, KEYS, TEXT, WAIT = "command", "keys", "text", "wait"
-RECORD, DELETE = "record", "delete"
+RECORD, DELETE_SELECTION, DELETE_DICTATION = "record", "delete_selection", "delete_dictation"
 
 _PUNCT = re.compile(r"[\s，。、！？；：,.!?;:…]+")
 
@@ -51,14 +52,32 @@ class Rule:
 
 
 def defaults(key: str = "mouse_middle", newline: bool = True, send: bool = True) -> list[Rule]:
-    """Hold to record, double tap to delete, 換行 / 送出 spoken alone press Shift+Enter / Enter."""
+    """Hold to record; double tap to delete the selection, or what was just dictated; 換行 / 送出 spoken alone press
+    Shift+Enter / Enter. A double tap in neither situation stays the key's own."""
     source = MOUSE if key.startswith("mouse") else KEY
     out = [Rule(source, key, gesture=HOLD, steps=[Step(COMMAND, RECORD)]),
-           Rule(source, key, gesture=DOUBLE, steps=[Step(COMMAND, DELETE)])]
+           Rule(source, key, gesture=DOUBLE, when=SELECTION, steps=[Step(COMMAND, DELETE_SELECTION)]),
+           Rule(source, key, gesture=DOUBLE, when=DICTATED, steps=[Step(COMMAND, DELETE_DICTATION)])]
     if newline:
         out.append(Rule(SPEECH, phrase="換行", steps=[Step(KEYS, "Shift+Enter")]))
     if send:
         out.append(Rule(SPEECH, phrase="送出", steps=[Step(KEYS, "Enter")]))
+    return out
+
+
+def migrate(rules: list[Rule]) -> list[Rule]:
+    """The one 刪除 command (before the split, 2026-10-11) becomes the command for the rule's situation; a rule for
+    any situation becomes two: one for a selection, one right after a dictation."""
+    out = []
+    for r in rules:
+        if not any(s.type == COMMAND and s.value == "delete" for s in r.steps):
+            out.append(r)
+            continue
+        for when, command in ((SELECTION, DELETE_SELECTION), (DICTATED, DELETE_DICTATION)):
+            if r.when in (when, ANY):
+                steps = [Step(COMMAND, command) if s.type == COMMAND and s.value == "delete" else Step(s.type, s.value)
+                         for s in r.steps]
+                out.append(Rule(r.source, r.key, r.phrase, r.gesture, when, steps, r.enabled))
     return out
 
 

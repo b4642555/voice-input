@@ -7,9 +7,9 @@ An utterance that is exactly a custom operation's phrase (換行, 送出 …) ru
 punctuation name (逗號, 句號 …) is typed as the mark (edit.symbol).
 
 What the mouse buttons and keys do is set by custom operations (rules.py, 2026-10-11). The defaults: hold the
-middle button to record, double click it to delete (the selection, else the last dictation while it is still the
-last change). When a key's double tap deletes and its hold records, holding the second press records again: delete
-and say it again. Gestures no operation takes are given back to the key.
+middle button to record; double click it on a selection to delete it, or right after a dictation to delete that
+(while it is still the last change). When a key's double tap does not record and its hold does, holding the second
+press records again: delete and say it again. Gestures no operation takes are given back to the key.
 
 All popup menus (選字, suspected mishearings, the hotword ✓ box) and hotwords were removed on the lean branch
 (2026-10-10); popups are to be redesigned. The second opinion (SenseVoice + suspects.py) is commented out below.
@@ -342,7 +342,7 @@ class App(QObject):
 
     def _maybe_redictate(self, press: _Press):
         """A double tap's second press held: when the key's hold operation records, record here too, after the
-        double tap's steps (刪除): delete and say it again."""
+        double tap's steps (a delete): delete and say it again."""
         if press.rule is None or press.rule.record_index() is not None or self.recognizer is None:
             return
         hold = rules.pick(self._rules_for(press.key, HOLD), False, False)
@@ -448,9 +448,11 @@ class App(QObject):
                         self.session.on_input()     # the caret may have moved
                 elif step.type == rules.TEXT:
                     self._on_main(lambda t=step.value: self._type_text(t))
-                elif step.type == rules.COMMAND and step.value == rules.DELETE:
+                elif step.type == rules.COMMAND and step.value == rules.DELETE_SELECTION:
                     ctx = press.probe.result()
-                    self._on_main(lambda: self._delete(press, ctx))
+                    self._on_main(lambda: self._delete_selection(press, ctx))
+                elif step.type == rules.COMMAND and step.value == rules.DELETE_DICTATION:
+                    self._on_main(self.delete_last)
         except Exception:
             log.exception("steps failed")
         finally:
@@ -474,24 +476,24 @@ class App(QObject):
             paste_text(text)
             self.session.dictated(text, None, foreground())
 
-    def _delete(self, press: _Press, ctx):
-        """刪除: the selected text (seen at the first press), else the last dictation while it is the last change."""
+    def _delete_selection(self, press: _Press, ctx):
+        """刪除選取的文字: the text selected when the (first) press went down."""
         sel = ctx.selection if press.deleted is None else None
-        if sel is not None:
-            log.info("delete %r on %s", sel.text, sel.app)
-            if not _delete_selection(sel):
-                self._notify(_SEL_LOST)
-                return
-            press.deleted = sel
-            self.session.replaced_selection(sel.before, "", foreground())
-            self.record.emit({"time": time.strftime("%H:%M:%S"), "asr": "", "asr_s": None, "fmt": "",
-                              "edit": f"刪除「{sel.text}」"})
+        if sel is None:
+            log.info("delete selection: nothing selected")
             return
-        self.delete_last()
+        log.info("delete %r on %s", sel.text, sel.app)
+        if not _delete_selection(sel):
+            self._notify(_SEL_LOST)
+            return
+        press.deleted = sel
+        self.session.replaced_selection(sel.before, "", foreground())
+        self.record.emit({"time": time.strftime("%H:%M:%S"), "asr": "", "asr_s": None, "fmt": "",
+                          "edit": f"刪除「{sel.text}」"})
 
     def delete_last(self):
-        """Main thread: delete the last dictation (or text spoken over a selection) while it is still the last
-        change before the caret. Nothing else is undone."""
+        """Main thread, 刪除剛輸入的文字: delete the last dictation (or text spoken over a selection) while it is
+        still the last change before the caret. Nothing else is undone."""
         s = self.session
         step = s.deletable()
         if step is None:

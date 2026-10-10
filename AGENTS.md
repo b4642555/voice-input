@@ -107,13 +107,15 @@ mute the user set is left alone. Selection edits and on-screen terms are always 
 (migrated by `Config.load`). A rule: trigger (滑鼠鍵: middle / upper / lower side button; 鍵盤鍵: CapsLock, right Alt,
 right Ctrl, Insert, ScrollLock, Pause, F1-F24; 說出: an utterance that is exactly the phrase) → 按法 (按一下 / 連按兩下
 / 按住; not for speech) → 情境 (不限 / 剛輸入完 / 有選取文字; the most specific wins) → steps run in order: 命令 (錄音,
-刪除), 按鍵 (a captured combination such as Ctrl+Z, sent with SendInput), 輸入文字 (pasted, counts as a dictation),
+刪除選取的文字, 刪除剛輸入的文字), 按鍵 (a captured combination such as Ctrl+Z, sent with SendInput), 輸入文字 (pasted, counts as a dictation),
 等待 (ms). Steps before 錄音 run at the start, those after it once the text is pasted (skipped if nothing was said).
 Hold + 錄音 records while held; tap / double tap + 錄音 starts there and the next press of any bound key stops it.
-刪除: the selection (terminals too, which is why it is a command and not the Delete key), else the last dictation.
+刪除選取的文字 works in terminals too (why it is a command, not the Delete key); 刪除剛輸入的文字 deletes the last
+dictation. They were one 刪除 command until the user had them split (2026-10-11; `rules.migrate` converts old rules).
 When a key's double tap is a non-recording rule and its hold records, a held second press records after the double
 tap's steps (delete and say it again; the user's choice). 復原 is not a command: the user adds Ctrl+Z if wanted.
-Defaults: hold middle = 錄音, double middle = 刪除, 說出 換行 = Shift+Enter, 說出 送出 = Enter.
+Defaults: hold middle = 錄音; double middle on a selection = 刪除選取的文字, right after a dictation = 刪除剛輸入的文字
+(in neither situation the double click goes back to the button); 說出 換行 = Shift+Enter, 說出 送出 = Enter.
 Gestures (`app.py`, `hotkey.Hotkeys`): bound keys are suppressed by the hooks; the microphone starts at key-down when
 the press may record; a single tap waits DOUBLE_TAP_GAP only when that key has a double-tap rule; a gesture no rule
 takes is given back (keyboard key replayed, mouse button clicked: the user's choice, so an unbound middle click
@@ -125,7 +127,7 @@ rule records any more, a tray notice warns that dictation is impossible (the use
 
 Plan agreed 2026-09-27, cut down 2026-09-29, spoken triggers replaced by the hotkey 2026-09-30. The selection is
 read when a bound key goes down (`selection.py`, UI Automation TextPattern, on a background thread). Speaking with
-text selected replaces it; 刪除 deletes it; with the default operations a double tap held deletes it and the
+text selected replaces it; 刪除選取的文字 deletes it; with the default operations a double tap held deletes it and the
 dictation is pasted there.
 UIA probe (2026-09-27): Chrome/Edge inputs, Win11 Notepad, LINE give selection + line context; LINE's first read ~1.2s.
 Terminals: Claude Code / Codex / agy in Windows Terminal (inside herdr) hide their mouse selection from UIA,
@@ -173,9 +175,9 @@ removed the same day they were built: the user corrects by selecting with the mo
   presses a key (keyboard hook, injected keys ignored), clicks (mouse hook) or another
   window comes to the front. Changes to it are Backspace up to the edit point (one `SendInput` burst) + paste of
   the new tail; works in terminals too.
-- **刪除 without a selection** deletes the last dictation while it is still the last change and the caret has not
+- **刪除剛輸入的文字** deletes the last dictation while it is still the last change and the caret has not
   moved; only that one (2026-10-04: the user had undo of picked suggestions and repeated undo removed). Text spoken
-  over a selection counts as a dictation (2026-10-07, the user's model: like typing over it): 刪除 removes it, the
+  over a selection counts as a dictation (2026-10-07, the user's model: like typing over it): it removes it, the
   selected text stays gone (a selected 。 turned into ，…。 gets its 。 back). Recording starts at key-down, but the
   indicator (overlay, tray icon) only after 0.1s (0.3s = TAP_THRESHOLD, then 0.2s, felt slow), so taps and double
   taps do not flash it.

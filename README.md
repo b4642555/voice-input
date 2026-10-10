@@ -18,14 +18,15 @@ Data from the old layout (`config.json`, `models/` inside the app folder) is mov
 
 ## Usage
 
-- By default: hold the middle mouse button ≥ 0.3s to record; double-click it to delete what you just dictated, or
-  just spoke over a selection (the last one only, before the caret moves); hold the second press to say it again.
-  A single middle click still works.
+- By default: hold the middle mouse button ≥ 0.3s to record; double-click it to delete the selected text, or what
+  you just dictated (the last one only, before the caret moves); hold the second press to say it again. Other middle
+  clicks and double clicks still work.
 - Say only 換行 for Shift+Enter, 送出 for Enter; 逗號 / 句號 / 問號 / 驚嘆號 / 頓號 / 分號 / 冒號 / 點點點 type that mark.
 - Left-click the tray icon to open settings: 一般 (microphone, muting the speakers while recording, selected 。 → ，,
   launch at login), 辨識紀錄 (a per-utterance log for this session) and 自訂操作. Changes apply immediately.
 - 自訂操作: choose a mouse button, keyboard key or spoken phrase, a gesture (tap / double tap / hold), a situation
-  (any / right after dictating / text selected) and steps run in order: 錄音, 刪除, a key combination, text, a wait.
+  (any / right after dictating / text selected) and steps run in order: 錄音, delete the selection, delete what was
+  just dictated, a key combination, text, a wait.
   Steps after 錄音 run once the text is typed (e.g. 錄音 → Enter: speak and send).
 - Missing models are downloaded automatically on launch (progress shown in settings / tray tooltip).
 
