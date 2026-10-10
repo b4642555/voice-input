@@ -211,6 +211,18 @@ removed the same day they were built: the user corrects by selecting with the mo
   punctuation names (when on) at score 5. Not by audio length: TTS 換行 alone was 1.7s with its silences. Fixed
   據點 -> 句點, 珊姐好 -> 刪節號; cost: 問好 / 分好 said alone become 問號 / 分號. Words of one repeated character
   (點點點) are not boosted: they ran away (點點點點點點點點點).
+- **Bopomofo spelling** (拼讀, `spell.py`, 2026-10-11, the user's request): an utterance that is exactly symbol
+  names + one character (ㄔ ㄤ 昌, ㄐ ㄧㄝ 節, ㄐ ㄧ ㄝ 節, ㄧ ㄢ 煙; 2 or 3 names) types only that character, then the
+  選字 menu opens under it (rect of the character before the caret, `selection.char_before_caret_rect`; else by the
+  mouse) with the other characters of the sound, common ones first, the same tone first, smart picks before them. A
+  pick replaces it through the session buffer (`Session.replace_tail`; a click in the menu does not end the buffer)
+  and is learned as a smart pick; 刪除剛輸入的文字 still removes it. Matched on the recognized characters' toneless
+  McBopomofo readings (TTS experiment: X-ASR writes 吃昂昌, 雞爺傑, 吉野結, 一安煙 …): names first (initial names ㄐㄧ
+  = ㄐ, ㄉㄜ = ㄉ …), they must make a real syllable, a ㄟ / ㄞ (欸) may stand for ㄝ. The symbols carry no tone (the
+  user corrected an earlier note): the tone is the last character's. If the last character reads as the syllable
+  it is typed as heard (長 for chang); if misheard but starting with the same sound (煙 → 音) the syllable's most
+  common character in the heard tone; else it is not a spelling (西洋棋, 基因庫). 0 hits on 3120 logged utterances.
+  Not handled: names heard as English letters (ㄐ ㄧ ㄝ → "G E A"); not tested with a real voice yet.
 - **Selected 。** (setting, 2026-10-07): speaking on a selected 。 replaces it with ， + the utterance + 。
   (今天很好。明天見 → 今天很好，我們去公園。明天見).
 

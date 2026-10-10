@@ -535,6 +535,37 @@ def read_caret() -> tuple[str, str] | None:
         return None
 
 
+def char_before_caret_rect() -> tuple | None:
+    """Screen rect (x, y, w, h) of the character right before the caret (one just typed), or None: in a terminal
+    the cell left of its cursor, elsewhere the caret range widened by one character back."""
+    try:
+        uia, U = _uia()
+        el = uia.GetFocusedElement()
+        pattern = el.GetCurrentPattern(U.UIA_TextPatternId)
+        if not pattern:
+            return None
+        pattern = pattern.QueryInterface(U.IUIAutomationTextPattern)
+        if _proc_name(el.CurrentProcessId) in _TERMINALS or el.CurrentClassName == "TermControl":
+            cursor = _term_cursor(pattern)
+            if cursor is None or cursor[1] == 0:
+                return None
+            rect = _char_rect(cursor[0], cursor[1] - 1)
+        else:
+            ranges = pattern.GetSelection()
+            if ranges.Length == 0:
+                return None
+            r = ranges.GetElement(0).Clone()
+            r.MoveEndpointByRange(_START, r, _END)
+            if not r.MoveEndpointByUnit(_START, _CHAR, -1):
+                return None
+            rects = r.GetBoundingRectangles()
+            rect = tuple(int(v) for v in rects[:4]) if rects and len(rects) >= 4 else None
+        return rect if rect and rect[2] > 0 and rect[3] > 0 else None
+    except Exception:
+        log.exception("reading the caret position failed")
+        return None
+
+
 def visible_text() -> str:
     """The text visible in the focused control (UI Automation TextPattern), "" if it has none."""
     try:

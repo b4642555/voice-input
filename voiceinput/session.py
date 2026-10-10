@@ -77,6 +77,22 @@ class Session:
             self.step = Step(undo_to, self.buffer, []) if undo_to is not None else None
             self.hwnd, self.dirty = hwnd, False
 
+    def replace_tail(self, old: str, new: str) -> tuple[int, str] | None:
+        """The text right before the caret ends with old (just typed, such as a spelled character): plan turning it
+        into new, recorded as if new had been typed in its place. None when the caret may have moved."""
+        with self._lock:
+            if not self.clean() or not old or not self.buffer.endswith(old):
+                return None
+            target = self.buffer[:-len(old)] + new
+            plan = self.plan_to(target)
+            u = self.utterances[-1] if self.utterances else None
+            if u is not None and u.end == len(self.buffer) and u.text.endswith(old):
+                u.text, u.end = u.text[:-len(old)] + new, len(target)
+            if self.step is not None and self.step.after == self.buffer:
+                self.step.after = target
+            self.buffer = target
+            return plan
+
     def plan_to(self, after: str) -> tuple[int, str]:
         """Keystrokes to turn the buffer into after: (backspaces, text to paste)."""
         p = 0
