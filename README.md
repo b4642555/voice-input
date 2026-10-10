@@ -25,9 +25,13 @@ Data from the old layout (`config.json`, `models/` inside the app folder) is mov
 - Left-click the tray icon to open settings: 一般 (microphone, muting the speakers while recording, punctuation names,
   selected 。 → ，,
   launch at login), 辨識紀錄 (a per-utterance log for this session) and 自訂操作. Changes apply immediately.
+- Click the middle button on selected text for 選字: same-sounding words, or ways of writing English (voiceInput,
+  Voice Input …). Picks are remembered with the words around them and applied to later dictations (智慧選字).
 - 自訂操作: choose a mouse button, keyboard key or spoken phrase, a gesture (tap / double tap / hold), a situation
-  (any / right after dictating / text selected) and steps run in order: 錄音, delete the selection, delete what was
-  just dictated, a key combination, text, a wait.
+  (any / right after dictating / text selected) and steps run in order: 錄音, 選字, 加入熱詞, delete the selection,
+  delete what was just dictated, a key combination, text, a wait.
+- 熱詞: words added with 加入熱詞 (a notice offers 撤銷). They bias recognition; Chinese ones always replace anything
+  that sounds exactly like them.
   Steps after 錄音 run once the text is typed (e.g. 錄音 → Enter: speak and send).
 - Missing models are downloaded automatically on launch (progress shown in settings / tray tooltip).
 
@@ -76,6 +80,10 @@ voiceinput/
   suspects.py  second-opinion check for misheard words (off for now)
   selection.py selection / on-screen terms via UI Automation
   candidates.py word list (McBopomofo): is-a-word / frequency, same-sounding words
+  memory.py    smart picks: picks remembered with their context, English writing styles
+  hotwords.py  the hotword list: recognition bias, absolute Chinese replacement
+  reading.py   text as tokens with pinyin, for matching by sound
+  picker.py    the 選字 menu and the hotword notice
   overlay.py   floating recording / thinking indicator
   settings.py  settings dialog + transcript log
   output.py    clipboard paste, Delete / Backspace

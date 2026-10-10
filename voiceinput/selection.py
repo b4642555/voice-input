@@ -36,6 +36,7 @@ class Selection:
     before: str       # rest of the line before the selection
     after: str        # rest of the line after the selection
     app: str          # process name, e.g. chrome.exe
+    rect: tuple | None = None   # selection bounds (x, y, w, h) in physical screen pixels (where menus open)
     term: tuple | None = None   # terminal: screen point of the selection's last character
 
 
@@ -90,7 +91,12 @@ def read_selection() -> Selection | None:
         before, after = line.Clone(), line.Clone()
         before.MoveEndpointByRange(_END, sel, _START)
         after.MoveEndpointByRange(_START, sel, _END)
-        return Selection(text, before.GetText(-1), after.GetText(-1).rstrip("\r\n"), app)
+        try:
+            rects = sel.GetBoundingRectangles()
+            rect = tuple(rects[:4]) if rects and len(rects) >= 4 else None
+        except Exception:
+            rect = None
+        return Selection(text, before.GetText(-1), after.GetText(-1).rstrip("\r\n"), app, rect)
     except Exception:
         log.exception("reading the selection failed")
         return None
@@ -216,10 +222,11 @@ class TermWatcher:
         if p is None:
             log.info("terminal selection %r is not in the input box", text)
             return None
-        last = _char_rect(line, b - 1)
+        first, last = _char_rect(line, a), _char_rect(line, b - 1)
+        rect = (first[0], first[1], last[0] + last[2] - first[0], first[3])
         point = (last[0] + last[2] // 2, last[1] + last[3] // 2)
         log.info("terminal selection %r after %r (%s)", text, row[p:a], how)
-        return Selection(text, row[p:a], row[b:].rstrip(), "terminal", point)
+        return Selection(text, row[p:a], row[b:].rstrip(), "terminal", rect, point)
 
     def _input_start(self, row: str, line, a: int, cursor) -> int | None:
         """Where the text of the input box starts on this row (after the prompt or the continuation indent), or

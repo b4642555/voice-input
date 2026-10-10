@@ -1,6 +1,8 @@
-"""Settings window in three tabs: 一般 (general), 辨識紀錄 (live transcript log) and 自訂操作 (custom operations,
-rules.py). Every change is applied and saved immediately."""
+"""Settings window in four tabs: 一般 (general), 辨識紀錄 (live transcript log), 自訂操作 (custom operations,
+rules.py) and 熱詞 (hotwords.py: listed and removable; added only by the 加入熱詞 operation). Every change is applied
+and saved immediately."""
 import html
+import os
 
 from PySide6.QtCore import QEvent, Qt, QTimer, Signal
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QFrame, QHBoxLayout,
@@ -15,7 +17,8 @@ SOURCES = [(rules.MOUSE, "滑鼠鍵"), (rules.KEY, "鍵盤鍵"), (rules.SPEECH, 
 GESTURES = [(rules.TAP, "按一下"), (rules.DOUBLE, "連按兩下"), (rules.HOLD, "按住")]
 SITUATIONS = [(rules.ANY, "不限"), (rules.DICTATED, "剛輸入完"), (rules.SELECTION, "有選取文字")]
 STEP_TYPES = [(rules.COMMAND, "命令"), (rules.KEYS, "按鍵"), (rules.TEXT, "輸入文字"), (rules.WAIT, "等待")]
-COMMANDS = [(rules.RECORD, "錄音"), (rules.DELETE_SELECTION, "刪除選取的文字"),
+COMMANDS = [(rules.RECORD, "錄音"), (rules.PICK, "選字"), (rules.ADD_HOTWORD, "加入熱詞"),
+            (rules.DELETE_SELECTION, "刪除選取的文字"),
             (rules.DELETE_DICTATION, "刪除剛輸入的文字")]
 _STEP_DEFAULTS = {rules.COMMAND: rules.DELETE_SELECTION, rules.KEYS: "", rules.TEXT: "", rules.WAIT: 100}
 
@@ -82,9 +85,11 @@ class KeyCapture(QLineEdit):
 class SettingsDialog(QDialog):
     applied = Signal()
 
-    def __init__(self, cfg):
+    def __init__(self, cfg, hotwords, memory_path):
         super().__init__()
         self.cfg = cfg
+        self.hotwords = hotwords
+        self.memory_path = memory_path
         self._loading = False
         self.setWindowTitle("VoiceInput 設定")
         self.resize(620, 560)
@@ -93,6 +98,7 @@ class SettingsDialog(QDialog):
         self.tabs.addTab(self._general_page(), "一般")
         self.tabs.addTab(self._log_page(), "辨識紀錄")
         self.tabs.addTab(self._rules_page(), "自訂操作")
+        self.tabs.addTab(self._hotwords_page(), "熱詞")
 
         buttons = QDialogButtonBox(QDialogButtonBox.Close)
         buttons.rejected.connect(self.close)
@@ -114,6 +120,13 @@ class SettingsDialog(QDialog):
         self.autostart = QCheckBox("開機時自動啟動")
         self.mute = QCheckBox("錄音時暫時靜音電腦音效")
         self.mute.setToolTip("錄音期間把喇叭靜音，文字輸入完成後恢復；原本就靜音的話不會動")
+        self.menu_seconds = QSpinBox(minimum=3, maximum=120, suffix=" 秒")
+        self.menu_seconds.setToolTip("選字選單和加入熱詞的提示，沒點的話幾秒後自動關閉")
+        memory = QPushButton("開啟紀錄檔", clicked=self._open_memory)
+        memory.setToolTip("選字時學到的前後文例子與英文寫法偏好（smart-picks.json）")
+        memory_row = QHBoxLayout()
+        memory_row.addWidget(memory)
+        memory_row.addStretch()
         self.status = QLabel()
         self.status.setStyleSheet("color: gray")
         self.status.setWordWrap(True)
@@ -124,6 +137,8 @@ class SettingsDialog(QDialog):
         form.addRow("", self.punct)
         form.addRow("", self.period_comma)
         form.addRow("", self.autostart)
+        form.addRow("選單自動關閉", self.menu_seconds)
+        form.addRow("智慧選字", memory_row)
         page = QWidget()
         v = QVBoxLayout(page)
         v.addLayout(form)
@@ -131,6 +146,7 @@ class SettingsDialog(QDialog):
         v.addWidget(self.status)
 
         self.mic.currentIndexChanged.connect(self._apply)
+        self.menu_seconds.valueChanged.connect(self._apply)
         for box in (self.punct, self.period_comma, self.autostart, self.mute):
             box.toggled.connect(self._apply)
         return page
@@ -142,8 +158,10 @@ class SettingsDialog(QDialog):
         self.period_comma.setChecked(self.cfg.period_to_comma)
         self.autostart.setChecked(self.cfg.autostart)
         self.mute.setChecked(self.cfg.mute_while_recording)
+        self.menu_seconds.setValue(self.cfg.menu_seconds)
         self._loading = False
         self.refresh_rules()
+        self.refresh_hotwords()
 
     def set_status(self, text: str):
         self.status.setText(text)
@@ -156,11 +174,59 @@ class SettingsDialog(QDialog):
         self.cfg.period_to_comma = self.period_comma.isChecked()
         self.cfg.autostart = self.autostart.isChecked()
         self.cfg.mute_while_recording = self.mute.isChecked()
+        self.cfg.menu_seconds = self.menu_seconds.value()
         self._save()
 
     def _save(self):
         self.cfg.save()
         self.applied.emit()
+
+    def _open_memory(self):
+        if not self.memory_path.exists():
+            self.memory_path.parent.mkdir(parents=True, exist_ok=True)
+            self.memory_path.write_text('{\n"examples": [\n],\n"styles": {}\n}\n', encoding="utf-8")
+        os.startfile(self.memory_path)
+
+    # --- 熱詞 ---
+    def _hotwords_page(self) -> QWidget:
+        self.hw_list = QVBoxLayout()
+        self.hw_list.setSpacing(4)
+        inner = QWidget()
+        v = QVBoxLayout(inner)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.addLayout(self.hw_list)
+        v.addStretch(1)
+        scroll = QScrollArea(widgetResizable=True, frameShape=QFrame.NoFrame)
+        scroll.setWidget(inner)
+        self.hw_empty = QLabel("還沒有熱詞。在「自訂操作」加入「加入熱詞」命令後，選取文字執行它就會加到這裡。")
+        self.hw_empty.setStyleSheet("color: gray")
+        self.hw_empty.setWordWrap(True)
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.addWidget(self.hw_empty)
+        layout.addWidget(scroll, 1)
+        return page
+
+    def refresh_hotwords(self):
+        while self.hw_list.count():
+            w = self.hw_list.takeAt(0).widget()
+            w.setParent(None)
+            w.deleteLater()
+        for word in self.hotwords.words:
+            card = QFrame(objectName="card")
+            card.setStyleSheet(_CARD_STYLE)
+            row = QHBoxLayout(card)
+            row.setContentsMargins(8, 4, 4, 4)
+            row.addWidget(QLabel(word), 1)
+            remove = QPushButton("✕", toolTip="刪除這個熱詞", clicked=lambda _=False, w=word: self._remove_hotword(w))
+            remove.setFixedWidth(28)
+            row.addWidget(remove)
+            self.hw_list.addWidget(card)
+        self.hw_empty.setVisible(not self.hotwords.words)
+
+    def _remove_hotword(self, word: str):
+        self.hotwords.remove(word)
+        self.refresh_hotwords()
 
     # --- 辨識紀錄 ---
     def _log_page(self) -> QWidget:

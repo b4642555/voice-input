@@ -4,15 +4,18 @@ What an utterance does:
 1. Text is selected (UI Automation): the utterance replaces it.
 2. Otherwise it is dictated: formatted and pasted.
 An utterance that is exactly a custom operation's phrase (換行, 送出 …) runs that operation instead, and a bare
-punctuation name (逗號, 句號 …) is typed as the mark (edit.symbol; a setting since 2026-10-11).
+punctuation name (逗號, 句號 …) is typed as the mark (edit.symbol; a setting since 2026-10-11). Dictated text then
+goes through the smart picks (memory.py) and the absolute Chinese hotwords (hotwords.py).
 
 What the mouse buttons and keys do is set by custom operations (rules.py, 2026-10-11). The defaults: hold the
 middle button to record; double click it on a selection to delete it, or right after a dictation to delete that
 (while it is still the last change). When a key's double tap does not record and its hold does, holding the second
-press records again: delete and say it again. Gestures no operation takes are given back to the key.
+press records again: delete and say it again. A tap on a selection opens 選字. Gestures no operation takes are
+given back to the key.
 
-All popup menus (選字, suspected mishearings, the hotword ✓ box) and hotwords were removed on the lean branch
-(2026-10-10); popups are to be redesigned. The second opinion (SenseVoice + suspects.py) is commented out below.
+Popups (picker.py): the 選字 candidate menu and the notice after 加入熱詞 (with 撤銷); both came back 2026-10-11 after
+the lean branch removed every popup, and a redesign is planned. The second opinion (SenseVoice + suspects.py) is
+commented out below.
 """
 import logging
 import sys
@@ -30,11 +33,15 @@ from . import autostart, candidates, edit, models, paths, rules
 from .asr import Recognizer
 from .audio import Recorder
 from .config import Config
+from .hotwords import Hotwords
 from .hotkey import DOUBLE_TAP_GAP, TAP_THRESHOLD, Hotkeys
 from .keys import MOUSE_TRIGGERS, combo_vks
+from .memory import Memory, is_latin, situation
 from .mute import Muter
 from .output import backspace, paste_text, press_chord, press_delete
 from .overlay import Overlay
+from .picker import Picker
+from .reading import reading_key
 from .rules import DOUBLE, HOLD, TAP
 from .selection import ContextProbe, move_cursor_after, term_watcher
 from .session import Session, foreground
@@ -48,6 +55,7 @@ _SEL_LOST = "找不到選取的文字，沒有修改"   # a terminal selection t
 _NO_RECORD = "目前沒有任何操作會錄音，無法語音輸入。請到「設定 → 自訂操作」加入「錄音」。"
 _INDICATOR_DELAY = 0.1     # seconds held before the recording indicator shows (a tap is < TAP_THRESHOLD)
 _STEP_GAP = 0.03           # seconds between the steps of an operation
+_MENU_ROWS = 8
 
 
 @dataclass
@@ -95,6 +103,7 @@ class App(QObject):
     key_up = Signal(str, float)
     main = Signal(object)                    # run a callable on the Qt main thread (keystrokes, clipboard, UI)
     edited = Signal(object, str, object)     # Selection, replacement, _Press: spoken on a selection
+    candidates_ready = Signal(object, list)  # Selection, rows for the 選字 menu
     record = Signal(dict)         # one transcript log entry for the settings window
     status = Signal(str)
 
@@ -119,12 +128,19 @@ class App(QObject):
         self._mic: _Press | None = None          # the press the microphone records for
         self._ignored: set[str] = set()          # keys pressed while another was held
         self._could_record = rules.can_record(self.cfg.rules)
+        self.hotwords = Hotwords()
+        self.memory = Memory()
+        self._menu = None                        # ("pick", Selection) | ("hotword", word): what the popup shows
 
         self.icon_idle = make_icon(QColor(235, 235, 235) if self._dark_taskbar() else QColor(40, 40, 40))
         self.icon_rec = make_icon(QColor(255, 69, 58))
 
         self.overlay = Overlay(lambda: self.recorder.level)
-        self.settings = SettingsDialog(self.cfg)
+        self.picker = Picker()
+        self.picker.timeout_ms = self.cfg.menu_seconds * 1000
+        self.picker.picked.connect(self.on_menu_pick)
+        self.picker.undone.connect(self.on_hotword_undo)
+        self.settings = SettingsDialog(self.cfg, self.hotwords, self.memory.path)
         self.settings.applied.connect(self.apply_settings)
 
         self.tray = QSystemTrayIcon(self.icon_idle)
@@ -141,6 +157,7 @@ class App(QObject):
         self.key_up.connect(self.on_key_up)
         self.main.connect(lambda fn: fn())
         self.edited.connect(self.on_edited)
+        self.candidates_ready.connect(self.on_candidates)
         self.status.connect(self.on_status)
         self.record.connect(self.on_record)
 
@@ -235,6 +252,7 @@ class App(QObject):
         if self._press is not None:          # another key is held: this one is ignored
             self._ignored.add(key)
             return
+        self._close_menu()
         if self._toggle is not None:         # any press stops a recording a tap started
             toggle, self._toggle = self._toggle, None
             self._press = _Press(key, None, t, False, consumed=True)
@@ -453,6 +471,10 @@ class App(QObject):
                     self._on_main(lambda: self._delete_selection(press, ctx))
                 elif step.type == rules.COMMAND and step.value == rules.DELETE_DICTATION:
                     self._on_main(self.delete_last)
+                elif step.type == rules.COMMAND and step.value in (rules.PICK, rules.ADD_HOTWORD):
+                    sel = press.probe.result().selection if press.deleted is None else None
+                    fn = self._open_candidates if step.value == rules.PICK else self._add_hotword
+                    self._on_main(lambda f=fn: f(sel))
         except Exception:
             log.exception("steps failed")
         finally:
@@ -519,7 +541,7 @@ class App(QObject):
             ctx = press.probe.result()
             press.resolved.wait(3.0)
             t0 = time.monotonic()
-            raw = rec.recognize(audio, [(t, _SCREEN_TERM_SCORE) for t in ctx.terms])
+            raw = rec.recognize(audio, self.hotwords.bias() + [(t, _SCREEN_TERM_SCORE) for t in ctx.terms])
             t_asr = time.monotonic() - t0
             log.info("asr %.2fs: %s%s", t_asr, raw, f" (terms: {len(ctx.terms)})" if ctx.terms else "")
             # no sentence-final punctuation when the caret has text on both sides: the user is inserting
@@ -535,6 +557,9 @@ class App(QObject):
                 return
             sym = edit.symbol(formatted) if self.cfg.punctuation_names else None
             text = sym or formatted
+            if not sym:   # smart picks, then the hotwords, which are absolute
+                prefix = ctx.selection.before if selected else (ctx.caret[0] if ctx.caret else "")
+                text = self.hotwords.apply(self.memory.apply(text, prefix))
             entry = {"time": stamp, "asr": to_traditional(raw), "asr_s": t_asr, "fmt": text}
             if selected:
                 self._edit_job(ctx.selection, text, bool(sym), entry, press)
@@ -595,6 +620,87 @@ class App(QObject):
     def _notify(self, text: str):
         self.tray.showMessage("VoiceInput", text, self.icon_idle, 4000)
 
+    # --- popups: 選字 and the hotword notice ---
+    def _close_menu(self):
+        if self.picker.isVisible():
+            self.picker.hide()
+        self._menu = None
+
+    def _open_candidates(self, sel):
+        """選字: the candidate menu for the selection, under it."""
+        if sel is None or not sel.text.strip():
+            log.info("pick: nothing selected")
+            return
+        log.info("candidates for %r on %s", sel.text, sel.app)
+        self._menu = ("pick", sel)
+        self.picker.show_loading(sel.text.strip(), sel.rect)
+        threading.Thread(target=lambda: self.candidates_ready.emit(sel, self._menu_words(sel)), daemon=True).start()
+
+    def _menu_words(self, sel) -> list[str]:
+        """Rows for the selection: what the smart picks decide here, everything picked for it before, then
+        same-sounding words (Chinese) or ways of writing it, the most picked style first (English)."""
+        text = sel.text.strip()
+        try:
+            key = reading_key(text)
+            line = sel.before + sel.text + sel.after
+            start = len(sel.before) + sel.text.index(text)
+            left, right = situation(line, start, start + len(text))
+            rows = [self.memory.lookup(key, left, right, single=len(text) == 1)] + self.memory.values(key)
+            rows += self.memory.ordered_variants(text) if is_latin(text) else candidates.homophones(text)
+        except Exception:
+            log.exception("candidates failed")
+            rows = []
+        out = []
+        for w in rows:
+            if w and w != text and w not in out:
+                out.append(w)
+        return out[:_MENU_ROWS]
+
+    def on_candidates(self, sel, words: list):
+        if self._menu and self._menu[0] == "pick" and self._menu[1] is sel and self.picker.isVisible():
+            self.picker.show_candidates(sel.text.strip(), words)
+
+    def on_menu_pick(self, row: int):
+        menu, words = self._menu, self.picker.candidates
+        self._menu = None
+        if not menu or menu[0] != "pick" or not 0 <= row < len(words):
+            return
+        sel, word = menu[1], words[row]
+        text = sel.text.strip()
+        lead = sel.text.index(text)
+        log.info("menu pick: %s -> %s", text, word)
+        if not _paste_over(sel, sel.text[:lead] + word + sel.text[lead + len(text):]):
+            self._notify(_SEL_LOST)
+            return
+        line = sel.before + sel.text + sel.after
+        start = len(sel.before) + lead
+        self.memory.record(line, start, start + len(text), word)
+        self.session.replaced_selection(sel.before, word, foreground())
+        self.record.emit({"time": time.strftime("%H:%M:%S"), "asr": "", "asr_s": None, "fmt": "",
+                          "edit": f"選字：{text} → {word}"})
+
+    def _add_hotword(self, sel):
+        """加入熱詞: the selection becomes a hotword at once; the notice under it offers 撤銷."""
+        if sel is None or not sel.text.strip():
+            log.info("add hotword: nothing selected")
+            return
+        word = sel.text.strip()
+        if self.hotwords.add(word):
+            log.info("hotword added: %s", word)
+            self._menu = ("hotword", word)
+            self.picker.show_notice("已加入熱詞", word, sel.rect, "撤銷")
+            self.settings.refresh_hotwords()
+        else:
+            self._menu = None
+            self.picker.show_notice("已經是熱詞", word, sel.rect)
+
+    def on_hotword_undo(self):
+        menu, self._menu = self._menu, None
+        if menu and menu[0] == "hotword":
+            log.info("hotword undone: %s", menu[1])
+            self.hotwords.remove(menu[1])
+            self.settings.refresh_hotwords()
+
     # --- utterances on a selection ---
     def _edit_job(self, sel, text: str, sym: bool, entry: dict, press: _Press):
         """Worker thread: an utterance spoken on a selection replaces it."""
@@ -645,6 +751,7 @@ class App(QObject):
 
     def apply_settings(self):
         self.hotkeys.set_keys(rules.bound_keys(self.cfg.rules))
+        self.picker.timeout_ms = self.cfg.menu_seconds * 1000
         can = rules.can_record(self.cfg.rules)
         if self._could_record and not can:
             self._notify(_NO_RECORD)

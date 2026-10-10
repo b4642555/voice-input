@@ -30,7 +30,8 @@ menus (fix menu, fuzzy readings, menu timeout). The user plans to redesign popup
 off: SenseVoice is not loaded and the suspects code in `app.py` is commented out (`suspects.py` and
 `candidates.homophones`, which it needs, are kept). Tray error notices (model not ready, mic failure, terminal
 selection lost) stay. Sections below describe
-the branch; history of the removed features is in git (main, up to 71e5516).
+the branch; history of the removed features is in git (main, up to 71e5516). Brought back 2026-10-11 in a new form:
+the 選字 menu (old look, `picker.py`), hotwords (a plain word list) and pick memory (`memory.py`); see below.
 
 ## Platform
 
@@ -62,7 +63,8 @@ Memory with everything on: ~1.1GB (was ~3GB with the LLM). The word index held a
 
 ## Text pipeline
 
-`asr.py` (raw text) → `textfmt.format_text` → paste. Order inside `format_text` matters: s2tw → filler
+`asr.py` (raw text) → `textfmt.format_text` → smart picks (`memory.apply`) → Chinese hotwords (`hotwords.apply`,
+absolute, so last) → paste. Order inside `format_text` matters: s2tw → filler
 removal → disfluencies → 百分之 → numerals → spelled letters → 點 → percent → number+letter → English punctuation →
 CJK/ASCII spacing → trailing punctuation.
 
@@ -97,9 +99,10 @@ CJK/ASCII spacing → trailing punctuation.
 
 ## Settings window (tabs since 2026-10-11)
 
-Three tabs, sized for the log: 一般 (microphone, "mute the speakers while recording", punctuation names, "selected 。 →
-，", autostart),
-辨識紀錄 (the transcript log) and 自訂操作 (custom operations, below). Mute (2026-10-06, `mute.py`): Core Audio via
+Four tabs, sized for the log: 一般 (microphone, "mute the speakers while recording", punctuation names, "selected 。 →
+，", autostart, menu timeout (default 10s, back 2026-10-11, for the 選字 menu and the hotword notice), a button that
+opens smart-picks.json), 辨識紀錄 (the transcript log), 自訂操作 (custom operations, below) and 熱詞 (the hotword list,
+remove only). Mute (2026-10-06, `mute.py`): Core Audio via
 comtypes; muted when the recording indicator shows, unmuted once the text is pasted or the press ends in nothing; a
 mute the user set is left alone. Selection edits and on-screen terms are always on.
 
@@ -109,7 +112,7 @@ mute the user set is left alone. Selection edits and on-screen terms are always 
 (migrated by `Config.load`). A rule: trigger (滑鼠鍵: middle / upper / lower side button; 鍵盤鍵: CapsLock, right Alt,
 right Ctrl, Insert, ScrollLock, Pause, F1-F24; 說出: an utterance that is exactly the phrase) → 按法 (按一下 / 連按兩下
 / 按住; not for speech) → 情境 (不限 / 剛輸入完 / 有選取文字; the most specific wins) → steps run in order: 命令 (錄音,
-刪除選取的文字, 刪除剛輸入的文字), 按鍵 (a captured combination such as Ctrl+Z, sent with SendInput), 輸入文字 (pasted, counts as a dictation),
+選字, 加入熱詞, 刪除選取的文字, 刪除剛輸入的文字), 按鍵 (a captured combination such as Ctrl+Z, sent with SendInput), 輸入文字 (pasted, counts as a dictation),
 等待 (ms). Steps before 錄音 run at the start, those after it once the text is pasted (skipped if nothing was said).
 Hold + 錄音 records while held; tap / double tap + 錄音 starts there and the next press of any bound key stops it.
 刪除選取的文字 works in terminals too (why it is a command, not the Delete key); 刪除剛輸入的文字 deletes the last
@@ -117,13 +120,36 @@ dictation. They were one 刪除 command until the user had them split (2026-10-1
 When a key's double tap is a non-recording rule and its hold records, a held second press records after the double
 tap's steps (delete and say it again; the user's choice). 復原 is not a command: the user adds Ctrl+Z if wanted.
 Defaults: hold middle = 錄音; double middle on a selection = 刪除選取的文字, right after a dictation = 刪除剛輸入的文字
-(in neither situation the double click goes back to the button); 說出 換行 = Shift+Enter, 說出 送出 = Enter.
+(in neither situation the double click goes back to the button); tap middle on a selection = 選字 (added
+2026-10-11; `rules.upgrade` appends it to configs saved before, rules_version 2); 說出 換行 = Shift+Enter, 說出 送出 =
+Enter.
 Gestures (`app.py`, `hotkey.Hotkeys`): bound keys are suppressed by the hooks; the microphone starts at key-down when
 the press may record; a single tap waits DOUBLE_TAP_GAP only when that key has a double-tap rule; a gesture no rule
 takes is given back (keyboard key replayed, mouse button clicked: the user's choice, so an unbound middle click
 still works, 0.35s late when a double tap is bound; a hold is given back as one click). Invalid rules (two 錄音,
 錄音 in a speech rule, empty combination, a duplicate of an earlier rule) are flagged in red and skipped. When no
 rule records any more, a tray notice warns that dictation is impossible (the user's request).
+
+## 選字, smart picks and hotwords (2026-10-11)
+
+Only two popups exist (`picker.py`, the pre-lean look; a redesign is planned): the 選字 menu and the hotword notice.
+- **選字** (command): the menu under the selection lists what the smart picks decide in this context, everything
+  picked for that reading before (newest first), then homophones (`candidates.homophones`, Chinese) or ways of writing
+  English (`memory.variants`: Claude / claude / CLAUDE; voiceInput / VoiceInput / Voice Input / voice input / VOICE
+  INPUT / voice_input / voice-input / voiceinput), the styles the user picks most first, counted apart for one word
+  and for several. 8 rows. A pick replaces the selection and is recorded.
+- **Smart picks** (`memory.py`, DATA_DIR/smart-picks.json, one example per line so the user can read it): modelled on
+  art-shuangpin's core/user_preferences (spec §7): an example is key (toned pinyin per character / casefolded words)
+  + left (two characters, `^` boundary) + right (two toneless readings) + value. Applied after formatting: most
+  agreeing tokens wins, then the right side, the boundary, the newest; one Chinese character needs an agreeing token
+  and is left alone on a tie; a phrase applies anywhere (the user's choice: picked once, used everywhere until picked
+  back elsewhere). A pick deletes older examples with another value whose context does not conflict.
+- **Hotwords** (`hotwords.py`, DATA_DIR/hotword-list.json; the old key -> value hotwords.json is not read): added only
+  by the 加入熱詞 command (added at once; the notice offers 撤銷), removed on the 熱詞 tab. All bias X-ASR at 3.0, the
+  highest. Chinese ones are also absolute (the user's choice, because X-ASR barely follows Chinese biasing in our
+  tests): any run read exactly like one, tones included, becomes it, after the smart picks.
+- Dropped the same day: picks raising a word's X-ASR bias (a hidden weight); Chinese biasing is too weak and the user
+  chose not to keep it for English alone.
 
 ## Voice edits on selected text
 
@@ -158,7 +184,7 @@ WT reported the cursor one character left; in front it is exact. Forgotten on an
 The dictionary (`candidates.py`, since 2026-10-02): McBopomofo's word list (MIT, `voiceinput/dict/words.tsv.gz`,
 built by `dev/build_dict.py` from a pinned commit): ~146k Taiwanese phrases + Big5 single characters with Bopomofo
 readings and Taiwanese-corpus frequencies, cached in DATA_DIR/cache/word_index.pkl (build ~10s, load ~0.4s). It
-answers `is_word` / `frequency` for disfluencies; `homophones` is kept for the (commented-out) suspects. jieba was
+answers `is_word` / `frequency` for disfluencies and `homophones` for 選字 (and the commented-out suspects). jieba was
 used until 2026-10-02 (commit 58c1535) and dropped for missing Taiwanese words and mainland frequencies.
 
 ## After a dictation (2026-09-29)

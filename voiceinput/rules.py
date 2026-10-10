@@ -2,11 +2,11 @@
 
 A rule is a trigger (a mouse button or keyboard key with a gesture: tap, double tap or hold; or an utterance that is
 exactly a phrase), a situation (any, right after a dictation, text selected) and a list of steps run in order:
-a command (錄音 record, 刪除選取的文字, 刪除剛輸入的文字), a key combination, text to type, or a wait. A rule's
+a command (錄音 record, 刪除選取的文字, 刪除剛輸入的文字, 選字, 加入熱詞), a key combination, text to type, or a wait. A rule's
 steps before 錄音 run when it starts, the ones after it once the dictated text is pasted. Hold + 錄音 records while
 held; tap or double tap + 錄音 starts on that gesture and stops at the next press. 刪除選取的文字 works in terminals
 too; 刪除剛輸入的文字 deletes the last dictation while the caret is still after it (split from one 刪除 command
-2026-10-11, the user's choice).
+2026-10-11, the user's choice). 選字 opens the candidate menu for the selection, 加入熱詞 adds it as a hotword.
 
 For one trigger and gesture the most specific situation wins: selected text, then right after a dictation, then
 any. Unbound gestures are given back to the key (a keyboard key is replayed, a mouse button clicked).
@@ -19,6 +19,8 @@ TAP, DOUBLE, HOLD = "tap", "double", "hold"
 ANY, DICTATED, SELECTION = "any", "dictated", "selection"
 COMMAND, KEYS, TEXT, WAIT = "command", "keys", "text", "wait"
 RECORD, DELETE_SELECTION, DELETE_DICTATION = "record", "delete_selection", "delete_dictation"
+PICK, ADD_HOTWORD = "pick", "add_hotword"
+VERSION = 2   # config rules_version: 2 added the tap on a selection that opens 選字
 
 _PUNCT = re.compile(r"[\s，。、！？；：,.!?;:…]+")
 
@@ -52,12 +54,13 @@ class Rule:
 
 
 def defaults(key: str = "mouse_middle", newline: bool = True, send: bool = True) -> list[Rule]:
-    """Hold to record; double tap to delete the selection, or what was just dictated; 換行 / 送出 spoken alone press
-    Shift+Enter / Enter. A double tap in neither situation stays the key's own."""
+    """Hold to record; double tap to delete the selection, or what was just dictated; tap on a selection for 選字;
+    換行 / 送出 spoken alone press Shift+Enter / Enter. Other taps and double taps stay the key's own."""
     source = MOUSE if key.startswith("mouse") else KEY
     out = [Rule(source, key, gesture=HOLD, steps=[Step(COMMAND, RECORD)]),
            Rule(source, key, gesture=DOUBLE, when=SELECTION, steps=[Step(COMMAND, DELETE_SELECTION)]),
-           Rule(source, key, gesture=DOUBLE, when=DICTATED, steps=[Step(COMMAND, DELETE_DICTATION)])]
+           Rule(source, key, gesture=DOUBLE, when=DICTATED, steps=[Step(COMMAND, DELETE_DICTATION)]),
+           Rule(source, key, gesture=TAP, when=SELECTION, steps=[Step(COMMAND, PICK)])]
     if newline:
         out.append(Rule(SPEECH, phrase="換行", steps=[Step(KEYS, "Shift+Enter")]))
     if send:
@@ -79,6 +82,17 @@ def migrate(rules: list[Rule]) -> list[Rule]:
                          for s in r.steps]
                 out.append(Rule(r.source, r.key, r.phrase, r.gesture, when, steps, r.enabled))
     return out
+
+
+def upgrade(rules: list[Rule], version: int) -> list[Rule]:
+    """Defaults added after a config was saved: version 2 adds tap on a selection = 選字 on the key that records
+    by holding, unless that tap is taken."""
+    if version < 2:
+        hold = next((r for r in rules if r.source != SPEECH and r.gesture == HOLD and r.record_index() is not None),
+                    None)
+        if hold and not any(r.key == hold.key and r.gesture == TAP and r.when in (SELECTION, ANY) for r in rules):
+            rules.append(Rule(hold.source, hold.key, gesture=TAP, when=SELECTION, steps=[Step(COMMAND, PICK)]))
+    return rules
 
 
 def normalize(phrase: str) -> str:

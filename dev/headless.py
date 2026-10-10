@@ -9,7 +9,9 @@ box), click (the user clicks: ends what the app knows about the text), tap (one 
 hotkey:NAME (the key or button the next steps press, default mouse_middle), rules:default (the default operations),
 rule:JSON (add an operation, rules.Rule.from_dict), at:WORD (put the caret right after the last WORD; at: puts it at
 the end), say:TEXT (dictate TEXT as if recognized), set:NAME=VALUE (change a setting in memory only) or key:BACK (the
-user presses Backspace n times: key:BACK*3). Settings are never saved.
+user presses Backspace n times: key:BACK*3), pick:N / pickw:WORD (click a row of the 選字 menu), undohw (click 撤銷
+on the hotword notice). Settings are never saved; hotwords and smart picks live in <dir> (hotwords.test.json,
+smart-picks.test.json, emptied at the start), never in the real files.
 """
 import json
 import shutil
@@ -100,6 +102,11 @@ class Probe:
 
 
 appmod.ContextProbe = Probe
+_Hotwords, _Memory = appmod.Hotwords, appmod.Memory
+for name in ("hotwords.test.json", "smart-picks.test.json"):
+    (Path(S) / name).unlink(missing_ok=True)
+appmod.Hotwords = lambda: _Hotwords(Path(S) / "hotwords.test.json")
+appmod.Memory = lambda: _Memory(Path(S) / "smart-picks.test.json")
 qapp = QApplication(sys.argv)
 qapp.setQuitOnLastWindowClosed(False)
 A = appmod.App(qapp)
@@ -149,6 +156,12 @@ def _steps(arg: str) -> list[str]:
     return out + [cur]
 
 
+def menu() -> str:
+    if not A.picker.isVisible():
+        return ""
+    return f"   氣泡：{A.picker.title.text()} {A.picker.candidates}"
+
+
 def down():
     A.on_key_down(KEY, time.monotonic())
 
@@ -186,6 +199,7 @@ try:
                 up()
             pump(2.5 if wav else 1.0)
             given = f"  (還給按鍵：{replayed})" if replayed else ""
+            given += menu()
             print(f"[{step}] → 文字框：{box.text[:box.caret] + '|' + box.text[box.caret:]!r}{given}")
             continue
         if step.startswith("hotkey:"):
@@ -219,6 +233,19 @@ try:
             A.session.on_input()
             print(f"[游標移到] → 文字框：{box.text[:box.caret] + '|' + box.text[box.caret:]!r}")
             continue
+        if step.startswith(("pick:", "pickw:")) or step == "undohw":
+            shown = A.picker.isVisible()
+            if shown and step == "undohw":
+                A.picker._undo()
+            elif shown:
+                rows = A.picker.candidates
+                i = int(step[5:]) - 1 if step.startswith("pick:") else rows.index(step[6:]) if step[6:] in rows else -1
+                if 0 <= i < len(rows):
+                    A.picker._pick(i)
+            pump(0.5)
+            print(f"[{step}] {'' if shown else '（沒有氣泡）'} → 文字框：{box.text[:box.caret] + '|' + box.text[box.caret:]!r}"
+                  f"  熱詞：{A.hotwords.words}")
+            continue
         if step == "click":
             A.session.on_input()
             print("[點滑鼠]")
@@ -236,7 +263,7 @@ try:
         up()
         pump(2.5)
         shown = box.text[:box.caret] + "|" + box.text[box.caret:]
-        print(f"[{step}] {A._records[-1]['fmt'] if A._records else ''!r:32} → 文字框：{shown!r}")
+        print(f"[{step}] {A._records[-1]['fmt'] if A._records else ''!r:32} → 文字框：{shown!r}{menu()}")
 finally:
     A.quit()
     shutil.rmtree(Path(S) / "__pycache__", ignore_errors=True)
