@@ -662,23 +662,32 @@ class App(QObject):
 
     def _menu_words(self, sel) -> list[str]:
         """Rows for the selection. One Chinese character: what the smart picks decide here, everything picked for it
-        before, then same-sounding characters. A word: same-sounding words (Chinese) or ways of writing it, the most
-        picked style first (English), with hotwords among them first, heaviest first."""
+        before, then same-sounding characters. A word: same-sounding words, the same reading first (Chinese), or ways
+        of writing it, the most picked style first (English); hotwords first among equals, heaviest first."""
         text = sel.text.strip()
         try:
             if is_latin(text):
                 rows = self.memory.ordered_variants(text)
-            else:
+            elif len(text) == 1:
                 rows = candidates.homophones(text)
+            else:
+                # the same reading first (the user's choice, 2026-10-11: before common words of another tone), then
+                # without tones, fuzzy; within each, hotwords by weight, common words, frequency
+                found = candidates.ranked(text)
                 key = reading_key(text)
-                rows += [h.word for h in self.hotwords.items if h.word != text and reading_key(h.word) == key]
+                for h in self.hotwords.items:
+                    if h.word != text and h.word not in found and reading_key(h.word) == key:
+                        found[h.word] = (0, 0)
+                weights = self.hotwords.weights_for(found)
+                rows = sorted(found, key=lambda w: (found[w][0], -weights.get(w, 0),
+                                                    -found[w][1] < candidates.COMMON, found[w][1]))
             if len(text) == 1:
                 key = reading_key(text)
                 line = sel.before + sel.text + sel.after
                 start = len(sel.before) + sel.text.index(text)
                 left, right = situation(line, start, start + 1)
                 rows = [self.memory.lookup(key, left, right, single=True)] + self.memory.values(key) + rows
-            else:
+            elif is_latin(text):
                 weights = self.hotwords.weights_for(rows)
                 rows.sort(key=lambda w: -weights.get(w, 0))   # stable: the rest keep their order
         except Exception:

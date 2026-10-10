@@ -123,15 +123,23 @@ def _readings(word: str) -> list[str]:
     return [" ".join(_words[c][1][0] if c in _words else _pypinyin_reading(c) for c in word)]
 
 
-_COMMON = 5   # frequency from which a word counts as common (McBopomofo lists many obscure words at 1-2)
+COMMON = 5   # frequency from which a word counts as common (McBopomofo lists many obscure words at 1-2)
 
 
 def homophones(word: str, limit: int = 8) -> list[str]:
     """Words that sound like word (Traditional Chinese), best first: common words before rare ones, then the same
     reading with tones, without tones, fuzzy, then frequency; word itself excluded."""
+    found = ranked(word)
+    # rare entries (逆號, 塵事: frequency 1) go last whatever their reading: common words are what the user means
+    return sorted(found, key=lambda w: (-found[w][1] < COMMON, found[w]))[:limit]
+
+
+def ranked(word: str) -> dict[str, tuple[int, int]]:
+    """Words that sound like word -> (rank, -frequency); rank 0: the same reading with tones, 1: without tones,
+    2: fuzzy."""
     word = word.strip()
     if not _CJK.match(word) or len(word) > 6:
-        return []
+        return {}
     index = load()
     readings = _readings(word)
     found: dict[str, tuple[int, int]] = {}
@@ -141,5 +149,4 @@ def homophones(word: str, limit: int = 8) -> list[str]:
             rank = 0 if r == reading else 1 if _TONES.sub("", r) == toneless else 2
             if w != word and (w not in found or rank < found[w][0]):
                 found[w] = (rank, -freq)
-    # rare entries (逆號, 塵事: frequency 1) go last whatever their reading: common words are what the user means
-    return sorted(found, key=lambda w: (-found[w][1] < _COMMON, found[w]))[:limit]
+    return found

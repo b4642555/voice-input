@@ -135,9 +135,10 @@ rule records any more, a tray notice warns that dictation is impossible (the use
 The one popup is the 選字 menu (`picker.py`, the pre-lean look; a redesign is planned). The 加入熱詞 notice with 撤銷
 lived a few hours: the user wants hotwords added quietly (they come from deliberate picks and commands).
 - **選字** (command): the menu under the selection. One Chinese character: what the smart picks decide here, what
-  was picked for it before, then same-sounding characters. A word: homophones (`candidates.homophones`: common words
-  (frequency ≥ 5) first, since McBopomofo lists obscure entries like 逆號 at 1; then same reading with tones,
-  without, fuzzy; then frequency) or English spellings (`memory.variants`: Claude / claude / CLAUDE; voiceInput /
+  was picked for it before, then same-sounding characters. A Chinese word: homophones (`candidates.ranked`), the same reading with tones
+  first (the user's choice, 2026-10-11), then without tones, then fuzzy; within each: hotwords by weight, common
+  words (frequency ≥ 5, since McBopomofo lists obscure entries like 逆號 at 1), frequency. (Single characters still
+  use `candidates.homophones`: common first, then the reading tiers.) English: spellings (`memory.variants`: Claude / claude / CLAUDE; voiceInput /
   VoiceInput / Voice Input / voice input / VOICE INPUT / voice_input / voice-input / voiceinput, the styles picked
   most first, counted apart for one word and for several), hotwords among them first by weight. 8 rows.
 - **Smart picks** (`memory.py`, DATA_DIR/smart-picks.json, one example per line, opened from the 一般 tab): single
