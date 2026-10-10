@@ -211,6 +211,9 @@ removed the same day they were built: the user corrects by selecting with the mo
   punctuation names (when on) at score 5. Not by audio length: TTS 換行 alone was 1.7s with its silences. Fixed
   據點 -> 句點, 珊姐好 -> 刪節號; cost: 問好 / 分好 said alone become 問號 / 分號. Words of one repeated character
   (點點點) are not boosted: they ran away (點點點點點點點點點).
+- **Bopomofo spelling** (拼讀: ㄔ ㄤ 昌 types 昌) was built and reverted on 2026-10-11 (db3f0e7, c0ae24e): with a real
+  voice X-ASR heard most symbol names as English letters (ㄐ ㄧ ㄝ → "G E A"), and there is no way to force Chinese,
+  so it missed too often for a feature meant for frequent use (the user's verdict).
 - **Selected 。** (setting, 2026-10-07): speaking on a selected 。 replaces it with ， + the utterance + 。
   (今天很好。明天見 → 今天很好，我們去公園。明天見).
 
