@@ -4,7 +4,8 @@ word candidates (城市 -> 程式, 誠實, 乘勢 …) for suspects.py, which is
 The words come from McBopomofo (小麥注音, MIT): ~146k Taiwanese phrases of 2-6 characters and the Big5 single
 characters, each with its Bopomofo reading and a frequency counted in a Taiwanese corpus (dict/words.tsv.gz, built
 by dev/build_dict.py). Every word is indexed by its toneless reading, made fuzzy for Taiwanese-accent confusions
-(ㄓ/ㄗ, ㄔ/ㄘ, ㄕ/ㄙ, ㄥ/ㄣ, ㄤ/ㄢ, ㄌ/ㄋ), under both McBopomofo's reading and pypinyin's (垃圾 is listed as
+(ㄓ/ㄗ, ㄔ/ㄘ, ㄕ/ㄙ, ㄥ/ㄣ, ㄤ/ㄢ which also covers ㄧㄤ/ㄧㄢ and ㄨㄤ/ㄨㄢ, ㄖ/ㄌ; the user's set,
+2026-10-11: ㄖ/ㄌ replaced ㄌ/ㄋ, ㄈ/ㄏ left out), under both McBopomofo's reading and pypinyin's (垃圾 is listed as
 ㄌㄜˋ ㄙㄜˋ but said ㄌㄚ ㄐㄧ). Candidates are ordered: same reading with tones, same reading without tones,
 fuzzy reading; then frequency. The index is cached in DATA_DIR/cache and built in the background at startup.
 
@@ -26,10 +27,10 @@ log = logging.getLogger("voiceinput")
 _DICT = Path(__file__).resolve().parent / "dict" / "words.tsv.gz"
 _CACHE = DATA_DIR / "cache" / "word_index.pkl"
 _OLD_CACHE = DATA_DIR / "cache" / "pinyin_index.pkl"   # the jieba index, removed on first build
-_CACHE_VERSION = 1
+_CACHE_VERSION = 2   # the index keys depend on _FUZZY
 _CJK = re.compile(r"^[㐀-䶿一-鿿]+$")
 _TONES = re.compile("[ˊˇˋ˙]")
-_FUZZY = [("ㄓ", "ㄗ"), ("ㄔ", "ㄘ"), ("ㄕ", "ㄙ"), ("ㄤ", "ㄢ"), ("ㄌ", "ㄋ")]
+_FUZZY = [("ㄓ", "ㄗ"), ("ㄔ", "ㄘ"), ("ㄕ", "ㄙ"), ("ㄤ", "ㄢ"), ("ㄖ", "ㄌ")]
 _ENG = re.compile("(?<![ㄨㄩ])ㄥ")   # eng/en and ing/in, but not ong/un or iong/ün
 
 _index: dict[str, list[tuple[str, str, int]]] | None = None   # fuzzy key -> [(word, toned reading, frequency)]
