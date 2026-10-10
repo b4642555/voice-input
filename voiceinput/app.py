@@ -4,7 +4,8 @@ What an utterance does:
 1. Text is selected (UI Automation): the utterance replaces it.
 2. Otherwise it is dictated: formatted and pasted.
 An utterance that is exactly a custom operation's phrase (換行, 送出 …) runs that operation instead, and a bare
-punctuation name (逗號, 句號 …) is typed as the mark (edit.symbol; a setting since 2026-10-11). Dictated text then
+punctuation name (逗號, 句號 …) is typed as the mark (edit.symbol; a setting since 2026-10-11), and 節日的節 types
+節 (edit.described, a setting). Dictated text then
 goes through the smart picks (memory.py, single characters only); words are left to X-ASR hotword biasing.
 
 What the mouse buttons and keys do is set by custom operations (rules.py, 2026-10-11). The defaults: hold the
@@ -14,7 +15,8 @@ press records again: delete and say it again. A tap on a selection opens 選字.
 given back to the key.
 
 The one popup (picker.py) is the 選字 candidate menu; it came back 2026-10-11 after the lean branch removed every
-popup, and a redesign is planned (the 加入熱詞 notice with 撤銷 lived for a few hours the same day). The second opinion (SenseVoice + suspects.py) is
+popup, and a redesign is planned (the 加入熱詞 notice with 撤銷 lived for a few hours the same day). Its input box
+takes a typed word, which replaces the selection and becomes a hotword. The second opinion (SenseVoice + suspects.py) is
 commented out below.
 """
 import logging
@@ -146,8 +148,10 @@ class App(QObject):
 
         self.overlay = Overlay(lambda: self.recorder.level)
         self.picker = Picker()
-        self.picker.timeout_ms = self.cfg.menu_seconds * 1000
         self.picker.picked.connect(self.on_menu_pick)
+        self.picker.typed.connect(self.on_menu_typed)
+        self.picker.closed.connect(self._forget_menu)
+        self._picker_hwnd = int(self.picker.winId())
         self.settings = SettingsDialog(self.cfg, self.hotwords, self.memory.path)
         self.settings.applied.connect(self.apply_settings)
 
@@ -192,9 +196,22 @@ class App(QObject):
             return True
 
     def _on_other_key(self, vk: int):
-        """Keyboard hook thread: a key the user pressed (injected keys never get here)."""
+        """Keyboard hook thread: a key the user pressed (injected keys never get here). Typing in the 選字 menu's
+        input box leaves the target app alone; any other key closes the menu."""
+        import ctypes
+        if ctypes.windll.user32.GetForegroundWindow() == self._picker_hwnd:
+            return
         self.session.on_input()
         term_watcher.forget()
+        self.main.emit(self.picker.dismiss)
+
+    def _on_picker(self, pt) -> bool:
+        """Mouse hook thread: the point is on the 選字 menu."""
+        import ctypes.wintypes
+        u32 = ctypes.windll.user32
+        u32.WindowFromPoint.argtypes = [ctypes.wintypes.POINT]
+        hwnd = u32.WindowFromPoint(pt)
+        return bool(hwnd) and u32.GetAncestor(hwnd, 2) == self._picker_hwnd   # GA_ROOT
 
     def _watch_mouse(self):
         """Any click may move the caret, which ends what session.py knows about the text before it. Left button
@@ -208,6 +225,9 @@ class App(QObject):
             if self.hotkeys.is_bound_mouse(msg, data.mouseData):
                 return False   # a button an operation uses is not a click
             if msg in downs:
+                if self._on_picker(data.pt):
+                    return False   # a click in the 選字 menu leaves the caret and the selection where they are
+                self.main.emit(self.picker.dismiss)   # a click anywhere else closes it
                 self.session.on_input()
                 if msg == 0x201:
                     term_watcher.mouse_down(data.pt.x, data.pt.y)
@@ -479,10 +499,9 @@ class App(QObject):
                     self._on_main(lambda: self._delete_selection(press, ctx))
                 elif step.type == rules.COMMAND and step.value == rules.DELETE_DICTATION:
                     self._on_main(self.delete_last)
-                elif step.type == rules.COMMAND and step.value in (rules.PICK, rules.ADD_HOTWORD):
+                elif step.type == rules.COMMAND and step.value == rules.PICK:
                     sel = press.probe.result().selection if press.deleted is None else None
-                    fn = self._open_candidates if step.value == rules.PICK else self._add_hotword
-                    self._on_main(lambda f=fn: f(sel))
+                    self._on_main(lambda: self._open_candidates(sel))
         except Exception:
             log.exception("steps failed")
         finally:
@@ -513,6 +532,8 @@ class App(QObject):
             log.info("delete selection: nothing selected")
             return
         log.info("delete %r on %s", sel.text, sel.app)
+        if sel.term is not None:
+            self.overlay.hide_now()
         if not _delete_selection(sel):
             self._notify(_SEL_LOST)
             return
@@ -571,11 +592,17 @@ class App(QObject):
                 self.main.emit(lambda: self._spoken_operation(press, op))
                 return
             sym = edit.symbol(formatted) if self.cfg.punctuation_names else None
+            described = None if sym or not self.cfg.describe_char else edit.described(formatted)
+            if described:
+                log.info("described character: %s", described)
+                sym = described   # typed as it is, like a punctuation mark
             text = sym or formatted
             if not sym:   # smart picks (single characters)
                 prefix = ctx.selection.before if selected else (ctx.caret[0] if ctx.caret else "")
                 text = self.memory.apply(text, prefix)
             entry = {"time": stamp, "asr": to_traditional(raw), "asr_s": t_asr, "fmt": text}
+            if described:
+                entry["edit"] = f"指定字：{formatted.strip()} → {described}"
             if selected:
                 self._edit_job(ctx.selection, text, bool(sym), entry, press)
                 return
@@ -703,17 +730,31 @@ class App(QObject):
         if self._menu and self._menu[0] == "pick" and self._menu[1] is sel and self.picker.isVisible():
             self.picker.show_candidates(sel.text.strip(), words)
 
+    def _forget_menu(self):
+        self._menu = None
+
     def on_menu_pick(self, row: int):
-        """A pick replaces the selection. A single character is learned with its context (smart picks); a word
-        gains hotword weight and the word it replaced loses some."""
         menu, words = self._menu, self.picker.candidates
         self._menu = None
-        if not menu or menu[0] != "pick" or not 0 <= row < len(words):
-            return
-        sel, word = menu[1], words[row]
+        if menu and menu[0] == "pick" and 0 <= row < len(words):
+            self._apply_pick(menu[1], words[row])
+
+    def on_menu_typed(self, word: str):
+        """Text typed in the menu's input box: once focus is back in the app, it replaces the selection like a pick
+        and becomes a hotword at the highest weight (single characters are learned as smart picks instead)."""
+        menu = self._menu
+        self._menu = None
+        if menu and menu[0] == "pick":
+            QTimer.singleShot(150, lambda: self._apply_pick(menu[1], word, typed=True))
+
+    def _apply_pick(self, sel, word: str, typed: bool = False):
+        """A pick replaces the selection. A single character is learned with its context (smart picks); a word
+        gains hotword weight and the word it replaced loses some."""
         text = sel.text.strip()
         lead = sel.text.index(text)
-        log.info("menu pick: %s -> %s", text, word)
+        log.info("menu %s: %s -> %s", "typed" if typed else "pick", text, word)
+        if sel.term is not None:
+            self.overlay.hide_now()
         if not _paste_over(sel, sel.text[:lead] + word + sel.text[lead + len(text):]):
             self._notify(_SEL_LOST)
             return
@@ -721,23 +762,12 @@ class App(QObject):
         start = len(sel.before) + lead
         self.memory.record(line, start, start + len(text), word)
         self.hotwords.picked(text, word)
+        if typed and self.hotwords.add(word):
+            log.info("hotword typed: %s", word)
         self.settings.refresh_hotwords()
         self.session.replaced_selection(sel.before, word, foreground())
         self.record.emit({"time": time.strftime("%H:%M:%S"), "asr": "", "asr_s": None, "fmt": "",
-                          "edit": f"選字：{text} → {word}"})
-
-    def _add_hotword(self, sel):
-        """加入熱詞: the selection becomes a hotword at the highest weight, quietly (no notice since 2026-10-11:
-        the user chose it on purpose). Single characters are skipped."""
-        if sel is None or not sel.text.strip():
-            log.info("add hotword: nothing selected")
-            return
-        word = sel.text.strip()
-        if self.hotwords.add(word):
-            log.info("hotword added: %s", word)
-            self.settings.refresh_hotwords()
-        else:
-            log.info("add hotword: %r skipped (a single character)", word)
+                          "edit": f"{'輸入' if typed else '選字'}：{text} → {word}"})
 
     # --- utterances on a selection ---
     def _edit_job(self, sel, text: str, sym: bool, entry: dict, press: _Press):
@@ -754,6 +784,8 @@ class App(QObject):
         self.edited.emit(sel, rep, press)
 
     def on_edited(self, sel, rep: str, press: _Press):
+        if sel.term is not None:
+            self.overlay.hide_now()
         self.overlay.hide_overlay()
         if not rep:
             self._input_done()
@@ -789,7 +821,6 @@ class App(QObject):
 
     def apply_settings(self):
         self.hotkeys.set_keys(rules.bound_keys(self.cfg.rules))
-        self.picker.timeout_ms = self.cfg.menu_seconds * 1000
         can = rules.can_record(self.cfg.rules)
         if self._could_record and not can:
             self._notify(_NO_RECORD)

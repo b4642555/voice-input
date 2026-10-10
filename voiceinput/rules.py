@@ -2,11 +2,11 @@
 
 A rule is a trigger (a mouse button or keyboard key with a gesture: tap, double tap or hold; or an utterance that is
 exactly a phrase), a situation (any, right after a dictation, text selected) and a list of steps run in order:
-a command (錄音 record, 刪除選取的文字, 刪除剛輸入的文字, 選字, 加入熱詞), a key combination, text to type, or a wait. A rule's
+a command (錄音 record, 刪除選取的文字, 刪除剛輸入的文字, 選字), a key combination, text to type, or a wait. A rule's
 steps before 錄音 run when it starts, the ones after it once the dictated text is pasted. Hold + 錄音 records while
 held; tap or double tap + 錄音 starts on that gesture and stops at the next press. 刪除選取的文字 works in terminals
 too; 刪除剛輸入的文字 deletes the last dictation while the caret is still after it (split from one 刪除 command
-2026-10-11, the user's choice). 選字 opens the candidate menu for the selection, 加入熱詞 adds it as a hotword.
+2026-10-11, the user's choice). 選字 opens the candidate menu for the selection.
 
 For one trigger and gesture the most specific situation wins: selected text, then right after a dictation, then
 any. Unbound gestures are given back to the key (a keyboard key is replayed, a mouse button clicked).
@@ -19,7 +19,8 @@ TAP, DOUBLE, HOLD = "tap", "double", "hold"
 ANY, DICTATED, SELECTION = "any", "dictated", "selection"
 COMMAND, KEYS, TEXT, WAIT = "command", "keys", "text", "wait"
 RECORD, DELETE_SELECTION, DELETE_DICTATION = "record", "delete_selection", "delete_dictation"
-PICK, ADD_HOTWORD = "pick", "add_hotword"
+PICK = "pick"
+_ADD_HOTWORD = "add_hotword"   # 加入熱詞, removed 2026-10-11: hotwords are typed in the 選字 menu instead
 VERSION = 2   # config rules_version: 2 added the tap on a selection that opens 選字
 
 _PUNCT = re.compile(r"[\s，。、！？；：,.!?;:…]+")
@@ -73,6 +74,10 @@ def migrate(rules: list[Rule]) -> list[Rule]:
     any situation becomes two: one for a selection, one right after a dictation."""
     out = []
     for r in rules:
+        if any(s.type == COMMAND and s.value == _ADD_HOTWORD for s in r.steps):
+            r.steps = [s for s in r.steps if not (s.type == COMMAND and s.value == _ADD_HOTWORD)]
+            if not r.steps:
+                continue
         if not any(s.type == COMMAND and s.value == "delete" for s in r.steps):
             out.append(r)
             continue

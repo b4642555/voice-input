@@ -23,16 +23,18 @@ Data from the old layout (`config.json`, `models/` inside the app folder) is mov
   clicks and double clicks still work.
 - Say only 換行 for Shift+Enter, 送出 for Enter; 逗號 / 句號 / 問號 / 驚嘆號 / 頓號 / 分號 / 冒號 / 點點點 type that mark.
 - Left-click the tray icon to open settings: 一般 (microphone, muting the speakers while recording, punctuation names,
-  selected 。 → ，,
+  selected 。 → ，, 節日的節,
   launch at login), 辨識紀錄 (a per-utterance log for this session) and 自訂操作. Changes apply immediately.
 - Click the middle button on selected text for 選字: same-sounding words, or ways of writing English (voiceInput,
   Voice Input …). A picked word gains recognition weight (熱詞); a picked single character is remembered with the
-  characters around it and applied to later dictations (智慧選字).
+  characters around it and applied to later dictations (智慧選字). Or type the right text in the menu's input box
+  (any input method): it replaces the selection and becomes a 熱詞. The menu closes on any click elsewhere.
+- Say a word and the character you mean (節日的節, 這個字是教育的育) to type just that character.
 - 自訂操作: choose a mouse button, keyboard key or spoken phrase, a gesture (tap / double tap / hold), a situation
-  (any / right after dictating / text selected) and steps run in order: 錄音, 選字, 加入熱詞, delete the selection,
+  (any / right after dictating / text selected) and steps run in order: 錄音, 選字, delete the selection,
   delete what was just dictated, a key combination, text, a wait.
-- 熱詞: words with a weight that biases recognition: added with 加入熱詞 (highest weight) or by picking words in
-  選字 (weight grows with each pick, drops when picked away). Listed with their weights on the 熱詞 tab.
+- 熱詞: words with a weight that biases recognition: typed in the 選字 menu (highest weight) or picked in it
+  (weight grows with each pick, drops when picked away). Listed with their weights (and % of the cap) on the 熱詞 tab.
   Steps after 錄音 run once the text is typed (e.g. 錄音 → Enter: speak and send).
 - Missing models are downloaded automatically on launch (progress shown in settings / tray tooltip).
 

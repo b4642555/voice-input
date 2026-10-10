@@ -18,13 +18,13 @@ SOURCES = [(rules.MOUSE, "滑鼠鍵"), (rules.KEY, "鍵盤鍵"), (rules.SPEECH, 
 GESTURES = [(rules.TAP, "按一下"), (rules.DOUBLE, "連按兩下"), (rules.HOLD, "按住")]
 SITUATIONS = [(rules.ANY, "不限"), (rules.DICTATED, "剛輸入完"), (rules.SELECTION, "有選取文字")]
 STEP_TYPES = [(rules.COMMAND, "命令"), (rules.KEYS, "按鍵"), (rules.TEXT, "輸入文字"), (rules.WAIT, "等待")]
-COMMANDS = [(rules.RECORD, "錄音"), (rules.PICK, "選字"), (rules.ADD_HOTWORD, "加入熱詞"),
+COMMANDS = [(rules.RECORD, "錄音"), (rules.PICK, "選字"),
             (rules.DELETE_SELECTION, "刪除選取的文字"),
             (rules.DELETE_DICTATION, "刪除剛輸入的文字")]
 _STEP_DEFAULTS = {rules.COMMAND: rules.DELETE_SELECTION, rules.KEYS: "", rules.TEXT: "", rules.WAIT: 100}
 
-HOTWORD_SORTS = [("weight", "權重（高→低）"), ("name", "名稱 A→Z"), ("name_desc", "名稱 Z→A"),
-                 ("date", "日期（新→舊）"), ("date_old", "日期（舊→新）"), ("source", "來源（手動優先）")]
+HOTWORD_SORTS = [("weight", "權重比例（高→低）"), ("name", "名稱 A→Z"), ("name_desc", "名稱 Z→A"),
+                 ("date", "日期（新→舊）"), ("date_old", "日期（舊→新）")]
 _CARD_STYLE = "QFrame#card { border: 1px solid palette(mid); border-radius: 6px; }"
 
 
@@ -123,8 +123,8 @@ class SettingsDialog(QDialog):
         self.autostart = QCheckBox("開機時自動啟動")
         self.mute = QCheckBox("錄音時暫時靜音電腦音效")
         self.mute.setToolTip("錄音期間把喇叭靜音，文字輸入完成後恢復；原本就靜音的話不會動")
-        self.menu_seconds = QSpinBox(minimum=3, maximum=120, suffix=" 秒")
-        self.menu_seconds.setToolTip("選字選單和加入熱詞的提示，沒點的話幾秒後自動關閉")
+        self.describe = QCheckBox("說「詞＋的＋字」時只輸入那個字，例如「節日的節」")
+        self.describe.setToolTip("整句剛好是「某個詞的某個字」才算，輸入的是詞裡讀音相同的那個字")
         memory = QPushButton("開啟紀錄檔", clicked=self._open_memory)
         memory.setToolTip("選字時學到的前後文例子與英文寫法偏好（smart-picks.json）")
         memory_row = QHBoxLayout()
@@ -139,8 +139,8 @@ class SettingsDialog(QDialog):
         form.addRow("", self.mute)
         form.addRow("", self.punct)
         form.addRow("", self.period_comma)
+        form.addRow("", self.describe)
         form.addRow("", self.autostart)
-        form.addRow("選單自動關閉", self.menu_seconds)
         form.addRow("智慧選字", memory_row)
         page = QWidget()
         v = QVBoxLayout(page)
@@ -149,8 +149,7 @@ class SettingsDialog(QDialog):
         v.addWidget(self.status)
 
         self.mic.currentIndexChanged.connect(self._apply)
-        self.menu_seconds.valueChanged.connect(self._apply)
-        for box in (self.punct, self.period_comma, self.autostart, self.mute):
+        for box in (self.punct, self.period_comma, self.describe, self.autostart, self.mute):
             box.toggled.connect(self._apply)
         return page
 
@@ -161,7 +160,7 @@ class SettingsDialog(QDialog):
         self.period_comma.setChecked(self.cfg.period_to_comma)
         self.autostart.setChecked(self.cfg.autostart)
         self.mute.setChecked(self.cfg.mute_while_recording)
-        self.menu_seconds.setValue(self.cfg.menu_seconds)
+        self.describe.setChecked(self.cfg.describe_char)
         self._loading = False
         self.refresh_rules()
         self.refresh_hotwords()
@@ -177,7 +176,7 @@ class SettingsDialog(QDialog):
         self.cfg.period_to_comma = self.period_comma.isChecked()
         self.cfg.autostart = self.autostart.isChecked()
         self.cfg.mute_while_recording = self.mute.isChecked()
-        self.cfg.menu_seconds = self.menu_seconds.value()
+        self.cfg.describe_char = self.describe.isChecked()
         self._save()
 
     def _save(self):
@@ -207,7 +206,7 @@ class SettingsDialog(QDialog):
         top.addWidget(QLabel("排序"))
         top.addWidget(self.hw_sort)
         top.addStretch()
-        self.hw_empty = QLabel("還沒有熱詞。選字時選了詞語，或對選取的文字執行「加入熱詞」，就會加到這裡。")
+        self.hw_empty = QLabel("還沒有熱詞。選字時選了詞語，或在選字選單的輸入框輸入文字，就會加到這裡。")
         self.hw_empty.setStyleSheet("color: gray")
         self.hw_empty.setWordWrap(True)
         page = QWidget()
@@ -228,10 +227,6 @@ class SettingsDialog(QDialog):
             row = QHBoxLayout(card)
             row.setContentsMargins(8, 4, 4, 4)
             row.addWidget(QLabel(h.word), 1)
-            source = QLabel("手動" if h.source == hotwords.MANUAL else "選字")
-            source.setStyleSheet("color: gray")
-            source.setToolTip("手動：用「加入熱詞」加入，權重固定在上限\n選字：選字時選了它，每選一次加權，被選掉時扣分")
-            row.addWidget(source)
             added = QLabel(h.added)
             added.setStyleSheet("color: gray")
             added.setToolTip("加入的日期")
@@ -241,6 +236,11 @@ class SettingsDialog(QDialog):
             weight.setMinimumWidth(56)
             weight.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
             row.addWidget(weight)
+            percent = QLabel(f"{self.hotwords.percent(h):.0f}%")
+            percent.setToolTip("權重佔上限的比例；依權重排序時看這個")
+            percent.setMinimumWidth(40)
+            percent.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            row.addWidget(percent)
             remove = QPushButton("✕", toolTip="刪除這個熱詞", clicked=lambda _=False, w=h.word: self._remove_hotword(w))
             remove.setFixedWidth(28)
             row.addWidget(remove)
@@ -248,18 +248,17 @@ class SettingsDialog(QDialog):
         self.hw_empty.setVisible(not self.hotwords.items)
 
     def _sorted_hotwords(self) -> list:
-        """The list in the chosen order; ties by weight, then name. Names sort by their pinyin, so Chinese words sit
-        among the English ones by sound (程式 near Claude)."""
+        """The list in the chosen order; ties by weight (as a share of the cap: Chinese and English caps differ),
+        then name. Names sort by their pinyin, so Chinese words sit among the English ones by sound (程式 near
+        Claude)."""
         def name(h):
             return "".join(lazy_pinyin(h.word)).casefold()
-        items = sorted(self.hotwords.items, key=lambda h: (-h.weight, name(h)))
+        items = sorted(self.hotwords.items, key=lambda h: (-self.hotwords.percent(h), name(h)))
         order = self.cfg.hotword_sort
         if order in ("name", "name_desc"):
             items.sort(key=name, reverse=order == "name_desc")
         elif order in ("date", "date_old"):
             items.sort(key=lambda h: h.added, reverse=order == "date")
-        elif order == "source":
-            items.sort(key=lambda h: h.source != hotwords.MANUAL)
         return items
 
     def _sort_hotwords(self):

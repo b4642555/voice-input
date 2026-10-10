@@ -9,7 +9,7 @@ box), click (the user clicks: ends what the app knows about the text), tap (one 
 hotkey:NAME (the key or button the next steps press, default mouse_middle), rules:default (the default operations),
 rule:JSON (add an operation, rules.Rule.from_dict), at:WORD (put the caret right after the last WORD; at: puts it at
 the end), say:TEXT (dictate TEXT as if recognized), set:NAME=VALUE (change a setting in memory only) or key:BACK (the
-user presses Backspace n times: key:BACK*3), pick:N / pickw:WORD (click a row of the 選字 menu). Settings are never saved; hotwords and smart picks live in <dir> (hotwords.test.json,
+user presses Backspace n times: key:BACK*3), pick:N / pickw:WORD (click a row of the 選字 menu), type:TEXT (type TEXT in the menu's input box and press Enter). Settings are never saved; hotwords and smart picks live in <dir> (hotwords.test.json,
 smart-picks.test.json, emptied at the start), never in the real files.
 """
 import json
@@ -158,7 +158,7 @@ def _steps(arg: str) -> list[str]:
 def menu() -> str:
     if not A.picker.isVisible():
         return ""
-    return f"   氣泡：{A.picker.title.text()} {A.picker.candidates}"
+    return f"   氣泡：{A.picker.candidates}"
 
 
 def down():
@@ -240,6 +240,15 @@ try:
                 if 0 <= i < len(rows):
                     A.picker._pick(i)
             pump(0.5)
+            print(f"[{step}] {'' if shown else '（沒有氣泡）'} → 文字框：{box.text[:box.caret] + '|' + box.text[box.caret:]!r}"
+                  f"  熱詞：{A.hotwords.bias()}")
+            continue
+        if step.startswith("type:"):
+            shown = A.picker.isVisible()
+            if shown:
+                A.picker.input.setText(step[5:])
+                A.picker._submit()
+            pump(0.6)
             print(f"[{step}] {'' if shown else '（沒有氣泡）'} → 文字框：{box.text[:box.caret] + '|' + box.text[box.caret:]!r}"
                   f"  熱詞：{A.hotwords.bias()}")
             continue

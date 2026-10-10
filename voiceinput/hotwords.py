@@ -1,7 +1,8 @@
 """Hotwords: words that bias X-ASR, each with a weight (2026-10-11, reworked the same day).
 
 Two sources, one list (DATA_DIR/hotword-list.json, shown on the 熱詞 tab with weights):
-- 手動: the custom operation 加入熱詞; weight at the cap.
+- typed (source "manual"): a word typed in the 選字 menu's input box; weight at the cap. (Until 2026-10-11 the
+  custom operation 加入熱詞 added these; the 熱詞 tab no longer shows the source.)
 - 選字: a word of two or more characters (or English) picked in the candidate menu; it starts at half the cap and
   gains 0.5 per pick up to the cap. The word a pick replaced loses 1 and is dropped at 0 (程式 picked over 城市,
   later 城市 over 程式); a 手動 hotword never loses weight.
@@ -76,7 +77,7 @@ class Hotwords:
         return next((h for h in self.items if h.word == word), None)
 
     def add(self, word: str) -> bool:
-        """加入熱詞: a 手動 hotword at the cap (a 選字 one is promoted). False if not eligible."""
+        """A word typed in the 選字 menu: a hotword at the cap (a picked one is promoted). False if not eligible."""
         word = word.strip()
         if not eligible(word):
             return False
@@ -115,6 +116,9 @@ class Hotwords:
         if h is not None:
             self.items.remove(h)
             self.save()
+
+    def percent(self, h: Hotword) -> float:
+        return 100 * h.weight / cap(h.word)
 
     def bias(self) -> list[tuple[str, float]]:
         return [(h.word, h.weight) for h in self.items]

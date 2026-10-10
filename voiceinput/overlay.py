@@ -52,6 +52,16 @@ class Overlay(QWidget):
         self._fade.setEndValue(0.0)
         self._fade.start()
 
+    def hide_now(self):
+        """Hide without the fade. Before a terminal edit: it blocks the main thread while UI Automation reads the
+        terminal, and a fading overlay over the point it reads (Claude Code's input box sits at the bottom of the
+        screen, like the overlay) made UIA wait for our own frozen window until the 4s timeout (2026-10-11: the
+        edit failed with 找不到選取的文字 and the three dots stood still)."""
+        self._state = self.IDLE
+        self._fade.stop()
+        self._timer.stop()
+        self.hide()
+
     # --- internals ---
     def _set_state(self, state):
         was_hidden = self._state == self.IDLE or not self.isVisible()

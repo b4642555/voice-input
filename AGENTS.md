@@ -100,9 +100,10 @@ CJK/ASCII spacing → trailing punctuation.
 ## Settings window (tabs since 2026-10-11)
 
 Four tabs, sized for the log: 一般 (microphone, "mute the speakers while recording", punctuation names, "selected 。 →
-，", autostart, menu timeout (default 10s, back 2026-10-11, for the 選字 menu and the hotword notice), a button that
-opens smart-picks.json), 辨識紀錄 (the transcript log), 自訂操作 (custom operations, below) and 熱詞 (the hotword list:
-source, date added, weight; remove only; a 排序 drop-down: weight, name A→Z / Z→A by pinyin, date, source; remembered). Mute (2026-10-06, `mute.py`): Core Audio via
+，", "節日的節" (described characters), autostart, a button that opens smart-picks.json; the menu timeout was
+removed 2026-10-11), 辨識紀錄 (the transcript log), 自訂操作 (custom operations, below) and 熱詞 (the hotword list:
+date added, weight / cap and its percentage; remove only; the source is not shown since 2026-10-11; a 排序
+drop-down: weight percentage (the caps differ), name A→Z / Z→A by pinyin, date; remembered). Mute (2026-10-06, `mute.py`): Core Audio via
 comtypes; muted when the recording indicator shows, unmuted once the text is pasted or the press ends in nothing; a
 mute the user set is left alone. Selection edits and on-screen terms are always on.
 
@@ -112,7 +113,7 @@ mute the user set is left alone. Selection edits and on-screen terms are always 
 (migrated by `Config.load`). A rule: trigger (滑鼠鍵: middle / upper / lower side button; 鍵盤鍵: CapsLock, right Alt,
 right Ctrl, Insert, ScrollLock, Pause, F1-F24; 說出: an utterance that is exactly the phrase) → 按法 (按一下 / 連按兩下
 / 按住; not for speech) → 情境 (不限 / 剛輸入完 / 有選取文字; the most specific wins) → steps run in order: 命令 (錄音,
-選字, 加入熱詞, 刪除選取的文字, 刪除剛輸入的文字), 按鍵 (a captured combination such as Ctrl+Z, sent with SendInput), 輸入文字 (pasted, counts as a dictation),
+選字, 刪除選取的文字, 刪除剛輸入的文字; 加入熱詞 was removed 2026-10-11 and `rules.migrate` drops it), 按鍵 (a captured combination such as Ctrl+Z, sent with SendInput), 輸入文字 (pasted, counts as a dictation),
 等待 (ms). Steps before 錄音 run at the start, those after it once the text is pasted (skipped if nothing was said).
 Hold + 錄音 records while held; tap / double tap + 錄音 starts there and the next press of any bound key stops it.
 刪除選取的文字 works in terminals too (why it is a command, not the Delete key); 刪除剛輸入的文字 deletes the last
@@ -133,7 +134,14 @@ rule records any more, a tray notice warns that dictation is impossible (the use
 ## 選字, smart picks and hotwords (2026-10-11, reworked the same day)
 
 The one popup is the 選字 menu (`picker.py`, the pre-lean look; a redesign is planned). The 加入熱詞 notice with 撤銷
-lived a few hours: the user wants hotwords added quietly (they come from deliberate picks and commands).
+lived a few hours: the user wants hotwords added quietly (they come from deliberate picks and typing).
+- **The menu** (reworked 2026-10-11, the user's design): no title row; on top an input box as tall as a row,
+  placeholder 輸入加入熱詞. A click there activates the menu (WS_EX_NOACTIVATE is lifted, SetForegroundWindow) so an
+  input method works; Enter hides it, gives focus back to the window that had it and, 150ms later, replaces the
+  selection with the text like a pick and makes it a hotword at the cap (a single character is learned as a smart
+  pick instead); Esc closes. No timeout: any click outside the menu or key in another window closes it (mouse /
+  keyboard hooks; clicks in it and keys typed into it leave the session and the terminal selection alone), and an
+  activated menu closes when it loses focus. Not yet tried with a real IME and a terminal selection.
 - **選字** (command): the menu under the selection. One Chinese character: what the smart picks decide here, what
   was picked for it before, then same-sounding characters. A Chinese word: homophones (`candidates.ranked`), the same reading with tones
   first (the user's choice, 2026-10-11), then without tones, then fuzzy; within each: hotwords by weight, common
@@ -147,9 +155,9 @@ lived a few hours: the user wants hotwords added quietly (they come from deliber
   formatting when at least one token agrees, most agreement wins, left alone on a tie. Phrases and English were
   learned for a few hours the same day and are ignored on load.
 - **Hotwords** (`hotwords.py`, DATA_DIR/hotword-list.json, one list with weights on the 熱詞 tab, removable; the old
-  key -> value hotwords.json is not read). 手動 (加入熱詞) sits at the cap; 選字 (a word of 2+ characters or English
-  picked in the menu) starts at half the cap, +0.5 per pick, and the word a pick replaced loses 1 (dropped at 0;
-  手動 never loses). Caps: Chinese 5, English 3. Single characters never become hotwords. No replacement after
+  key -> value hotwords.json is not read). A word typed in the menu (source "manual"; until 2026-10-11 the 加入熱詞
+  command) sits at the cap; 選字 (a word of 2+ characters or English picked in the menu) starts at half the cap,
+  +0.5 per pick, and the word a pick replaced loses 1 (dropped at 0; typed ones never lose). Caps: Chinese 5, English 3. Single characters never become hotwords. No replacement after
   recognition: words are left to X-ASR biasing. A biasing word that another one starts with is not sent (剪貼 next to
   剪貼簿 made X-ASR write 剪貼布).
 - **Why Chinese biasing works now** (dev experiment by a subagent, 2026-10-11, Windows TTS, 16 target words + 4
@@ -212,6 +220,12 @@ removed the same day they were built: the user corrects by selecting with the mo
   punctuation names (when on) at score 5. Not by audio length: TTS 換行 alone was 1.7s with its silences. Fixed
   據點 -> 句點, 珊姐好 -> 刪節號; cost: 問好 / 分好 said alone become 問號 / 分號. Words of one repeated character
   (點點點) are not boosted: they ran away (點點點點點點點點點).
+- **Described characters** (`edit.described`, 2026-10-11, the user picked it among ideas for exact text by voice;
+  a 一般 checkbox, on by default): an utterance that is exactly <words>的<character> types only that character when
+  the last 4 characters before 的 contain it, or one that sounds like it (X-ASR wrote 一張的章: 張 is typed). Also
+  這個字是教育的育, 偉是偉大的偉 (said that way in the log before the feature existed). Typed as is, like a
+  punctuation mark (replaces a selection, no smart picks). No false hits on 3182 logged results; TTS 節日的節,
+  薔薇的薇, 這個字是教育的育 right (程式的程 was heard as 城市的城 and typed 城).
 - **Bopomofo spelling** (拼讀: ㄔ ㄤ 昌 types 昌) was built and reverted on 2026-10-11 (db3f0e7, c0ae24e): with a real
   voice X-ASR heard most symbol names as English letters (ㄐ ㄧ ㄝ → "G E A"), and there is no way to force Chinese,
   so it missed too often for a feature meant for frequent use (the user's verdict).
@@ -240,6 +254,11 @@ removed the same day they were built: the user corrects by selecting with the mo
   it heard other Chinese characters and its version is the likelier word (a dictionary word where ours is not, or
   ≥20× as frequent), a menu offered it. Rare, because both models often share an error (主機版, 剪貼布). Guessing
   from the dictionary alone was rejected: every flag on 80 real utterances was wrong.
+- **Terminal edits and the overlay** (2026-10-11): a terminal edit runs on the main thread, which waits up to 4s
+  for the arrow keys to bring the cursor there (UI Automation on a thread). The overlay's 140ms fade-out was still
+  running over Claude Code's input box (both sit at the bottom of the screen), so UIA's ElementFromPoint waited for
+  our own frozen window until the timeout: the three dots stood still and 找不到選取的文字 appeared. The overlay is
+  now hidden at once (`Overlay.hide_now`) before a terminal edit, delete or pick.
 - **Clipboard**: every format is restored after a paste (images copied before dictating used to be lost).
 - Tests without a microphone, with Windows TTS audio (zh-TW Hanhan voice via `dev/tts.ps1`):
   `dev/headless.py` runs the real App against a simulated text box; use it by default. Never let a test write the
