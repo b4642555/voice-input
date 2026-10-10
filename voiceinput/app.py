@@ -5,7 +5,7 @@ What an utterance does:
 2. Otherwise it is dictated: formatted and pasted.
 An utterance that is exactly a custom operation's phrase (換行, 送出 …) runs that operation instead, and a bare
 punctuation name (逗號, 句號 …) is typed as the mark (edit.symbol; a setting since 2026-10-11). Dictated text then
-goes through the smart picks (memory.py) and the absolute Chinese hotwords (hotwords.py).
+goes through the smart picks (memory.py, single characters only); words are left to X-ASR hotword biasing.
 
 What the mouse buttons and keys do is set by custom operations (rules.py, 2026-10-11). The defaults: hold the
 middle button to record; double click it on a selection to delete it, or right after a dictation to delete that
@@ -13,8 +13,8 @@ middle button to record; double click it on a selection to delete it, or right a
 press records again: delete and say it again. A tap on a selection opens 選字. Gestures no operation takes are
 given back to the key.
 
-Popups (picker.py): the 選字 candidate menu and the notice after 加入熱詞 (with 撤銷); both came back 2026-10-11 after
-the lean branch removed every popup, and a redesign is planned. The second opinion (SenseVoice + suspects.py) is
+The one popup (picker.py) is the 選字 candidate menu; it came back 2026-10-11 after the lean branch removed every
+popup, and a redesign is planned (the 加入熱詞 notice with 撤銷 lived for a few hours the same day). The second opinion (SenseVoice + suspects.py) is
 commented out below.
 """
 import logging
@@ -130,7 +130,7 @@ class App(QObject):
         self._could_record = rules.can_record(self.cfg.rules)
         self.hotwords = Hotwords()
         self.memory = Memory()
-        self._menu = None   # ("pick", Selection) | ("hotword", word, spellings it replaced): what the popup shows
+        self._menu = None                        # ("pick", Selection) while the 選字 menu is up
 
         self.icon_idle = make_icon(QColor(235, 235, 235) if self._dark_taskbar() else QColor(40, 40, 40))
         self.icon_rec = make_icon(QColor(255, 69, 58))
@@ -139,7 +139,6 @@ class App(QObject):
         self.picker = Picker()
         self.picker.timeout_ms = self.cfg.menu_seconds * 1000
         self.picker.picked.connect(self.on_menu_pick)
-        self.picker.undone.connect(self.on_hotword_undo)
         self.settings = SettingsDialog(self.cfg, self.hotwords, self.memory.path)
         self.settings.applied.connect(self.apply_settings)
 
@@ -541,7 +540,7 @@ class App(QObject):
             ctx = press.probe.result()
             press.resolved.wait(3.0)
             t0 = time.monotonic()
-            raw = rec.recognize(audio, self.hotwords.bias() + [(t, _SCREEN_TERM_SCORE) for t in ctx.terms])
+            raw = rec.recognize(audio, _bias(self.hotwords.bias() + [(t, _SCREEN_TERM_SCORE) for t in ctx.terms]))
             t_asr = time.monotonic() - t0
             log.info("asr %.2fs: %s%s", t_asr, raw, f" (terms: {len(ctx.terms)})" if ctx.terms else "")
             # no sentence-final punctuation when the caret has text on both sides: the user is inserting
@@ -557,9 +556,9 @@ class App(QObject):
                 return
             sym = edit.symbol(formatted) if self.cfg.punctuation_names else None
             text = sym or formatted
-            if not sym:   # smart picks, then the hotwords, which are absolute
+            if not sym:   # smart picks (single characters)
                 prefix = ctx.selection.before if selected else (ctx.caret[0] if ctx.caret else "")
-                text = self.hotwords.apply(self.memory.apply(text, prefix))
+                text = self.memory.apply(text, prefix)
             entry = {"time": stamp, "asr": to_traditional(raw), "asr_s": t_asr, "fmt": text}
             if selected:
                 self._edit_job(ctx.selection, text, bool(sym), entry, press)
@@ -637,16 +636,26 @@ class App(QObject):
         threading.Thread(target=lambda: self.candidates_ready.emit(sel, self._menu_words(sel)), daemon=True).start()
 
     def _menu_words(self, sel) -> list[str]:
-        """Rows for the selection: what the smart picks decide here, everything picked for it before, then
-        same-sounding words (Chinese) or ways of writing it, the most picked style first (English)."""
+        """Rows for the selection. One Chinese character: what the smart picks decide here, everything picked for it
+        before, then same-sounding characters. A word: same-sounding words (Chinese) or ways of writing it, the most
+        picked style first (English), with hotwords among them first, heaviest first."""
         text = sel.text.strip()
         try:
-            key = reading_key(text)
-            line = sel.before + sel.text + sel.after
-            start = len(sel.before) + sel.text.index(text)
-            left, right = situation(line, start, start + len(text))
-            rows = [self.memory.lookup(key, left, right, single=len(text) == 1)] + self.memory.values(key)
-            rows += self.memory.ordered_variants(text) if is_latin(text) else candidates.homophones(text)
+            if is_latin(text):
+                rows = self.memory.ordered_variants(text)
+            else:
+                rows = candidates.homophones(text)
+                key = reading_key(text)
+                rows += [h.word for h in self.hotwords.items if h.word != text and reading_key(h.word) == key]
+            if len(text) == 1:
+                key = reading_key(text)
+                line = sel.before + sel.text + sel.after
+                start = len(sel.before) + sel.text.index(text)
+                left, right = situation(line, start, start + 1)
+                rows = [self.memory.lookup(key, left, right, single=True)] + self.memory.values(key) + rows
+            else:
+                weights = self.hotwords.weights_for(rows)
+                rows.sort(key=lambda w: -weights.get(w, 0))   # stable: the rest keep their order
         except Exception:
             log.exception("candidates failed")
             rows = []
@@ -661,6 +670,8 @@ class App(QObject):
             self.picker.show_candidates(sel.text.strip(), words)
 
     def on_menu_pick(self, row: int):
+        """A pick replaces the selection. A single character is learned with its context (smart picks); a word
+        gains hotword weight and the word it replaced loses some."""
         menu, words = self._menu, self.picker.candidates
         self._menu = None
         if not menu or menu[0] != "pick" or not 0 <= row < len(words):
@@ -675,41 +686,24 @@ class App(QObject):
         line = sel.before + sel.text + sel.after
         start = len(sel.before) + lead
         self.memory.record(line, start, start + len(text), word)
+        self.hotwords.picked(text, word)
+        self.settings.refresh_hotwords()
         self.session.replaced_selection(sel.before, word, foreground())
         self.record.emit({"time": time.strftime("%H:%M:%S"), "asr": "", "asr_s": None, "fmt": "",
                           "edit": f"選字：{text} → {word}"})
-        if is_latin(word):    # an English spelling picked is the user's: it becomes a hotword (notice with 撤銷)
-            removed = self.hotwords.add_spelling(word)
-            if removed is not None:
-                log.info("hotword added from a pick: %s (replacing %s)", word, removed)
-                self._menu = ("hotword", word, removed)
-                self.picker.show_notice("已加入熱詞", word, sel.rect, "撤銷")
-                self.settings.refresh_hotwords()
 
     def _add_hotword(self, sel):
-        """加入熱詞: the selection becomes a hotword at once; the notice under it offers 撤銷."""
+        """加入熱詞: the selection becomes a hotword at the highest weight, quietly (no notice since 2026-10-11:
+        the user chose it on purpose). Single characters are skipped."""
         if sel is None or not sel.text.strip():
             log.info("add hotword: nothing selected")
             return
         word = sel.text.strip()
         if self.hotwords.add(word):
             log.info("hotword added: %s", word)
-            self._menu = ("hotword", word, [])
-            self.picker.show_notice("已加入熱詞", word, sel.rect, "撤銷")
             self.settings.refresh_hotwords()
         else:
-            self._menu = None
-            self.picker.show_notice("已經是熱詞", word, sel.rect)
-
-    def on_hotword_undo(self):
-        menu, self._menu = self._menu, None
-        if menu and menu[0] == "hotword":
-            _, word, replaced = menu
-            log.info("hotword undone: %s", word)
-            self.hotwords.remove(word)
-            for w in replaced:       # the spellings it had replaced come back
-                self.hotwords.add(w)
-            self.settings.refresh_hotwords()
+            log.info("add hotword: %r skipped (a single character)", word)
 
     # --- utterances on a selection ---
     def _edit_job(self, sel, text: str, sym: bool, entry: dict, press: _Press):
@@ -782,6 +776,20 @@ class App(QObject):
             self._mouse.stop()
         self.tray.hide()
         self.qapp.quit()
+
+
+def _bias(words: list[tuple[str, float]]) -> list[tuple[str, float]]:
+    """Biasing words without a word another one starts with: with 剪貼 and 剪貼簿 both listed, X-ASR wrote 剪貼布
+    (the short one is matched first and takes the boost; dev experiment 2026-10-11). The first of duplicates wins."""
+    seen = {w.casefold() for w, _ in words}
+    out, kept = [], set()
+    for w, score in words:
+        k = w.casefold()
+        if k in kept or any(o != k and o.startswith(k) for o in seen):
+            continue
+        kept.add(k)
+        out.append((w, score))
+    return out
 
 
 def _delete_selection(sel) -> bool:

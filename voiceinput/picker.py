@@ -1,7 +1,7 @@
 """Small dark menu that never takes focus, so the target app keeps its caret and selection.
 
-Two uses (2026-10-11; the look is the one from before the lean branch, a redesign is planned): the 選字 candidate
-list, and a notice that a hotword was added with a 撤銷 button. Both are answered with the mouse only (decided
+The 選字 candidate list (2026-10-11; the look is the one from before the lean branch, a redesign is planned).
+It is answered with the mouse only (decided
 2026-09-29: short spoken answers like 對 / 第二個 were often misheard). A thin bar on the bottom edge shrinks as the
 timeout runs out."""
 import time
@@ -13,13 +13,10 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QStyle, QStyleOp
 _STYLE = """
 QWidget#picker { background: #202024; border: 1px solid #3a3a40; border-radius: 8px; }
 QLabel { color: #9a9aa2; padding: 2px 4px; font-size: 12px; }
-QLabel#text { color: #f2f2f2; font-size: 14px; }
 QPushButton { color: #f2f2f2; background: transparent; border: none; border-radius: 5px;
               padding: 4px 10px; text-align: left; font-size: 15px; }
 QPushButton:hover { background: #3a3a44; }
 QPushButton#close { color: #9a9aa2; padding: 2px 6px; font-size: 12px; }
-QPushButton#undo { color: #f0b37e; font-size: 14px; padding: 2px 10px; text-align: center; }
-QPushButton#undo:hover { background: #4a3a2c; }
 """
 _MAX_WIDTH = 360
 _RADIUS = 8
@@ -51,7 +48,6 @@ class _Frame(QWidget):
 
 class Picker(QWidget):
     picked = Signal(int)      # 0-based row
-    undone = Signal()         # 撤銷 clicked in a notice
 
     def __init__(self):
         super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
@@ -101,22 +97,6 @@ class Picker(QWidget):
             self._shrink()
             self._clamp()
 
-    def show_notice(self, title: str, text: str, rect, button: str = ""):
-        """A notice: title, text and optionally a button (撤銷) that emits undone; ✕ or the timeout just close it."""
-        self.candidates = []
-        self._clear()
-        self.title.setText(title)
-        row = QWidget()
-        h = QHBoxLayout(row)
-        h.setContentsMargins(4, 0, 0, 0)
-        h.addWidget(QLabel(text, objectName="text"), 1)
-        if button:
-            h.addWidget(QPushButton(button, objectName="undo", clicked=self._undo))
-        self.rows.addWidget(row)
-        self._shrink()
-        self._start_timer(self.timeout_ms)
-        self._place(rect)
-
     def _start_timer(self, ms: int):
         self._timer.start(ms)
         self._total = ms / 1000
@@ -155,9 +135,6 @@ class Picker(QWidget):
         self.hide()
         self.picked.emit(i)
 
-    def _undo(self):
-        self.hide()
-        self.undone.emit()
 
     def _place(self, rect):
         """rect: selection bounds in physical screen pixels (x, y, w, h) from UI Automation, or None (then next

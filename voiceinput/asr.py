@@ -17,7 +17,7 @@ _TAGS = re.compile(r"<\|[^|]*\|>")
 # Hotword biasing (X-ASR only). Modified beam search with per-utterance hotwords costs about the same as greedy
 # search (tested 2026-09-29: 0.11-0.22s either way on 3s clips). Latin terms work well (L M -> LLM,
 # work tree -> worktree; cloud code -> Claude Code needs score 3). Chinese biasing is weak (張雨薇 -> 張玉薇 at
-# score 3, 城市 never became 程式). Used for the English terms visible on screen (app.py).
+# score 3, 城市 never became 程式) -- at max_active_paths 4; see _xasr. Used for hotwords and on-screen terms.
 _HOTWORD_SCORE = 2.0
 _LATIN_TERM = re.compile(r"^[A-Za-z][A-Za-z0-9 .'+#-]*$")
 
@@ -88,7 +88,10 @@ def _xasr(d):
         modeling_unit="bpe",
         bpe_vocab=_bpe_vocab(d),
         decoding_method="modified_beam_search",
-        max_active_paths=4,
+        # 12, not 4: the beam keeps the top k by the model's own score before any hotword boost is added, so a
+        # Chinese word that misses the first cut is never boosted (程式 never won at 4 whatever the score; 16/16
+        # TTS targets at 12 with score 5; dev experiment 2026-10-11). 14s of audio: 0.62s -> 0.80s.
+        max_active_paths=12,
         hotwords_score=_HOTWORD_SCORE,
     )
 

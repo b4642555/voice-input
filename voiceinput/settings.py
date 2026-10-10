@@ -1,5 +1,5 @@
 """Settings window in four tabs: 一般 (general), 辨識紀錄 (live transcript log), 自訂操作 (custom operations,
-rules.py) and 熱詞 (hotwords.py: listed and removable; added only by the 加入熱詞 operation). Every change is applied
+rules.py) and 熱詞 (hotwords.py: every word with its weight and source, removable). Every change is applied
 and saved immediately."""
 import html
 import os
@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDia
                                QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea, QSpinBox, QTabWidget,
                                QTextBrowser, QVBoxLayout, QWidget)
 
-from . import audio, rules
+from . import audio, hotwords, rules
 from .keys import KEY_TRIGGERS, MOUSE_TRIGGERS, combo_text, is_modifier
 from .rules import Rule, Step
 
@@ -198,7 +198,7 @@ class SettingsDialog(QDialog):
         v.addStretch(1)
         scroll = QScrollArea(widgetResizable=True, frameShape=QFrame.NoFrame)
         scroll.setWidget(inner)
-        self.hw_empty = QLabel("還沒有熱詞。在「自訂操作」加入「加入熱詞」命令後，選取文字執行它就會加到這裡。")
+        self.hw_empty = QLabel("還沒有熱詞。選字時選了詞語，或對選取的文字執行「加入熱詞」，就會加到這裡。")
         self.hw_empty.setStyleSheet("color: gray")
         self.hw_empty.setWordWrap(True)
         page = QWidget()
@@ -212,17 +212,26 @@ class SettingsDialog(QDialog):
             w = self.hw_list.takeAt(0).widget()
             w.setParent(None)
             w.deleteLater()
-        for word in self.hotwords.words:
+        for h in sorted(self.hotwords.items, key=lambda h: (-h.weight, h.word)):
             card = QFrame(objectName="card")
             card.setStyleSheet(_CARD_STYLE)
             row = QHBoxLayout(card)
             row.setContentsMargins(8, 4, 4, 4)
-            row.addWidget(QLabel(word), 1)
-            remove = QPushButton("✕", toolTip="刪除這個熱詞", clicked=lambda _=False, w=word: self._remove_hotword(w))
+            row.addWidget(QLabel(h.word), 1)
+            source = QLabel("手動" if h.source == hotwords.MANUAL else "選字")
+            source.setStyleSheet("color: gray")
+            source.setToolTip("手動：用「加入熱詞」加入，權重固定在上限\n選字：選字時選了它，每選一次加權，被選掉時扣分")
+            row.addWidget(source)
+            weight = QLabel(f"{h.weight:g} / {hotwords.cap(h.word):g}")
+            weight.setToolTip("權重 / 上限（中文 5、英文 3）")
+            weight.setMinimumWidth(56)
+            weight.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            row.addWidget(weight)
+            remove = QPushButton("✕", toolTip="刪除這個熱詞", clicked=lambda _=False, w=h.word: self._remove_hotword(w))
             remove.setFixedWidth(28)
             row.addWidget(remove)
             self.hw_list.addWidget(card)
-        self.hw_empty.setVisible(not self.hotwords.words)
+        self.hw_empty.setVisible(not self.hotwords.items)
 
     def _remove_hotword(self, word: str):
         self.hotwords.remove(word)

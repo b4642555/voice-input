@@ -1,10 +1,14 @@
-"""Smart picks (智慧選字, 2026-10-11): what the user picked in the candidate menu, learned like an input method.
+"""Smart picks (智慧選字, 2026-10-11): single characters picked in the candidate menu, learned like an input method.
+
+Only single Chinese characters (在 / 再) since the same day (the user's choice): a word of two or more characters
+picked in 選字 raises its X-ASR hotword weight instead (hotwords.py), and nothing is replaced after recognition.
 
 Modelled on art-shuangpin's core/user_preferences (its docs/spec.md §7). Every pick is one EXAMPLE: "the span that
 sounds like <key>, between <left> and <right>, was picked as <value>". key is the span's reading (toned pinyin per
 character, casefolded English words: "cheng2 shi4", "voice input"); left is up to two characters in front, nearest
 last, `^` for "nothing usable in front" (the start, punctuation, English); right is up to two toneless readings after
-it, nearest first. Readings on the right because what follows may be misheard too.
+it, nearest first. Readings on the right because what follows may be misheard too. (The rules below were written
+for phrases too; with single characters only, the phrase cases no longer arise.)
 
 After formatting, every span whose reading has examples is matched: walking outward from the span on each side,
 agreeing tokens count until the first disagreement. Most agreement wins, then more on the right, then the boundary,
@@ -126,6 +130,8 @@ class Memory:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             for ex in data.get("examples", []):
+                if not _single(ex["value"]):
+                    continue          # phrases and English were learned before the change to single characters
                 self.examples.setdefault(ex["key"], []).append(
                     {"value": ex["value"], "left": list(ex["left"]), "right": list(ex["right"]),
                      "serial": int(ex["serial"])})
@@ -177,7 +183,9 @@ class Memory:
         """The user picked value for text[start:end] (the selection, with its line around it)."""
         old = text[start:end]
         key = reading_key(old)
-        if not key:
+        if not key or not (_single(old) and _single(value)):
+            self._learn_style(old, value)
+            self.save()
             return
         left, right = situation(text, start, end)
         new = {"value": value, "left": left, "right": right, "serial": self._serial}
@@ -196,7 +204,7 @@ class Memory:
         with self._lock:
             if not self.examples:
                 return text
-            lengths = sorted({len(k.split(" ")) for k in self.examples}, reverse=True)
+            lengths = [1]
         full = prefix + text
         toks = tokens(full)
         out, pos, i = [], len(prefix), 0
@@ -205,7 +213,7 @@ class Memory:
         while i < len(toks):
             for n in lengths:
                 run = toks[i:i + n]
-                if len(run) < n or not _contiguous(full, run):
+                if len(run) < n or run[0].kind != "cjk" or not _contiguous(full, run):
                     continue
                 key = " ".join(t.reading for t in run)
                 if key not in self.examples:
@@ -238,6 +246,10 @@ class Memory:
         with self._lock:
             vs.sort(key=lambda sv: -self.styles.get(sv[0], 0))   # stable: default order breaks ties
         return [form for _, form in vs]
+
+
+def _single(text: str) -> bool:
+    return len(text) == 1 and bool(re.match(r"[㐀-䶿一-鿿]", text))
 
 
 def _contiguous(text: str, run: list[Token]) -> bool:

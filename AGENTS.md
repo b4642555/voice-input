@@ -31,7 +31,7 @@ off: SenseVoice is not loaded and the suspects code in `app.py` is commented out
 `candidates.homophones`, which it needs, are kept). Tray error notices (model not ready, mic failure, terminal
 selection lost) stay. Sections below describe
 the branch; history of the removed features is in git (main, up to 71e5516). Brought back 2026-10-11 in a new form:
-the 選字 menu (old look, `picker.py`), hotwords (a plain word list) and pick memory (`memory.py`); see below.
+the 選字 menu (old look, `picker.py`), hotwords (a weighted word list) and pick memory (`memory.py`); see below.
 
 ## Platform
 
@@ -63,8 +63,8 @@ Memory with everything on: ~1.1GB (was ~3GB with the LLM). The word index held a
 
 ## Text pipeline
 
-`asr.py` (raw text) → `textfmt.format_text` → smart picks (`memory.apply`) → Chinese hotwords (`hotwords.apply`,
-absolute, so last) → paste. Order inside `format_text` matters: s2tw → filler
+`asr.py` (raw text, biased toward hotwords and on-screen terms) → `textfmt.format_text` → smart picks
+(`memory.apply`, single characters) → paste. Order inside `format_text` matters: s2tw → filler
 removal → disfluencies → 百分之 → numerals → spelled letters → 點 → percent → number+letter → English punctuation →
 CJK/ASCII spacing → trailing punctuation.
 
@@ -130,29 +130,35 @@ still works, 0.35s late when a double tap is bound; a hold is given back as one 
 錄音 in a speech rule, empty combination, a duplicate of an earlier rule) are flagged in red and skipped. When no
 rule records any more, a tray notice warns that dictation is impossible (the user's request).
 
-## 選字, smart picks and hotwords (2026-10-11)
+## 選字, smart picks and hotwords (2026-10-11, reworked the same day)
 
-Only two popups exist (`picker.py`, the pre-lean look; a redesign is planned): the 選字 menu and the hotword notice.
-- **選字** (command): the menu under the selection lists what the smart picks decide in this context, everything
-  picked for that reading before (newest first), then homophones (`candidates.homophones`, Chinese: common words (frequency ≥ 5) first, since McBopomofo
-  lists obscure entries like 逆號 at 1; then same reading with tones, without, fuzzy; then frequency) or ways of writing
-  English (`memory.variants`: Claude / claude / CLAUDE; voiceInput / VoiceInput / Voice Input / voice input / VOICE
-  INPUT / voice_input / voice-input / voiceinput), the styles the user picks most first, counted apart for one word
-  and for several. 8 rows. A pick replaces the selection and is recorded.
-- **Smart picks** (`memory.py`, DATA_DIR/smart-picks.json, one example per line so the user can read it): modelled on
-  art-shuangpin's core/user_preferences (spec §7): an example is key (toned pinyin per character / casefolded words)
-  + left (two characters, `^` boundary) + right (two toneless readings) + value. Applied after formatting: most
-  agreeing tokens wins, then the right side, the boundary, the newest; one Chinese character needs an agreeing token
-  and is left alone on a tie; a phrase applies anywhere (the user's choice: picked once, used everywhere until picked
-  back elsewhere). A pick deletes older examples with another value whose context does not conflict.
-- **Hotwords** (`hotwords.py`, DATA_DIR/hotword-list.json; the old key -> value hotwords.json is not read): added by
-  the 加入熱詞 command, and by picking an English spelling in 選字 (the user's spelling; it replaces other spellings
-  of the same words). Added at once; the notice offers 撤銷 (which also brings replaced spellings back). Removed on
-  the 熱詞 tab. All bias X-ASR at 3.0, the
-  highest. Chinese ones are also absolute (the user's choice, because X-ASR barely follows Chinese biasing in our
-  tests): any run read exactly like one, tones included, becomes it, after the smart picks.
-- Dropped the same day: picks raising a word's X-ASR bias (a hidden weight); Chinese biasing is too weak and the user
-  chose not to keep it for English alone.
+The one popup is the 選字 menu (`picker.py`, the pre-lean look; a redesign is planned). The 加入熱詞 notice with 撤銷
+lived a few hours: the user wants hotwords added quietly (they come from deliberate picks and commands).
+- **選字** (command): the menu under the selection. One Chinese character: what the smart picks decide here, what
+  was picked for it before, then same-sounding characters. A word: homophones (`candidates.homophones`: common words
+  (frequency ≥ 5) first, since McBopomofo lists obscure entries like 逆號 at 1; then same reading with tones,
+  without, fuzzy; then frequency) or English spellings (`memory.variants`: Claude / claude / CLAUDE; voiceInput /
+  VoiceInput / Voice Input / voice input / VOICE INPUT / voice_input / voice-input / voiceinput, the styles picked
+  most first, counted apart for one word and for several), hotwords among them first by weight. 8 rows.
+- **Smart picks** (`memory.py`, DATA_DIR/smart-picks.json, one example per line, opened from the 一般 tab): single
+  Chinese characters only (the user's choice). Modelled on art-shuangpin's core/user_preferences (spec §7): key
+  (toned pinyin) + left (two characters, `^` boundary) + right (two toneless readings) + value; applied after
+  formatting when at least one token agrees, most agreement wins, left alone on a tie. Phrases and English were
+  learned for a few hours the same day and are ignored on load.
+- **Hotwords** (`hotwords.py`, DATA_DIR/hotword-list.json, one list with weights on the 熱詞 tab, removable; the old
+  key -> value hotwords.json is not read). 手動 (加入熱詞) sits at the cap; 選字 (a word of 2+ characters or English
+  picked in the menu) starts at half the cap, +0.5 per pick, and the word a pick replaced loses 1 (dropped at 0;
+  手動 never loses). Caps: Chinese 5, English 3. Single characters never become hotwords. No replacement after
+  recognition: words are left to X-ASR biasing. A biasing word that another one starts with is not sent (剪貼 next to
+  剪貼簿 made X-ASR write 剪貼布).
+- **Why Chinese biasing works now** (dev experiment by a subagent, 2026-10-11, Windows TTS, 16 target words + 4
+  counter-examples; the scripts were deleted): sherpa-onnx's modified beam search keeps the top max_active_paths
+  tokens by the model's own score and only then adds the hotword boost (offline-transducer-modified-beam-search-
+  decoder.cc), so at 4 a word that missed the first cut was never boosted (程式 failed at any score). At 12 with
+  score 5: 16/16, no false hits; score 6: 台北是一個美麗的城市 → 程式; score 8: English broke (a long sentence came out
+  as "VoiceIn。"). Encoding stays as it was: Simplified, characters space-separated (every CJK token is "▁X"; ▁ in
+  the hotword does nothing, the whole word in one piece encodes wrongly, Traditional works only where the glyphs are
+  the same). 14s of audio 0.62s → 0.80s. Not yet checked with real recordings.
 
 ## Voice edits on selected text
 
