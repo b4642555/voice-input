@@ -134,7 +134,8 @@ rule records any more, a tray notice warns that dictation is impossible (the use
 
 Only two popups exist (`picker.py`, the pre-lean look; a redesign is planned): the 選字 menu and the hotword notice.
 - **選字** (command): the menu under the selection lists what the smart picks decide in this context, everything
-  picked for that reading before (newest first), then homophones (`candidates.homophones`, Chinese) or ways of writing
+  picked for that reading before (newest first), then homophones (`candidates.homophones`, Chinese: common words (frequency ≥ 5) first, since McBopomofo
+  lists obscure entries like 逆號 at 1; then same reading with tones, without, fuzzy; then frequency) or ways of writing
   English (`memory.variants`: Claude / claude / CLAUDE; voiceInput / VoiceInput / Voice Input / voice input / VOICE
   INPUT / voice_input / voice-input / voiceinput), the styles the user picks most first, counted apart for one word
   and for several. 8 rows. A pick replaces the selection and is recorded.
