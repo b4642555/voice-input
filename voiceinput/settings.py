@@ -18,10 +18,6 @@ STEP_TYPES = [(rules.COMMAND, "命令"), (rules.KEYS, "按鍵"), (rules.TEXT, "�
 COMMANDS = [(rules.RECORD, "錄音"), (rules.DELETE, "刪除")]
 _STEP_DEFAULTS = {rules.COMMAND: rules.DELETE, rules.KEYS: "", rules.TEXT: "", rules.WAIT: 100}
 
-RULES_NOTE = ("每條操作：觸發方式 → 按法 → 情境，然後依序執行步驟。\n"
-              "錄音：按住時錄到放開；按一下 / 連按兩下則再按一次結束。錄音後面的步驟在文字輸入後才執行。\n"
-              "刪除：有選取文字就刪掉它，否則刪掉剛輸入的文字。同一個鍵連按兩下刪除、按住錄音時，第二下按住可刪除後重講。\n"
-              "情境較明確的優先（有選取文字 > 剛輸入完 > 不限）；沒有設定的按法照原本的按鍵功能。")
 _CARD_STYLE = "QFrame#card { border: 1px solid palette(mid); border-radius: 6px; }"
 
 
@@ -183,15 +179,10 @@ class SettingsDialog(QDialog):
         self.rules_scroll = QScrollArea(widgetResizable=True, frameShape=QFrame.NoFrame)
         self.rules_scroll.setWidget(inner)
 
-        note = QLabel(RULES_NOTE)
-        note.setStyleSheet("color: gray")
-        note.setWordWrap(True)
-
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.addLayout(top)
         layout.addWidget(self.rules_scroll, 1)
-        layout.addWidget(note)
         return page
 
     def refresh_rules(self):
