@@ -1,4 +1,5 @@
-"""Hotwords the user added by hand (custom operation 加入熱詞, 2026-10-11; the only way to add one).
+"""Hotwords the user added (2026-10-11): by the custom operation 加入熱詞, or by picking a way of writing English in
+選字 (it is the user's spelling; it replaces other spellings of the same words: voiceInput replaces Voice Input).
 
 Every hotword biases X-ASR at the highest score. X-ASR barely follows Chinese biasing (城市 never became 程式), so a
 Chinese hotword is also absolute (the user's choice): after formatting, any run of characters read exactly like it,
@@ -9,6 +10,7 @@ import logging
 import re
 import threading
 
+from .memory import split_words
 from .paths import DATA_DIR
 from .reading import tokens
 
@@ -42,6 +44,17 @@ class Hotwords:
         self.words.append(word)
         self.save()
         return True
+
+    def add_spelling(self, word: str) -> list[str] | None:
+        """Add an English spelling, removing other spellings of the same words. Returns the removed ones, or None
+        if word was already a hotword."""
+        if word in self.words:
+            return None
+        same = [w.lower() for w in split_words(word)]
+        removed = [w for w in self.words if [x.lower() for x in split_words(w)] == same and not _CJK.search(w)]
+        self.words = [w for w in self.words if w not in removed] + [word]
+        self.save()
+        return removed
 
     def remove(self, word: str):
         if word in self.words:

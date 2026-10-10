@@ -85,14 +85,15 @@ def _conflict(a: dict, b: dict) -> bool:
     return any(x != y for x, y in zip(a["right"], b["right"]))
 
 
-def _words(text: str) -> list[str]:
+def split_words(text: str) -> list[str]:
+    """English words in text, camelCase and snake_case split: voiceInput -> voice, Input."""
     return [w for part in re.split(r"[\s_\-]+", text) for w in _CAMEL.findall(part)]
 
 
 def variants(text: str) -> list[tuple[str, str]]:
     """(style, form) ways of writing English text, in default order: Claude / claude / CLAUDE for one word;
     voiceInput / VoiceInput / Voice Input / voice input / VOICE INPUT / voice_input / voice-input / voiceinput."""
-    words = [w.lower() for w in _words(text)]
+    words = [w.lower() for w in split_words(text)]
     if not words:
         return []
     if len(words) == 1:

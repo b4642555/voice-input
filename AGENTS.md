@@ -145,8 +145,10 @@ Only two popups exist (`picker.py`, the pre-lean look; a redesign is planned): t
   agreeing tokens wins, then the right side, the boundary, the newest; one Chinese character needs an agreeing token
   and is left alone on a tie; a phrase applies anywhere (the user's choice: picked once, used everywhere until picked
   back elsewhere). A pick deletes older examples with another value whose context does not conflict.
-- **Hotwords** (`hotwords.py`, DATA_DIR/hotword-list.json; the old key -> value hotwords.json is not read): added only
-  by the 加入熱詞 command (added at once; the notice offers 撤銷), removed on the 熱詞 tab. All bias X-ASR at 3.0, the
+- **Hotwords** (`hotwords.py`, DATA_DIR/hotword-list.json; the old key -> value hotwords.json is not read): added by
+  the 加入熱詞 command, and by picking an English spelling in 選字 (the user's spelling; it replaces other spellings
+  of the same words). Added at once; the notice offers 撤銷 (which also brings replaced spellings back). Removed on
+  the 熱詞 tab. All bias X-ASR at 3.0, the
   highest. Chinese ones are also absolute (the user's choice, because X-ASR barely follows Chinese biasing in our
   tests): any run read exactly like one, tones included, becomes it, after the smart picks.
 - Dropped the same day: picks raising a word's X-ASR bias (a hidden weight); Chinese biasing is too weak and the user

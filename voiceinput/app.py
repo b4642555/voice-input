@@ -130,7 +130,7 @@ class App(QObject):
         self._could_record = rules.can_record(self.cfg.rules)
         self.hotwords = Hotwords()
         self.memory = Memory()
-        self._menu = None                        # ("pick", Selection) | ("hotword", word): what the popup shows
+        self._menu = None   # ("pick", Selection) | ("hotword", word, spellings it replaced): what the popup shows
 
         self.icon_idle = make_icon(QColor(235, 235, 235) if self._dark_taskbar() else QColor(40, 40, 40))
         self.icon_rec = make_icon(QColor(255, 69, 58))
@@ -678,6 +678,13 @@ class App(QObject):
         self.session.replaced_selection(sel.before, word, foreground())
         self.record.emit({"time": time.strftime("%H:%M:%S"), "asr": "", "asr_s": None, "fmt": "",
                           "edit": f"選字：{text} → {word}"})
+        if is_latin(word):    # an English spelling picked is the user's: it becomes a hotword (notice with 撤銷)
+            removed = self.hotwords.add_spelling(word)
+            if removed is not None:
+                log.info("hotword added from a pick: %s (replacing %s)", word, removed)
+                self._menu = ("hotword", word, removed)
+                self.picker.show_notice("已加入熱詞", word, sel.rect, "撤銷")
+                self.settings.refresh_hotwords()
 
     def _add_hotword(self, sel):
         """加入熱詞: the selection becomes a hotword at once; the notice under it offers 撤銷."""
@@ -687,7 +694,7 @@ class App(QObject):
         word = sel.text.strip()
         if self.hotwords.add(word):
             log.info("hotword added: %s", word)
-            self._menu = ("hotword", word)
+            self._menu = ("hotword", word, [])
             self.picker.show_notice("已加入熱詞", word, sel.rect, "撤銷")
             self.settings.refresh_hotwords()
         else:
@@ -697,8 +704,11 @@ class App(QObject):
     def on_hotword_undo(self):
         menu, self._menu = self._menu, None
         if menu and menu[0] == "hotword":
-            log.info("hotword undone: %s", menu[1])
-            self.hotwords.remove(menu[1])
+            _, word, replaced = menu
+            log.info("hotword undone: %s", word)
+            self.hotwords.remove(word)
+            for w in replaced:       # the spellings it had replaced come back
+                self.hotwords.add(w)
             self.settings.refresh_hotwords()
 
     # --- utterances on a selection ---
