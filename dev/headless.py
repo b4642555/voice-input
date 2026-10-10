@@ -90,7 +90,6 @@ appmod.Hotkeys.start = lambda self: None           # no real hotkey / keyboard h
 replayed = []                                      # gestures given back to the key (key name per press)
 appmod.Hotkeys.replay = lambda self, name, times=1: replayed.extend([name] * times)
 appmod.App._watch_mouse = lambda self: None       # the user's real clicks must not end the simulated session
-appmod.char_before_caret_rect = lambda: None      # the 選字 menu after a spelling opens by the mouse
 
 
 class Probe:

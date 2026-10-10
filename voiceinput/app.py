@@ -30,7 +30,7 @@ from PySide6.QtCore import QLockFile, QObject, QPointF, QRectF, Qt, QTimer, Sign
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
-from . import autostart, candidates, edit, models, paths, rules, spell
+from . import autostart, candidates, edit, models, paths, rules
 from .asr import Recognizer
 from .audio import Recorder
 from .config import Config
@@ -44,7 +44,7 @@ from .overlay import Overlay
 from .picker import Picker
 from .reading import reading_key
 from .rules import DOUBLE, HOLD, TAP
-from .selection import ContextProbe, char_before_caret_rect, move_cursor_after, term_watcher
+from .selection import ContextProbe, move_cursor_after, term_watcher
 from .session import Session, foreground
 from .settings import SettingsDialog
 from .textfmt import format_text, to_traditional
@@ -60,7 +60,6 @@ _SCREEN_TERM_SCORE = 1.5
 _COMMAND_SCORE = 5.0
 _COMMAND_SLACK = 2
 _TEXT_CHARS = re.compile(r"[\s\W_]+")
-_CARET_MOVED = "游標已經移動，沒有修改"
 _SEL_LOST = "找不到選取的文字，沒有修改"   # a terminal selection that moved or the cursor could not reach
 _NO_RECORD = "目前沒有任何操作會錄音，無法語音輸入。請到「設定 → 自訂操作」加入「錄音」。"
 _INDICATOR_DELAY = 0.1     # seconds held before the recording indicator shows (a tap is < TAP_THRESHOLD)
@@ -87,7 +86,6 @@ class _Press:
     recording: bool = False           # the microphone is on for it
     consumed: bool = False            # it only stopped a recording a tap had started
     deleted: object = None            # Selection a 刪除 step removed (the dictation goes there)
-    spelled: object = None            # (spell.Spelled, line before, line after) when it spelled a character
     resolved: threading.Event = field(default_factory=threading.Event)   # steps before 錄音 are done
 
 
@@ -115,7 +113,6 @@ class App(QObject):
     main = Signal(object)                    # run a callable on the Qt main thread (keystrokes, clipboard, UI)
     edited = Signal(object, str, object)     # Selection, replacement, _Press: spoken on a selection
     candidates_ready = Signal(object, list)  # Selection, rows for the 選字 menu
-    spell_menu = Signal(object, object)      # the menu's ("spell", …) state, rect of the spelled character
     record = Signal(dict)         # one transcript log entry for the settings window
     status = Signal(str)
 
@@ -142,7 +139,7 @@ class App(QObject):
         self._could_record = rules.can_record(self.cfg.rules)
         self.hotwords = Hotwords()
         self.memory = Memory()
-        self._menu = None                        # ("pick", Selection) or ("spell", …) while the 選字 menu is up
+        self._menu = None                        # ("pick", Selection) while the 選字 menu is up
 
         self.icon_idle = make_icon(QColor(235, 235, 235) if self._dark_taskbar() else QColor(40, 40, 40))
         self.icon_rec = make_icon(QColor(255, 69, 58))
@@ -151,7 +148,6 @@ class App(QObject):
         self.picker = Picker()
         self.picker.timeout_ms = self.cfg.menu_seconds * 1000
         self.picker.picked.connect(self.on_menu_pick)
-        self._picker_hwnd = int(self.picker.winId())
         self.settings = SettingsDialog(self.cfg, self.hotwords, self.memory.path)
         self.settings.applied.connect(self.apply_settings)
 
@@ -170,7 +166,6 @@ class App(QObject):
         self.main.connect(lambda fn: fn())
         self.edited.connect(self.on_edited)
         self.candidates_ready.connect(self.on_candidates)
-        self.spell_menu.connect(self.on_spell_menu)
         self.status.connect(self.on_status)
         self.record.connect(self.on_record)
 
@@ -196,14 +191,6 @@ class App(QObject):
         except OSError:
             return True
 
-    def _on_picker(self, pt) -> bool:
-        """Mouse hook thread: the point is on the 選字 menu."""
-        import ctypes.wintypes
-        u32 = ctypes.windll.user32
-        u32.WindowFromPoint.argtypes = [ctypes.wintypes.POINT]
-        hwnd = u32.WindowFromPoint(pt)
-        return bool(hwnd) and u32.GetAncestor(hwnd, 2) == self._picker_hwnd   # GA_ROOT
-
     def _on_other_key(self, vk: int):
         """Keyboard hook thread: a key the user pressed (injected keys never get here)."""
         self.session.on_input()
@@ -221,8 +208,6 @@ class App(QObject):
             if self.hotkeys.is_bound_mouse(msg, data.mouseData):
                 return False   # a button an operation uses is not a click
             if msg in downs:
-                if self._on_picker(data.pt):
-                    return False   # a click in the 選字 menu leaves the caret where it is
                 self.session.on_input()
                 if msg == 0x201:
                     term_watcher.mouse_down(data.pt.x, data.pt.y)
@@ -586,26 +571,17 @@ class App(QObject):
                 self.main.emit(lambda: self._spoken_operation(press, op))
                 return
             sym = edit.symbol(formatted) if self.cfg.punctuation_names else None
-            spelled = None if sym else spell.parse(to_traditional(raw))
-            around = ctx.selection if selected else press.deleted
-            prefix, suffix = (around.before, around.after) if around else (ctx.caret or ("", ""))
-            if spelled:
-                log.info("spelled: %s %s", spelled.char, spelled.reading)
-                text = spelled.char
-                press.spelled = (spelled, prefix, suffix)
-            elif sym:
-                text = sym
-            else:   # smart picks (single characters)
-                text = self.memory.apply(formatted, prefix)
+            text = sym or formatted
+            if not sym:   # smart picks (single characters)
+                prefix = ctx.selection.before if selected else (ctx.caret[0] if ctx.caret else "")
+                text = self.memory.apply(text, prefix)
             entry = {"time": stamp, "asr": to_traditional(raw), "asr_s": t_asr, "fmt": text}
-            if spelled:
-                entry["edit"] = f"拼讀：{spelled.char}（{spelled.reading}）"
             if selected:
-                self._edit_job(ctx.selection, text, bool(sym or spelled), entry, press)
+                self._edit_job(ctx.selection, text, bool(sym), entry, press)
                 return
             replaced = press.deleted
             if replaced is not None:
-                if not (sym or spelled):
+                if not sym:
                     text = edit.replacement(replaced.text, text)
                 entry["edit"] = f"{replaced.text} → {text}（刪除後重講）"
             self.record.emit(entry)
@@ -643,7 +619,6 @@ class App(QObject):
         # u = self.session.dictated(text, audio, foreground() or hwnd)
         # if audio is not None:
         #     self.bg.submit(self._suspect_job, u)
-        self._open_spelled(press)
         self._run_steps(press, self._after_steps(press))
 
     # Second opinion, off for now: SenseVoice re-decodes each dictation and suspects.find() lists words it heard
@@ -715,31 +690,6 @@ class App(QObject):
                 out.append(w)
         return out[:_MENU_ROWS]
 
-    def _open_spelled(self, press: _Press):
-        """After a spelled character is typed: the 選字 menu under it (once the app has drawn it), with what the
-        smart picks learned for it first, then the other characters of its sound, the same tone first."""
-        if press.spelled is None:
-            return
-        spelled, prefix, suffix = press.spelled
-        menu = ("spell", spelled.char, prefix, suffix)
-        self._menu = menu
-        key = reading_key(spelled.char)
-        left, right = situation(prefix + spelled.char + suffix, len(prefix), len(prefix) + 1)
-        learned = [self.memory.lookup(key, left, right, single=True)] + self.memory.values(key)
-        rows = [w for w in learned if w in spelled.options] + spelled.options
-        menu += ([w for i, w in enumerate(rows) if w and w not in rows[:i]][:_MENU_ROWS],)
-        self._menu = menu
-
-        def locate():
-            time.sleep(0.1)
-            self.spell_menu.emit(menu, char_before_caret_rect())
-        threading.Thread(target=locate, daemon=True).start()
-
-    def on_spell_menu(self, menu, rect):
-        if self._menu is menu:
-            self.picker.show_loading(menu[1], rect)
-            self.picker.show_candidates(menu[1], menu[4])
-
     def on_candidates(self, sel, words: list):
         if self._menu and self._menu[0] == "pick" and self._menu[1] is sel and self.picker.isVisible():
             self.picker.show_candidates(sel.text.strip(), words)
@@ -749,8 +699,6 @@ class App(QObject):
         gains hotword weight and the word it replaced loses some."""
         menu, words = self._menu, self.picker.candidates
         self._menu = None
-        if menu and menu[0] == "spell" and 0 <= row < len(words):
-            self._pick_spelled(menu, words[row])
         if not menu or menu[0] != "pick" or not 0 <= row < len(words):
             return
         sel, word = menu[1], words[row]
@@ -768,22 +716,6 @@ class App(QObject):
         self.session.replaced_selection(sel.before, word, foreground())
         self.record.emit({"time": time.strftime("%H:%M:%S"), "asr": "", "asr_s": None, "fmt": "",
                           "edit": f"選字：{text} → {word}"})
-
-    def _pick_spelled(self, menu, word: str):
-        """A pick in the menu after a spelling replaces the character just typed (still right before the caret),
-        learned with its context like any single character."""
-        _, char, prefix, suffix, _ = menu
-        plan = self.session.replace_tail(char, word)
-        log.info("spelled pick: %s -> %s", char, word)
-        if plan is None:
-            self._notify(_CARET_MOVED)
-            return
-        n, tail = plan
-        backspace(n)
-        paste_text(tail)
-        self.memory.record(prefix + char + suffix, len(prefix), len(prefix) + 1, word)
-        self.record.emit({"time": time.strftime("%H:%M:%S"), "asr": "", "asr_s": None, "fmt": "",
-                          "edit": f"選字：{char} → {word}"})
 
     def _add_hotword(self, sel):
         """加入熱詞: the selection becomes a hotword at the highest weight, quietly (no notice since 2026-10-11:
@@ -825,7 +757,6 @@ class App(QObject):
         # 刪除 removes the spoken text; over a 。 turned into ，…。 it puts the 。 back
         undo_to = sel.before + ("。" if rep.startswith("，") and sel.text.strip() == "。" else "")
         self.session.replaced_selection(sel.before, rep, foreground(), undo_to)
-        self._open_spelled(press)
         self._run_steps(press, self._after_steps(press))
 
     # --- settings / status ---

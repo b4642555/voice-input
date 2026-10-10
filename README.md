@@ -22,8 +22,6 @@ Data from the old layout (`config.json`, `models/` inside the app folder) is mov
   you just dictated (the last one only, before the caret moves); hold the second press to say it again. Other middle
   clicks and double clicks still work.
 - Say only 換行 for Shift+Enter, 送出 for Enter; 逗號 / 句號 / 問號 / 驚嘆號 / 頓號 / 分號 / 冒號 / 點點點 type that mark.
-- Spell one character with Bopomofo: say the symbols, then the character (ㄔ ㄤ 昌, ㄐ ㄧㄝ 節, ㄐ ㄧ ㄝ 節, ㄧ ㄢ 煙).
-  Only that character is typed, and the 選字 menu opens under it with the other characters of that sound.
 - Left-click the tray icon to open settings: 一般 (microphone, muting the speakers while recording, punctuation names,
   selected 。 → ，,
   launch at login), 辨識紀錄 (a per-utterance log for this session) and 自訂操作. Changes apply immediately.
@@ -80,7 +78,6 @@ voiceinput/
   textfmt.py   final text formatting (incl. repeated-word removal)
   session.py   what was just typed at the caret, deleting the last dictation
   edit.py      replacing a selection, punctuation names
-  spell.py     spelling one character with Bopomofo (ㄔ ㄤ 昌)
   suspects.py  second-opinion check for misheard words (off for now)
   selection.py selection / on-screen terms via UI Automation
   candidates.py word list (McBopomofo): is-a-word / frequency, same-sounding words
