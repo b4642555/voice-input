@@ -10,9 +10,16 @@ _s2tw = opencc.OpenCC("s2tw")  # glyphs only; s2twp would also swap vocabulary (
 _t2s = opencc.OpenCC("t2s")
 
 
+# s2tw picks glyphs Taiwan does not use: 台 becomes 臺 (台北 -> 臺北), and 荧 becomes 熒 (X-ASR writes 荧幕 for
+# 螢幕, 2026-10-11); these are put back
+_GLYPH_FIXES = {"臺": "台", "熒幕": "螢幕", "熒光": "螢光"}
+
+
 def to_traditional(text: str) -> str:
-    # s2tw turns 台 into 臺 (台北 -> 臺北); everyday Taiwanese writing uses 台
-    return _s2tw.convert(text).replace("臺", "台")
+    text = _s2tw.convert(text)
+    for a, b in _GLYPH_FIXES.items():
+        text = text.replace(a, b)
+    return text
 
 
 def to_simplified(text: str) -> str:

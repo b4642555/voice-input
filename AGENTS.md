@@ -72,7 +72,8 @@ CJK/ASCII spacing → trailing punctuation.
   Windows Terminal cursor is on in terminals (same behaviour everywhere, the user's requirement). Unknown → kept.
 
 - OpenCC `s2tw` only (glyph conversion). `s2twp` was dropped because it rewrites vocabulary (程序 → 程式).
-- After s2tw, 臺 is mapped back to 台 (s2tw turns 台北 into 臺北; the user wants 台).
+- After s2tw, 臺 is mapped back to 台 (s2tw turns 台北 into 臺北; the user wants 台), and 熒幕 / 熒光 to 螢幕 / 螢光
+  (X-ASR writes 荧幕, which s2tw turns into 熒幕; 2026-10-11).
 - 嗯 / 呃 are removed by regex.
 - Disfluencies (`remove_disfluencies`, 2026-09-29): repeated 2-4 character chunks (我們我們, 你可不可不可以, 今天今天),
   restarts (先打開那個，先打開設定頁 → 先打開設定頁) and stutters of a few characters (我我, 先先). ABAB reduplication is
