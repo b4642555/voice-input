@@ -206,6 +206,11 @@ removed the same day they were built: the user corrects by selecting with the mo
   驚嘆號 / 感嘆號 / 頓號 / 分號 / 冒號 / 點點點 / 刪節號 / 省略號 types the mark, appended after any existing
   punctuation (the user chose not to replace it). Exact text only: 都好 is not 逗號. On a selection it replaces it.
   換行 / 送出 are custom operations since 2026-10-11 (speech rules, checked before punctuation names).
+  Spoken commands are boosted (2026-10-11, the user's request: 換行 was often misheard): when the first decode is
+  short (at most the longest command + 2 characters) it runs again with every speech operation's phrase and the
+  punctuation names (when on) at score 5. Not by audio length: TTS 換行 alone was 1.7s with its silences. Fixed
+  據點 -> 句點, 珊姐好 -> 刪節號; cost: 問好 / 分好 said alone become 問號 / 分號. Words of one repeated character
+  (點點點) are not boosted: they ran away (點點點點點點點點點).
 - **Selected 。** (setting, 2026-10-07): speaking on a selected 。 replaces it with ， + the utterance + 。
   (今天很好。明天見 → 今天很好，我們去公園。明天見).
 

@@ -18,6 +18,7 @@ popup, and a redesign is planned (the 加入熱詞 notice with 撤銷 lived for 
 commented out below.
 """
 import logging
+import re
 import sys
 import threading
 import time
@@ -51,6 +52,14 @@ from .textfmt import format_text, to_traditional
 log = logging.getLogger("voiceinput")
 
 _SCREEN_TERM_SCORE = 1.5
+# Spoken commands (speech operations' phrases, punctuation names) are boosted only when the utterance is short: they
+# are said alone, and boosting them in every sentence would turn 還行 into 換行 (the user's choice, 2026-10-11).
+# "Short" is judged by the first decode's text (at most the longest command + _COMMAND_SLACK characters), which then
+# runs again with the commands: the audio's length was no use, TTS 換行 alone was already 1.7s with its silences.
+# With TTS the boost fixed 據點 -> 句點 and 珊姐好 -> 刪節號; alone, 問好 / 分好 became 問號 / 分號.
+_COMMAND_SCORE = 5.0
+_COMMAND_SLACK = 2
+_TEXT_CHARS = re.compile(r"[\s\W_]+")
 _SEL_LOST = "找不到選取的文字，沒有修改"   # a terminal selection that moved or the cursor could not reach
 _NO_RECORD = "目前沒有任何操作會錄音，無法語音輸入。請到「設定 → 自訂操作」加入「錄音」。"
 _INDICATOR_DELAY = 0.1     # seconds held before the recording indicator shows (a tap is < TAP_THRESHOLD)
@@ -540,7 +549,14 @@ class App(QObject):
             ctx = press.probe.result()
             press.resolved.wait(3.0)
             t0 = time.monotonic()
-            raw = rec.recognize(audio, _bias(self.hotwords.bias() + [(t, _SCREEN_TERM_SCORE) for t in ctx.terms]))
+            words = self.hotwords.bias() + [(t, _SCREEN_TERM_SCORE) for t in ctx.terms]
+            raw = rec.recognize(audio, _bias(words))
+            commands = self._command_words()
+            if commands and len(_TEXT_CHARS.sub("", raw)) <= max(map(len, commands)) + _COMMAND_SLACK:
+                again = rec.recognize(audio, _bias([(w, _COMMAND_SCORE) for w in commands] + words))
+                if again != raw:
+                    log.info("asr with commands boosted: %s -> %s", raw, again)
+                raw = again
             t_asr = time.monotonic() - t0
             log.info("asr %.2fs: %s%s", t_asr, raw, f" (terms: {len(ctx.terms)})" if ctx.terms else "")
             # no sentence-final punctuation when the caret has text on both sides: the user is inserting
@@ -574,6 +590,15 @@ class App(QObject):
             log.exception("transcribe failed")
             self.main.emit(self.overlay.hide_overlay)
             self.main.emit(self._input_done)
+
+    def _command_words(self) -> list[str]:
+        """What may be said alone as a command: speech operations' phrases, and punctuation names when they are on.
+        Not a word of one repeated character: boosted, 點點點 came out as 點點點點點點點點點."""
+        words = [r.phrase.strip() for r in self.cfg.rules
+                 if r.enabled and r.source == rules.SPEECH and not rules.problems(r, self.cfg.rules)]
+        if self.cfg.punctuation_names:
+            words += list(edit.SYMBOLS)
+        return [w for w in words if w and len(set(w)) > 1]
 
     def _spoken_operation(self, press: _Press, op):
         self.overlay.hide_overlay()
