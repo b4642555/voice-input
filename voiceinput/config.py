@@ -14,7 +14,8 @@ class Config:
     mute_while_recording: bool = False  # mute the speakers while recording, until the text is pasted
     period_to_comma: bool = True   # speaking on a selected 。 turns it into ， + the utterance + 。
     punctuation_names: bool = True  # an utterance of just a punctuation name (逗號, 句號 …) types the mark
-    menu_seconds: int = 10         # the 選字 menu and the hotword notice close after this many seconds
+    menu_seconds: int = 10         # the 選字 menu closes after this many seconds
+    hotword_sort: str = "weight"   # order of the 熱詞 tab (settings.HOTWORD_SORTS)
     rules: list = field(default_factory=rules.defaults)   # custom operations (rules.Rule)
     rules_version: int = RULES_VERSION
 

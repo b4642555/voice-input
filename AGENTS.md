@@ -101,8 +101,8 @@ CJK/ASCII spacing → trailing punctuation.
 
 Four tabs, sized for the log: 一般 (microphone, "mute the speakers while recording", punctuation names, "selected 。 →
 ，", autostart, menu timeout (default 10s, back 2026-10-11, for the 選字 menu and the hotword notice), a button that
-opens smart-picks.json), 辨識紀錄 (the transcript log), 自訂操作 (custom operations, below) and 熱詞 (the hotword list,
-remove only). Mute (2026-10-06, `mute.py`): Core Audio via
+opens smart-picks.json), 辨識紀錄 (the transcript log), 自訂操作 (custom operations, below) and 熱詞 (the hotword list:
+source, date added, weight; remove only; a 排序 drop-down: weight, name A→Z / Z→A by pinyin, date, source; remembered). Mute (2026-10-06, `mute.py`): Core Audio via
 comtypes; muted when the recording indicator shows, unmuted once the text is pasted or the press ends in nothing; a
 mute the user set is left alone. Selection edits and on-screen terms are always on.
 

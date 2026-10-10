@@ -14,6 +14,7 @@ import json
 import logging
 import re
 import threading
+import time
 from dataclasses import asdict, dataclass
 
 from .paths import DATA_DIR
@@ -42,6 +43,11 @@ class Hotword:
     word: str
     weight: float
     source: str = MANUAL
+    added: str = ""          # date it was first added, YYYY-MM-DD
+
+
+def _today() -> str:
+    return time.strftime("%Y-%m-%d")
 
 
 class Hotwords:
@@ -54,7 +60,9 @@ class Hotwords:
                 if isinstance(d, str):    # the first format, the same day: a plain list of 加入熱詞 words
                     d = {"word": d, "weight": cap(d), "source": MANUAL}
                 if eligible(d.get("word", "")):
-                    self.items.append(Hotword(d["word"], float(d["weight"]), d.get("source", MANUAL)))
+                    # entries from before dates were kept (2026-10-11) were all added that day
+                    self.items.append(Hotword(d["word"], float(d["weight"]), d.get("source", MANUAL),
+                                              d.get("added") or "2026-10-11"))
         except (OSError, ValueError, TypeError, KeyError):
             pass
 
@@ -74,7 +82,7 @@ class Hotwords:
             return False
         h = self.find(word)
         if h is None:
-            self.items.append(Hotword(word, cap(word), MANUAL))
+            self.items.append(Hotword(word, cap(word), MANUAL, _today()))
         else:
             h.weight, h.source = cap(word), MANUAL
         self.save()
@@ -87,7 +95,7 @@ class Hotwords:
         if eligible(new):
             h = self.find(new)
             if h is None:
-                self.items.append(Hotword(new, cap(new) / 2, PICKED))
+                self.items.append(Hotword(new, cap(new) / 2, PICKED, _today()))
             elif h.source == PICKED:
                 h.weight = min(cap(new), h.weight + _STEP)
             changed = True

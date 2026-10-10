@@ -4,6 +4,7 @@ and saved immediately."""
 import html
 import os
 
+from pypinyin import lazy_pinyin
 from PySide6.QtCore import QEvent, Qt, QTimer, Signal
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QFrame, QHBoxLayout,
                                QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea, QSpinBox, QTabWidget,
@@ -22,6 +23,8 @@ COMMANDS = [(rules.RECORD, "錄音"), (rules.PICK, "選字"), (rules.ADD_HOTWORD
             (rules.DELETE_DICTATION, "刪除剛輸入的文字")]
 _STEP_DEFAULTS = {rules.COMMAND: rules.DELETE_SELECTION, rules.KEYS: "", rules.TEXT: "", rules.WAIT: 100}
 
+HOTWORD_SORTS = [("weight", "權重（高→低）"), ("name", "名稱 A→Z"), ("name_desc", "名稱 Z→A"),
+                 ("date", "日期（新→舊）"), ("date_old", "日期（舊→新）"), ("source", "來源（手動優先）")]
 _CARD_STYLE = "QFrame#card { border: 1px solid palette(mid); border-radius: 6px; }"
 
 
@@ -198,11 +201,18 @@ class SettingsDialog(QDialog):
         v.addStretch(1)
         scroll = QScrollArea(widgetResizable=True, frameShape=QFrame.NoFrame)
         scroll.setWidget(inner)
+        self.hw_sort = _combo(HOTWORD_SORTS, self.cfg.hotword_sort)
+        self.hw_sort.currentIndexChanged.connect(self._sort_hotwords)
+        top = QHBoxLayout()
+        top.addWidget(QLabel("排序"))
+        top.addWidget(self.hw_sort)
+        top.addStretch()
         self.hw_empty = QLabel("還沒有熱詞。選字時選了詞語，或對選取的文字執行「加入熱詞」，就會加到這裡。")
         self.hw_empty.setStyleSheet("color: gray")
         self.hw_empty.setWordWrap(True)
         page = QWidget()
         layout = QVBoxLayout(page)
+        layout.addLayout(top)
         layout.addWidget(self.hw_empty)
         layout.addWidget(scroll, 1)
         return page
@@ -212,7 +222,7 @@ class SettingsDialog(QDialog):
             w = self.hw_list.takeAt(0).widget()
             w.setParent(None)
             w.deleteLater()
-        for h in sorted(self.hotwords.items, key=lambda h: (-h.weight, h.word)):
+        for h in self._sorted_hotwords():
             card = QFrame(objectName="card")
             card.setStyleSheet(_CARD_STYLE)
             row = QHBoxLayout(card)
@@ -222,6 +232,10 @@ class SettingsDialog(QDialog):
             source.setStyleSheet("color: gray")
             source.setToolTip("手動：用「加入熱詞」加入，權重固定在上限\n選字：選字時選了它，每選一次加權，被選掉時扣分")
             row.addWidget(source)
+            added = QLabel(h.added)
+            added.setStyleSheet("color: gray")
+            added.setToolTip("加入的日期")
+            row.addWidget(added)
             weight = QLabel(f"{h.weight:g} / {hotwords.cap(h.word):g}")
             weight.setToolTip("權重 / 上限（中文 5、英文 3）")
             weight.setMinimumWidth(56)
@@ -232,6 +246,26 @@ class SettingsDialog(QDialog):
             row.addWidget(remove)
             self.hw_list.addWidget(card)
         self.hw_empty.setVisible(not self.hotwords.items)
+
+    def _sorted_hotwords(self) -> list:
+        """The list in the chosen order; ties by weight, then name. Names sort by their pinyin, so Chinese words sit
+        among the English ones by sound (程式 near Claude)."""
+        def name(h):
+            return "".join(lazy_pinyin(h.word)).casefold()
+        items = sorted(self.hotwords.items, key=lambda h: (-h.weight, name(h)))
+        order = self.cfg.hotword_sort
+        if order in ("name", "name_desc"):
+            items.sort(key=name, reverse=order == "name_desc")
+        elif order in ("date", "date_old"):
+            items.sort(key=lambda h: h.added, reverse=order == "date")
+        elif order == "source":
+            items.sort(key=lambda h: h.source != hotwords.MANUAL)
+        return items
+
+    def _sort_hotwords(self):
+        self.cfg.hotword_sort = self.hw_sort.currentData()
+        self.cfg.save()
+        self.refresh_hotwords()
 
     def _remove_hotword(self, word: str):
         self.hotwords.remove(word)
