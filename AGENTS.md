@@ -6,8 +6,8 @@
   stop and ask before building, as many rounds as needed, with the recommended option first.
 - Don't guess between materially different designs; asking is cheaper than rebuilding.
 - Ask clarifying questions with the AskUserQuestion tool (when available); use it freely.
-- After every commit, restart VoiceInput if it is running so the user is testing the new code (don't start it if
-  it isn't running). PowerShell:
+- After every commit (each new feature or change), restart VoiceInput so the user is testing the new code; start it
+  even if it isn't running (the user's request, 2026-10-10). PowerShell:
 
   ```powershell
   $root = 'E:\Projects\voice-input'
@@ -15,8 +15,8 @@
   if ($procs) {
       $procs | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
       $procs | ForEach-Object { Wait-Process -Id $_.ProcessId -Timeout 10 -ErrorAction SilentlyContinue }
-      Start-Process "$root\.venv\Scripts\pythonw.exe" -ArgumentList "`"$root\run.pyw`"" -WorkingDirectory $root
   }
+  Start-Process "$root\.venv\Scripts\pythonw.exe" -ArgumentList "`"$root\run.pyw`"" -WorkingDirectory $root
   ```
 
   Then check the tail of `%LOCALAPPDATA%\VoiceInput\voiceinput.log` for "就緒" / errors.
