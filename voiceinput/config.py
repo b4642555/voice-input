@@ -12,6 +12,7 @@ class Config:
     autostart: bool = False
     mute_while_recording: bool = False  # mute the speakers while recording, until the text is pasted
     period_to_comma: bool = True   # speaking on a selected 。 turns it into ， + the utterance + 。
+    punctuation_names: bool = True  # an utterance of just a punctuation name (逗號, 句號 …) types the mark
     rules: list = field(default_factory=rules.defaults)   # custom operations (rules.Rule)
 
     @classmethod

@@ -96,7 +96,8 @@ CJK/ASCII spacing → trailing punctuation.
 
 ## Settings window (tabs since 2026-10-11)
 
-Three tabs, sized for the log: 一般 (microphone, "mute the speakers while recording", "selected 。 → ，", autostart),
+Three tabs, sized for the log: 一般 (microphone, "mute the speakers while recording", punctuation names, "selected 。 →
+，", autostart),
 辨識紀錄 (the transcript log) and 自訂操作 (custom operations, below). Mute (2026-10-06, `mute.py`): Core Audio via
 comtypes; muted when the recording indicator shows, unmuted once the text is pasted or the press ends in nothing; a
 mute the user set is left alone. Selection edits and on-screen terms are always on.
@@ -164,7 +165,8 @@ used until 2026-10-02 (commit 58c1535) and dropped for missing Taiwanese words a
 Voice commands on what was just dictated (復原, 送出, 換行, 刪掉上一句, X改成Y, 刪掉X, symbol names, trailing 送出) were
 removed the same day they were built: the user corrects by selecting with the mouse instead. What remains:
 
-- **Punctuation names** (restored 2026-09-30, `edit.symbol`): an utterance that is exactly 逗號 / 句號 / 句點 / 問號 /
+- **Punctuation names** (restored 2026-09-30, `edit.symbol`; a setting on the 一般 tab since 2026-10-11, on by
+  default, so they need no custom operations): an utterance that is exactly 逗號 / 句號 / 句點 / 問號 /
   驚嘆號 / 感嘆號 / 頓號 / 分號 / 冒號 / 點點點 / 刪節號 / 省略號 types the mark, appended after any existing
   punctuation (the user chose not to replace it). Exact text only: 都好 is not 逗號. On a selection it replaces it.
   換行 / 送出 are custom operations since 2026-10-11 (speech rules, checked before punctuation names).

@@ -4,7 +4,7 @@ What an utterance does:
 1. Text is selected (UI Automation): the utterance replaces it.
 2. Otherwise it is dictated: formatted and pasted.
 An utterance that is exactly a custom operation's phrase (換行, 送出 …) runs that operation instead, and a bare
-punctuation name (逗號, 句號 …) is typed as the mark (edit.symbol).
+punctuation name (逗號, 句號 …) is typed as the mark (edit.symbol; a setting since 2026-10-11).
 
 What the mouse buttons and keys do is set by custom operations (rules.py, 2026-10-11). The defaults: hold the
 middle button to record; double click it on a selection to delete it, or right after a dictation to delete that
@@ -533,7 +533,7 @@ class App(QObject):
                                   "edit": f"操作：「{op.phrase}」"})
                 self.main.emit(lambda: self._spoken_operation(press, op))
                 return
-            sym = edit.symbol(formatted)
+            sym = edit.symbol(formatted) if self.cfg.punctuation_names else None
             text = sym or formatted
             entry = {"time": stamp, "asr": to_traditional(raw), "asr_s": t_asr, "fmt": text}
             if selected:

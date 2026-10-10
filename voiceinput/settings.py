@@ -106,6 +106,9 @@ class SettingsDialog(QDialog):
         self.mic.addItem("系統預設", "")
         for name in audio.list_input_devices():
             self.mic.addItem(name, name)
+        self.punct = QCheckBox("只說標點符號的名字時，輸入該符號")
+        self.punct.setToolTip("逗號、句號、句點、問號、驚嘆號、感嘆號、頓號、分號、冒號、點點點、刪節號、省略號；"
+                              "整句只有這個名字才算，例如「逗號很重要」照常輸入")
         self.period_comma = QCheckBox("選取句號後講話，句號改成逗號並接上講的內容")
         self.period_comma.setToolTip("今天很好。明天見 → 選取「。」講「我們去公園」→ 今天很好，我們去公園。明天見")
         self.autostart = QCheckBox("開機時自動啟動")
@@ -118,6 +121,7 @@ class SettingsDialog(QDialog):
         form = QFormLayout()
         form.addRow("麥克風", self.mic)
         form.addRow("", self.mute)
+        form.addRow("", self.punct)
         form.addRow("", self.period_comma)
         form.addRow("", self.autostart)
         page = QWidget()
@@ -127,13 +131,14 @@ class SettingsDialog(QDialog):
         v.addWidget(self.status)
 
         self.mic.currentIndexChanged.connect(self._apply)
-        for box in (self.period_comma, self.autostart, self.mute):
+        for box in (self.punct, self.period_comma, self.autostart, self.mute):
             box.toggled.connect(self._apply)
         return page
 
     def load_values(self):
         self._loading = True
         self.mic.setCurrentIndex(max(0, self.mic.findData(self.cfg.mic)))
+        self.punct.setChecked(self.cfg.punctuation_names)
         self.period_comma.setChecked(self.cfg.period_to_comma)
         self.autostart.setChecked(self.cfg.autostart)
         self.mute.setChecked(self.cfg.mute_while_recording)
@@ -147,6 +152,7 @@ class SettingsDialog(QDialog):
         if self._loading:
             return
         self.cfg.mic = self.mic.currentData()
+        self.cfg.punctuation_names = self.punct.isChecked()
         self.cfg.period_to_comma = self.period_comma.isChecked()
         self.cfg.autostart = self.autostart.isChecked()
         self.cfg.mute_while_recording = self.mute.isChecked()

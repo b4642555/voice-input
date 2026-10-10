@@ -22,7 +22,8 @@ Data from the old layout (`config.json`, `models/` inside the app folder) is mov
   you just dictated (the last one only, before the caret moves); hold the second press to say it again. Other middle
   clicks and double clicks still work.
 - Say only 換行 for Shift+Enter, 送出 for Enter; 逗號 / 句號 / 問號 / 驚嘆號 / 頓號 / 分號 / 冒號 / 點點點 type that mark.
-- Left-click the tray icon to open settings: 一般 (microphone, muting the speakers while recording, selected 。 → ，,
+- Left-click the tray icon to open settings: 一般 (microphone, muting the speakers while recording, punctuation names,
+  selected 。 → ，,
   launch at login), 辨識紀錄 (a per-utterance log for this session) and 自訂操作. Changes apply immediately.
 - 自訂操作: choose a mouse button, keyboard key or spoken phrase, a gesture (tap / double tap / hold), a situation
   (any / right after dictating / text selected) and steps run in order: 錄音, delete the selection, delete what was
