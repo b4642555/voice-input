@@ -6,3 +6,7 @@ config.json
 voiceinput.log
 .voiceinput.lock
 .env
+# ElevenLabs sound sources: only the mp3s voiceinput/cues.py uses are tracked (git add -f), with prompts.json;
+# preview pages and unused takes stay local
+dev/sound-preview/*
+!dev/sound-preview/prompts.json
