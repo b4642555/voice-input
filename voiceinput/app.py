@@ -618,7 +618,7 @@ class App(QObject):
             ctx = press.probe.result()
             press.resolved.wait(3.0)
             t0 = time.monotonic()
-            heard = cues.cancel(audio, press.cue, SAMPLE_RATE) if press.cue else audio
+            heard = cues.remove(audio, press.cue, SAMPLE_RATE) if press.cue else audio
             words = self.hotwords.bias() + [(t, _SCREEN_TERM_SCORE) for t in ctx.terms]
             raw = rec.recognize(heard, _bias(words))
             commands = self._command_words()

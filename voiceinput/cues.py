@@ -30,6 +30,7 @@ SOUNDS = [
     ("music_box", "Music Box", "wood-{kind}-6.mp3"),
 ]
 DEFAULT = SOUNDS[0][0]
+MATCH = 0.6     # below it the start sound is subtracted, not cut out (see remove)
 _cache: dict[str, bytes] = {}
 _lock = threading.Lock()
 
@@ -59,24 +60,55 @@ def _samples(cue_id: str, rate: int) -> np.ndarray | None:
     return np.interp(np.arange(0, len(x) * rate / src) * src / rate, np.arange(len(x)), x).astype(np.float32)
 
 
+def _locate(audio: np.ndarray, x: np.ndarray, rate: int) -> tuple[int, float]:
+    """Where the start sound begins in the recording and how well it matches (normalized correlation). It plays as
+    the indicator shows (0.1s) and reaches the microphone ~0.17s later, so it is looked for 0.1-0.6s in."""
+    lo, hi = int(0.1 * rate), int(0.6 * rate)
+    seg = audio[: hi + len(x)]
+    size = 1 << (len(seg) + len(x)).bit_length()     # cross-correlation by FFT (np.correlate took ~100ms)
+    cc = np.fft.irfft(np.fft.rfft(seg, size) * np.conj(np.fft.rfft(x, size)), size)[: len(seg)]
+    lag = lo + int(np.argmax(np.abs(cc[lo:min(hi, len(cc))])))
+    win = audio[lag: lag + len(x)]
+    return lag, float(abs(cc[lag]) / (np.linalg.norm(x[: len(win)]) * np.linalg.norm(win) + 1e-9))
+
+
+def remove(audio: np.ndarray, cue_id: str, rate: int) -> np.ndarray:
+    """The recording with the start sound the microphone heard cut out (2026-10-13, the user's choice: the
+    recording counts from the end of the sound). X-ASR heard Bubble, Mallet and Kalimba as "Yeah.", Triad as "One"
+    when nothing was said. The stretch from where the sound arrives to its end is spliced out with a 10ms
+    crossfade, keeping the room noise before it: dropping everything before the end, or silencing it, made X-ASR
+    hear short commands wrong with no lead-in (送出 -> Somehow, nothing said -> So). The start sounds were shortened
+    for it (dev/build_cues.py). On the user's recordings: presses with nothing said that gave text 13/95 with
+    `cancel` -> 2/95 (你好, 哇: probably said); 換行 clips with the sound inserted before the speech (the user waits
+    for it) 204/216 (`cancel` 210/216), but spoken over the sound 99/216 (`cancel` 186/216): words said before it
+    ends are lost. A weak match (headphones, or speech over it lowers it; recordings with no sound scored up to
+    0.36) falls back to `cancel`."""
+    x = _samples(cue_id, rate) if cue_id else None
+    if x is None or len(audio) <= int(0.1 * rate) + len(x):
+        return audio
+    lag, match = _locate(audio, x, rate)
+    if match < MATCH:
+        log.info("start sound match %.2f at %.2fs: cancelled, not cut", match, lag / rate)
+        return cancel(audio, cue_id, rate)
+    pre, post = audio[:lag], audio[lag + len(x):].copy()
+    n = min(int(0.01 * rate), len(pre), len(post))
+    if n:
+        post[:n] = pre[len(pre) - n:] * np.linspace(1, 0, n) + post[:n] * np.linspace(0, 1, n)
+        pre = pre[:len(pre) - n]
+    log.info("start sound cut out %.2f-%.2fs (match %.2f)", lag / rate, (lag + len(x)) / rate, match)
+    return np.concatenate([pre, post]).astype(np.float32)
+
+
 def cancel(audio: np.ndarray, cue_id: str, rate: int, taps: int = 256) -> np.ndarray:
-    """The recording with the start sound the microphone heard taken out (2026-10-13). X-ASR heard Bubble, Mallet
-    and Kalimba as "Yeah.", Triad as "One" / "Four." when nothing was said. Found by cross-correlation 0.1-0.6s into
-    the recording (it plays as the indicator shows, 0.1s, and reaches the microphone ~0.17s later), then a
-    least-squares FIR (speaker and room) of `taps` samples is subtracted. On the user's recordings (2026-10-13):
+    """The start sound subtracted where `remove` cannot cut it: a least-squares FIR (speaker and room) of `taps`
+    samples. On the user's recordings (2026-10-13, before `remove`):
     presses with nothing said that gave text 6/29 -> 2/29 (Triad's One left); 換行 with a start sound mixed in
     178/216 -> 186/216 (83% without any sound). Turning that stretch down to 10% left no text but cut words said over
     it (162/216)."""
     x = _samples(cue_id, rate) if cue_id else None
-    if x is None or len(audio) < int(0.1 * rate) + taps:
+    if x is None or len(audio) <= int(0.1 * rate) + taps:
         return audio
-    lo, hi = int(0.1 * rate), int(0.6 * rate)
-    seg = audio[: hi + len(x)]
-    if len(seg) <= lo:
-        return audio
-    size = 1 << (len(seg) + len(x)).bit_length()     # cross-correlation by FFT (np.correlate took ~100ms)
-    cc = np.fft.irfft(np.fft.rfft(seg, size) * np.conj(np.fft.rfft(x, size)), size)[: len(seg)]
-    lag = lo + int(np.argmax(np.abs(cc[lo:min(hi, len(cc))])))
+    lag, _match = _locate(audio, x, rate)
     n = min(len(x) + taps, len(audio) - lag)
     if n <= taps:
         return audio

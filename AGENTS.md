@@ -298,8 +298,8 @@ removed the same day they were built: the user corrects by selecting with the mo
   sounds and previews them like a recording: start, 0.8s, end; reads 自定義 when they differ), then 開始 / 結束
   drop-downs with 試聽 buttons (12 each plus None last, Blip by default: the user's choices). The 簡潔 UI and 柔和木質 sets of ElevenLabs effects
   another agent made in `dev/sound-preview` (untracked), converted by `dev/build_cues.py` (loudness matched like the
-  preview page; silent tails cut at -40 dB, so a start sound lasts 0.19s (Woodblock) to 0.60s). The start sound
-  plays as the indicator fades in, once (`_show_recording` is called again when the gesture is decided at 0.3s and
+  preview page; an end sound's tail cut at -40 dB, a start sound's at -20 dB plus a 50ms fade, 0.07s (Pop) to 0.45s
+  (Triad), since it is cut out of the recording). The start sound plays as the indicator fades in, once (`_show_recording` is called again when the gesture is decided at 0.3s and
   replayed it until 2026-10-13). For its length plus `_CUE_LATENCY` (0.25s; PlaySound to microphone measured 0.17s
   on the user's machine) the level bars stay still (`Recorder.still`) and the speakers on; muting starts after.
   Recording still runs from key-down: dropping the audio while the sound played (tried the same day, the user's
@@ -308,12 +308,17 @@ removed the same day they were built: the user corrects by selecting with the mo
   when muted (a tap that flashed the indicator played it before). A double tap's second press shows no indicator
   until it records (it flashed with a second start sound). Each press and gesture is logged (`press ...`,
   `gesture ...`).
-- **Start sound taken out before recognition** (`cues.cancel`, 2026-10-13): with nothing said, X-ASR heard the start
-  sound the microphone picked up as text (Bubble / Mallet / Kalimba "Yeah.", Triad "One" / "Four.", Blip "Blip.").
-  The sound is found by cross-correlation 0.1-0.6s in and a least-squares FIR (256 taps, FFT + normal equations,
-  5-70ms) is subtracted (~10 dB). User's recordings: text from silent presses 6/29 → 2-4/29 (Triad's One left);
-  換行 with a sound mixed in 178/216 → 184-186/216 (83% with no sound). Turning the stretch down instead removed all
-  text but cut words said over it. Saved recordings keep the raw audio.
+- **Start sound cut out before recognition** (`cues.remove`, 2026-10-13, the user's choice: the recording counts from
+  the end of the start sound): with nothing said, X-ASR heard the sound the microphone picked up as text (Bubble /
+  Mallet / Kalimba "Yeah.", Triad "One" / "Four.", Blip "Blip."). It is found by cross-correlation 0.1-0.6s in and
+  that stretch spliced out (10ms crossfade), keeping the room noise before it: dropping everything before its end, or
+  silencing it, made X-ASR hear short commands wrong (送出 -> Somehow). The start sounds were shortened for this
+  (their -40 dB tails reached 0.36-0.60s and the user's first word, ASR timestamps: 0.80s after the press, median,
+  vs 0.48s before sounds existed, often came while the tail still played). User's recordings: silent presses with
+  text 13/95 -> 2/95 (probably said); 換行 with the sound before the speech 204/216 (subtracting it: 210/216), but
+  spoken over the sound 99/216 (subtracting: 186/216): words said before it ends are lost, the cost the user chose.
+  A weak match (below `cues.MATCH` 0.6: headphones, or speech over it) falls back to `cues.cancel`, a least-squares
+  FIR (256 taps, ~10 dB) subtracted. Saved recordings keep the raw audio.
 - **Hold check uses the hook's key state** (`Hotkeys.is_down`, 2026-10-13): the 0.3s hold timer runs on the main
   thread, which a double tap's delete in a terminal keeps busy; the release was still queued, the second press
   counted as held, recorded (delete and say it again) and played the end sound. Now the timer asks the hook whether
