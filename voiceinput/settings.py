@@ -237,7 +237,14 @@ class SettingsDialog(QDialog):
             card.setStyleSheet(_CARD_STYLE)
             row = QHBoxLayout(card)
             row.setContentsMargins(8, 4, 4, 4)
-            row.addWidget(QLabel(h.word), 1)
+            row.addWidget(QLabel(h.word))
+            for alias in h.aliases:
+                fix = QPushButton(f"{alias} ✕", flat=True, clicked=lambda _=False, w=h.word, a=alias:
+                                  self._remove_alias(w, a))
+                fix.setToolTip(f"辨識出「{alias}」時會改成「{h.word}」（選字時學到的）；按一下就不再改")
+                fix.setStyleSheet("color: gray")
+                row.addWidget(fix)
+            row.addStretch(1)
             added = QLabel(h.added)
             added.setStyleSheet("color: gray")
             added.setToolTip("加入的日期")
@@ -299,6 +306,10 @@ class SettingsDialog(QDialog):
         self.cfg.packs = ids
         self.cfg.save()
         self.hotwords.set_packs(packs.words_for(ids), packs.PCT)
+
+    def _remove_alias(self, word: str, alias: str):
+        self.hotwords.remove_alias(word, alias)
+        self.refresh_hotwords()
 
     def _remove_hotword(self, word: str):
         self.hotwords.remove(word)

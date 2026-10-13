@@ -32,7 +32,7 @@ from PySide6.QtCore import QLockFile, QObject, QPointF, QRectF, Qt, QTimer, Sign
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
-from . import autostart, candidates, edit, models, packs, paths, rules, sounds
+from . import autostart, candidates, edit, models, packs, paths, rules, sounds, spelling
 from .asr import Recognizer
 from .audio import Recorder
 from .config import Config
@@ -585,6 +585,10 @@ class App(QObject):
             # no sentence-final punctuation when the caret has text on both sides: the user is inserting
             mid = ctx.caret is not None and all(s.strip() for s in ctx.caret)
             formatted = format_text(raw, mid)
+            known = spelling.table(self._known_terms(ctx.terms), self.hotwords.aliases())
+            formatted, spelled = spelling.fix(formatted, known)
+            if spelled:
+                log.info("spelling: %s", ", ".join(f"{a} -> {b}" for a, b in spelled))
             selected = ctx.selection is not None and press.deleted is None and press.first is None
             op = rules.pick(rules.candidates(self.cfg.rules, rules.SPEECH, formatted), selected, press.dictated)
             if op is not None:

@@ -151,7 +151,16 @@ lived a few hours: the user wants hotwords added quietly (they come from deliber
   first up to 4 known terms that sound like the selection (`sounds.py`; the user's list, ticked packs, terms on
   screen: clock code → Claude Code, lanchin → LangChain, Deepsec → DeepSeek; 20 of 24 TTS mishearings first, 23
   in the menu), then the spellings below. No threshold separates mishearings from ordinary words (commit ~ ComfyUI
-  scores like clock ~ Claude), so an ordinary word gets a few look-alikes above its spellings. (Single characters still
+  scores like clock ~ Claude), so an ordinary word gets a few look-alikes above its spellings.
+- **English spelling after recognition** (`spelling.py`, 2026-10-13, the user's choice): X-ASR often hears a term
+  right and spells it its own way (Deep Seek, Notebook LM, fine tune). After `format_text`, a run of English words
+  whose letters equal a known term's (user list, ticked packs, on-screen terms) is written as the term; case alone
+  only when it adds inner capitals (deepseek → DeepSeek; cursor, Open Source stay). Aliases: an English spelling with
+  other letters replaced in 選字 or by typing (Dipsick → DeepSeek) is stored on the word (`aliases` in
+  hotword-list.json, shown after the word on the 詞庫 tab, ✕ removes one; picking it back removes it) and always
+  rewritten. This is replacement after recognition, for English only. Why not more: the user's real DeepSeek at
+  200% still came out as Dipsick / Dipsi / deep sick; TTS showed +4 helps a little (Ollama alone), +5 breaks
+  (DeepSeek → Deep, queue → que), and negative scores for misheard spellings made it worse (Deep Seek → Deepsec). (Single characters still
   use `candidates.homophones`: common first, then the reading tiers.) English: spellings (`memory.variants`: Claude / claude / CLAUDE; voiceInput /
   VoiceInput / Voice Input / voice input / VOICE INPUT / voice_input / voice-input / voiceinput, the styles picked
   most first, counted apart for one word and for several), hotwords among them first by weight. 8 rows.
