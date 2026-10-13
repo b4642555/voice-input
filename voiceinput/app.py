@@ -32,7 +32,7 @@ from PySide6.QtCore import QLockFile, QObject, QPointF, QRectF, Qt, QTimer, Sign
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
-from . import autostart, candidates, edit, models, packs, paths, rules
+from . import autostart, candidates, edit, models, packs, paths, rules, sounds
 from .asr import Recognizer
 from .audio import Recorder
 from .config import Config
@@ -501,8 +501,9 @@ class App(QObject):
                 elif step.type == rules.COMMAND and step.value == rules.DELETE_DICTATION:
                     self._on_main(self.delete_last)
                 elif step.type == rules.COMMAND and step.value == rules.PICK:
-                    sel = press.probe.result().selection if press.deleted is None else None
-                    self._on_main(lambda: self._open_candidates(sel))
+                    ctx = press.probe.result()
+                    sel = ctx.selection if press.deleted is None else None
+                    self._on_main(lambda: self._open_candidates(sel, ctx.terms))
         except Exception:
             log.exception("steps failed")
         finally:
@@ -678,24 +679,27 @@ class App(QObject):
             self.picker.hide()
         self._menu = None
 
-    def _open_candidates(self, sel):
-        """選字: the candidate menu for the selection, under it."""
+    def _open_candidates(self, sel, terms=()):
+        """選字: the candidate menu for the selection, under it. terms: English terms on screen."""
         if sel is None or not sel.text.strip():
             log.info("pick: nothing selected")
             return
         log.info("candidates for %r on %s", sel.text, sel.app)
         self._menu = ("pick", sel)
         self.picker.show_loading(sel.text.strip(), sel.rect)
-        threading.Thread(target=lambda: self.candidates_ready.emit(sel, self._menu_words(sel)), daemon=True).start()
+        threading.Thread(target=lambda: self.candidates_ready.emit(sel, self._menu_words(sel, terms)), daemon=True).start()
 
-    def _menu_words(self, sel) -> list[str]:
+    def _menu_words(self, sel, terms=()) -> list[str]:
         """Rows for the selection. One Chinese character: what the smart picks decide here, everything picked for it
-        before, then same-sounding characters. A word: same-sounding words, the same reading first (Chinese), or ways
-        of writing it, the most picked style first (English); hotwords first among equals, heaviest first."""
+        before, then same-sounding characters. A Chinese word: same-sounding words, the same reading first; hotwords
+        first among equals, heaviest first. English: up to 4 known terms that sound like it (sounds.py: the user's
+        list, ticked term packs, terms on screen), then ways of writing it, the most picked style first (the
+        hotwords among them first)."""
         text = sel.text.strip()
         try:
             if is_latin(text):
                 rows = self.memory.ordered_variants(text)
+                known = self._known_terms(terms)
             elif len(text) == 1:
                 rows = candidates.homophones(text)
             else:
@@ -718,6 +722,7 @@ class App(QObject):
             elif is_latin(text):
                 weights = self.hotwords.weights_for(rows)
                 rows.sort(key=lambda w: -weights.get(w, 0))   # stable: the rest keep their order
+                rows = sounds.alike(text, known) + rows
         except Exception:
             log.exception("candidates failed")
             rows = []
@@ -726,6 +731,12 @@ class App(QObject):
             if w and w != text and w not in out:
                 out.append(w)
         return out[:_MENU_ROWS]
+
+    def _known_terms(self, terms) -> list[str]:
+        """English terms 選字 may offer for a misheard word: the user's list (highest 優先度 first), the ticked term
+        packs, then the terms on screen."""
+        listed = sorted((h for h in self.hotwords.items if is_latin(h.word)), key=lambda h: -h.pct)
+        return [h.word for h in listed] + [w for w in self.hotwords.pack_pct if is_latin(w)] + list(terms)
 
     def on_candidates(self, sel, words: list):
         if self._menu and self._menu[0] == "pick" and self._menu[1] is sel and self.picker.isVisible():

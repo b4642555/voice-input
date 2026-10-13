@@ -8,7 +8,7 @@ box), click (the user clicks: ends what the app knows about the text), tap (one 
 (double tap), tap2:WAV (double tap, the second press held while WAV is spoken), toggle:WAV (tap, speak, tap),
 hotkey:NAME (the key or button the next steps press, default mouse_middle), rules:default (the default operations),
 rule:JSON (add an operation, rules.Rule.from_dict), at:WORD (put the caret right after the last WORD; at: puts it at
-the end), say:TEXT (dictate TEXT as if recognized), set:NAME=VALUE (change a setting in memory only) or key:BACK (the
+the end), say:TEXT (dictate TEXT as if recognized), set:NAME=VALUE (change a setting in memory only), packs:ID+ID (tick term packs, in memory only) or key:BACK (the
 user presses Backspace n times: key:BACK*3), pick:N / pickw:WORD (click a row of the 選字 menu), type:TEXT (type TEXT in the menu's input box and press Enter). Settings are never saved; hotwords and smart picks live in <dir> (hotwords.test.json,
 smart-picks.test.json, emptied at the start), never in the real files.
 """
@@ -219,6 +219,11 @@ try:
             name, value = step[4:].split("=")
             setattr(A.cfg, name, type(getattr(A.cfg, name))(int(value) if value.isdigit() else value))
             print(f"[設定 {name} = {getattr(A.cfg, name)!r}]（只改記憶體，不存檔）")
+            continue
+        if step.startswith("packs:"):
+            ids = [i for i in step[6:].split("+") if i]
+            A.hotwords.set_packs(appmod.packs.words_for(ids), appmod.packs.PCT)
+            print(f"[詞包 {ids}]（只改記憶體，不存檔）")
             continue
         if step.startswith("say:"):
             A._dictate(step[4:], None, HWND, appmod._Press("", Probe(), 0, False))

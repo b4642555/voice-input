@@ -147,7 +147,11 @@ lived a few hours: the user wants hotwords added quietly (they come from deliber
 - **選字** (command): the menu under the selection. One Chinese character: what the smart picks decide here, what
   was picked for it before, then same-sounding characters. A Chinese word: homophones (`candidates.ranked`), the same reading with tones
   first (the user's choice, 2026-10-11), then without tones, then fuzzy; within each: hotwords by weight (lowered ones last), common
-  words (frequency ≥ 5, since McBopomofo lists obscure entries like 逆號 at 1), frequency. (Single characters still
+  words (frequency ≥ 5, since McBopomofo lists obscure entries like 逆號 at 1), frequency. English (2026-10-13):
+  first up to 4 known terms that sound like the selection (`sounds.py`; the user's list, ticked packs, terms on
+  screen: clock code → Claude Code, lanchin → LangChain, Deepsec → DeepSeek; 20 of 24 TTS mishearings first, 23
+  in the menu), then the spellings below. No threshold separates mishearings from ordinary words (commit ~ ComfyUI
+  scores like clock ~ Claude), so an ordinary word gets a few look-alikes above its spellings. (Single characters still
   use `candidates.homophones`: common first, then the reading tiers.) English: spellings (`memory.variants`: Claude / claude / CLAUDE; voiceInput /
   VoiceInput / Voice Input / voice input / VOICE INPUT / voice_input / voice-input / voiceinput, the styles picked
   most first, counted apart for one word and for several), hotwords among them first by weight. 8 rows.
@@ -177,8 +181,7 @@ lived a few hours: the user wants hotwords added quietly (they come from deliber
   word, moved from 170%. TTS (18 sentences with a term, 28 without): 130% 11/18, 150-170% 12/18, 200% 14/18 but
   存到 cloud 上面 became Claude, so 170%. First pack: AI 工具與模型 (the user's pick; products, companies, models and
   English terms said in Chinese). Other domains suggested to the user: 辦公與協作, 程式開發, 雲端服務, 設計與影音,
-  行銷與數據, 硬體與系統. Next: English 選字 by sound against the list, packs and on-screen terms (clock code →
-  Claude Code).
+  行銷與數據, 硬體與系統.
 - **Why Chinese biasing works now** (dev experiment by a subagent, 2026-10-11, Windows TTS, 16 target words + 4
   counter-examples; the scripts were deleted): sherpa-onnx's modified beam search keeps the top max_active_paths
   tokens by the model's own score and only then adds the hotword boost (offline-transducer-modified-beam-search-
