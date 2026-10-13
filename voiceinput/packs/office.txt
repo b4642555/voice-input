@@ -1,0 +1,104 @@
+# 辦公與協作
+# One term per line (packs.py). Office suites, chat, project tools and the English said around them at work.
+
+# office suites and documents
+Microsoft 365
+Office
+Word
+Excel
+PowerPoint
+Outlook
+OneNote
+OneDrive
+SharePoint
+Teams
+Google Workspace
+Gmail
+Google Docs
+Google Sheets
+Google Slides
+Google Drive
+Google Calendar
+Google Meet
+Google Forms
+Keynote
+iCloud
+Dropbox
+WPS
+PDF
+Acrobat
+
+# chat and meetings
+Slack
+Discord
+LINE
+Telegram
+WhatsApp
+Messenger
+Zoom
+Webex
+Lark
+DingTalk
+WeChat
+
+# notes, wikis and project tools
+Notion
+Obsidian
+Evernote
+Confluence
+Jira
+Trello
+Asana
+Monday
+ClickUp
+Airtable
+Miro
+FigJam
+Todoist
+Calendly
+Loom
+DocuSign
+Salesforce
+HubSpot
+Zendesk
+Intercom
+
+# English said at work
+email
+meeting
+deadline
+schedule
+agenda
+follow up
+sync
+standup
+one-on-one
+KPI
+OKR
+roadmap
+milestone
+sprint
+backlog
+ticket
+feedback
+review
+proposal
+slide
+deck
+template
+dashboard
+spreadsheet
+pivot table
+VLOOKUP
+workflow
+SOP
+FAQ
+CC
+BCC
+PM
+HR
+CEO
+CTO
+CFO
+B2B
+B2C

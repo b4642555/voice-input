@@ -1,0 +1,80 @@
+# 設計與影音
+# One term per line (packs.py). Design, photo, video and audio tools and their vocabulary.
+
+Figma
+Sketch
+Adobe
+Photoshop
+Illustrator
+InDesign
+Lightroom
+Premiere
+Premiere Pro
+After Effects
+Audition
+Adobe XD
+Acrobat
+Canva
+Framer
+Webflow
+Procreate
+Affinity
+Blender
+Cinema 4D
+Maya
+Unity
+Unreal Engine
+DaVinci Resolve
+Final Cut Pro
+CapCut
+OBS
+Audacity
+Logic Pro
+GarageBand
+Ableton
+Spline
+Lottie
+Dribbble
+Behance
+Pinterest
+Unsplash
+YouTube
+Instagram
+TikTok
+Threads
+Facebook
+UI
+UX
+wireframe
+mockup
+prototype
+layout
+component
+design system
+style guide
+typography
+font
+icon
+logo
+branding
+palette
+gradient
+mask
+layer
+vector
+render
+keyframe
+timeline
+transition
+color grading
+B-roll
+thumbnail
+fps
+RGB
+CMYK
+HEX
+SVG
+PNG
+JPG
+GIF
+MP4

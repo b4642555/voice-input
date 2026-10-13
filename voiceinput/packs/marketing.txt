@@ -1,0 +1,74 @@
+# 行銷與數據
+# One term per line (packs.py). Marketing, analytics and business data vocabulary.
+
+SEO
+SEM
+SEA
+GA4
+Google Analytics
+Google Ads
+Google Tag Manager
+Search Console
+Looker Studio
+Meta Ads
+Facebook Ads
+Mailchimp
+HubSpot
+Salesforce
+Shopify
+WooCommerce
+WordPress
+Tableau
+Power BI
+Excel
+Hotjar
+Mixpanel
+Amplitude
+Semrush
+Ahrefs
+CRM
+ERP
+CDP
+KPI
+OKR
+ROI
+ROAS
+CPC
+CPM
+CPA
+CTR
+CVR
+LTV
+CAC
+GMV
+AOV
+MAU
+DAU
+retention
+churn
+conversion
+funnel
+landing page
+campaign
+engagement
+impression
+reach
+traffic
+lead
+persona
+branding
+copywriting
+content marketing
+influencer
+KOL
+UGC
+newsletter
+remarketing
+dashboard
+report
+insight
+data
+analytics
+B2B
+B2C
+D2C

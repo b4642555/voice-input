@@ -1,0 +1,86 @@
+# 硬體與系統
+# One term per line (packs.py). Computers, parts, operating systems and their vocabulary.
+
+Windows
+Windows 11
+macOS
+iOS
+iPadOS
+Android
+Linux
+ChromeOS
+Apple
+MacBook
+MacBook Pro
+MacBook Air
+iMac
+Mac mini
+iPhone
+iPad
+AirPods
+Apple Watch
+Microsoft
+Surface
+Lenovo
+ThinkPad
+Dell
+HP
+ASUS
+Acer
+MSI
+Logitech
+Razer
+Samsung
+Sony
+NVIDIA
+AMD
+Intel
+Qualcomm
+Snapdragon
+Apple Silicon
+M4
+Ryzen
+GeForce
+RTX
+CPU
+GPU
+NPU
+RAM
+ROM
+SSD
+HDD
+NVMe
+USB
+USB-C
+Thunderbolt
+HDMI
+DisplayPort
+Bluetooth
+Wi-Fi
+Ethernet
+router
+NAS
+monitor
+OLED
+keyboard
+mouse
+trackpad
+webcam
+headset
+dock
+BIOS
+driver
+firmware
+update
+reboot
+Task Manager
+File Explorer
+Control Panel
+registry
+PowerToys
+Finder
+Spotlight
+Terminal
+shortcut
+screenshot
+clipboard

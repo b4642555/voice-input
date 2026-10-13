@@ -1,0 +1,84 @@
+# 雲端服務
+# One term per line (packs.py). Cloud platforms, hosting, databases and their vocabulary.
+
+AWS
+Amazon Web Services
+EC2
+S3
+Lambda
+CloudFront
+RDS
+DynamoDB
+Azure
+Google Cloud
+GCP
+Firebase
+Cloud Run
+BigQuery
+Cloudflare
+Cloudflare Workers
+Vercel
+Netlify
+Heroku
+Fly.io
+DigitalOcean
+Linode
+Hetzner
+Supabase
+PlanetScale
+Neon
+MongoDB
+PostgreSQL
+Postgres
+MySQL
+SQLite
+Redis
+Elasticsearch
+Kafka
+RabbitMQ
+Snowflake
+Databricks
+Terraform
+Ansible
+Nginx
+Apache
+Linux
+Ubuntu
+Debian
+CentOS
+Docker Hub
+Kubernetes
+Helm
+Grafana
+Prometheus
+Datadog
+Stripe
+Twilio
+SendGrid
+Auth0
+Okta
+OAuth
+SSO
+DNS
+CDN
+VPS
+VPC
+VPN
+IP
+SSL
+TLS
+load balancer
+serverless
+container
+cluster
+instance
+region
+bucket
+storage
+backup
+uptime
+latency
+SaaS
+PaaS
+IaaS
+DevOps

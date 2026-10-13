@@ -3,9 +3,11 @@
 a word is listed there only once the user picks it, has it replaced or moves it, and from then on the user's
 percentage wins.
 
-PCT measured with Windows TTS (2026-10-13, the AI pack, 18 sentences with a pack term, 28 without): 130% hit 11/18,
-150% and 170% 12/18, 200% 14/18, but at 200% 我把檔案存到 cloud 上面 became Claude; nothing else changed at any
-strength, and the 178 words cost no time. The TTS voice says English badly, so real hit rates should be higher.
+PCT measured with Windows TTS (2026-10-13). The AI pack alone: 130% hit 11/18, 150-170% 12/18, 200% 14/18 but
+我把檔案存到 cloud 上面 became Claude. All seven packs (723 words, 38 sentences with a term, 37 without; with
+spelling.py, which alone gets 18/38): 120% 24/38, 130% 25/38 but 開 task manager lost 開, 150% 28/38 but Gira 的
+ticket became Key the ticket, 170% also Kimi task manager: many short English words take over a sentence's start.
+No time cost. The TTS voice says English badly, so real hit rates should be higher.
 
 File format: the first line is "# <name>", other lines starting with # are comments, one term per line.
 """
@@ -16,7 +18,8 @@ from pathlib import Path
 log = logging.getLogger("voiceinput")
 
 DIR = Path(__file__).resolve().parent / "packs"
-PCT = 170
+PCT = 120
+ORDER = ["ai", "office", "dev", "cloud", "design", "marketing", "hardware"]   # as shown on the 詞庫 tab
 
 
 @dataclass
@@ -35,7 +38,8 @@ def _load(path: Path) -> Pack:
 
 def available() -> list[Pack]:
     out = []
-    for path in sorted(DIR.glob("*.txt")):
+    rank = {pack_id: i for i, pack_id in enumerate(ORDER)}
+    for path in sorted(DIR.glob("*.txt"), key=lambda p: (rank.get(p.stem, len(ORDER)), p.stem)):
         try:
             out.append(_load(path))
         except (OSError, UnicodeDecodeError):

@@ -7,9 +7,9 @@ import os
 
 from pypinyin import lazy_pinyin
 from PySide6.QtCore import QEvent, Qt, QTimer, Signal
-from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QFrame, QHBoxLayout,
-                               QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea, QSpinBox, QTabWidget,
-                               QTextBrowser, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QFrame,
+                               QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea,
+                               QSpinBox, QTabWidget, QTextBrowser, QVBoxLayout, QWidget)
 
 from . import audio, hotwords, packs, rules
 from .keys import KEY_TRIGGERS, MOUSE_TRIGGERS, combo_text, is_modifier
@@ -214,14 +214,14 @@ class SettingsDialog(QDialog):
         scroll.setWidget(inner)
         self.hw_sort = _combo(HOTWORD_SORTS, self.cfg.hotword_sort)
         self.hw_sort.currentIndexChanged.connect(self._sort_hotwords)
-        pack_row = QHBoxLayout()
-        pack_row.addWidget(QLabel("詞包"))
-        for pack in packs.available():
+        pack_grid = QGridLayout()
+        pack_grid.addWidget(QLabel("詞包"), 0, 0, Qt.AlignTop)
+        for n, pack in enumerate(packs.available()):
             box = QCheckBox(f"{pack.name}（{len(pack.words)}）", checked=pack.id in self.cfg.packs)
             box.setToolTip(f"整包的詞以優先度 {_shown(packs.PCT)} 辨識；選字選過或被換掉的詞會列在下面，以那裡的優先度為準")
             box.toggled.connect(lambda on, i=pack.id: self._toggle_pack(i, on))
-            pack_row.addWidget(box)
-        pack_row.addStretch()
+            pack_grid.addWidget(box, n // 3, 1 + n % 3)
+        pack_grid.setColumnStretch(4, 1)
         top = QHBoxLayout()
         top.addWidget(QLabel("排序"))
         top.addWidget(self.hw_sort)
@@ -231,7 +231,7 @@ class SettingsDialog(QDialog):
         self.hw_empty.setWordWrap(True)
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.addLayout(pack_row)
+        layout.addLayout(pack_grid)
         layout.addLayout(top)
         layout.addWidget(self.hw_empty)
         layout.addWidget(scroll, 1)

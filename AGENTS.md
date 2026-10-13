@@ -184,14 +184,16 @@ lived a few hours: the user wants hotwords added quietly (they come from deliber
 - **Hotword volume** (TTS, 2026-10-13): random dictionary words at score 2 cost nothing up to 5k (0.50s → 0.54s for
   9.5s of audio), 20k 0.73s, 50k 1.12s (the hotword graph is rebuilt per stream), but from 20k on 熱詞 came out as
   熱刺: large term lists hurt accuracy before speed.
-- **Term packs** (詞包, `packs.py`, `voiceinput/packs/<id>.txt`, ticked on the 詞庫 tab, `packs` in config.json;
-  2026-10-13): curated lists, a few hundred words each, no version numbers (textfmt writes spoken numbers). Wikidata
-  is only a cross-check (`dev/pack_candidates.py` lists linked items a pack lacks): it misses tools (Cursor, Ollama)
-  and is noisy (DeviantArt). Words of ticked packs bias at 170% without being listed; a pick or replacement lists a
-  word, moved from 170%. TTS (18 sentences with a term, 28 without): 130% 11/18, 150-170% 12/18, 200% 14/18 but
-  存到 cloud 上面 became Claude, so 170%. First pack: AI 工具與模型 (the user's pick; products, companies, models and
-  English terms said in Chinese). Other domains suggested to the user: 辦公與協作, 程式開發, 雲端服務, 設計與影音,
-  行銷與數據, 硬體與系統.
+- **Term packs** (詞包, `packs.py`, `voiceinput/packs/<id>.txt`, ticked on the 詞庫 tab in a grid, `packs` in
+  config.json; 2026-10-13): seven curated lists in `packs.ORDER` (AI 工具與模型, 辦公與協作, 程式開發, 雲端服務,
+  設計與影音, 行銷與數據, 硬體與系統; 723 words), no version numbers (textfmt writes spoken numbers), no common words
+  as capitalized products (Box, Go, Pages, Numbers, Render, Railway, Linear were dropped), nothing hotword_spec cannot
+  encode (UI/UX, 4K, CI/CD). Wikidata is only a cross-check (`dev/pack_candidates.py`): it misses tools (Cursor,
+  Ollama) and is noisy (DeviantArt). Words of ticked packs bias at 120% (+20% on screen) without being listed; a pick
+  or replacement lists a word, moved from there. Strength by TTS with all packs and spelling.py (which alone gets
+  18/38): 120% 24/38, 130% 25/38 but 開 task manager lost 開, 150% 28/38 but Gira 的 ticket → Key the ticket, 170%
+  also Kimi task manager: many short English words take over a sentence's start. The AI pack alone looked safe at
+  170% on sentences that did not start that way.
 - **Why Chinese biasing works now** (dev experiment by a subagent, 2026-10-11, Windows TTS, 16 target words + 4
   counter-examples; the scripts were deleted): sherpa-onnx's modified beam search keeps the top max_active_paths
   tokens by the model's own score and only then adds the hotword boost (offline-transducer-modified-beam-search-

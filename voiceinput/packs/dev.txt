@@ -1,0 +1,169 @@
+# 程式開發
+# One term per line (packs.py). Languages, frameworks, tools and the English developers say inside Chinese.
+
+# languages
+Python
+JavaScript
+TypeScript
+Java
+Kotlin
+Swift
+Golang
+Rust
+C++
+C#
+Ruby
+PHP
+Dart
+Scala
+Elixir
+Lua
+SQL
+HTML
+CSS
+Bash
+PowerShell
+YAML
+JSON
+Markdown
+regex
+
+# frameworks and libraries
+React
+Next.js
+Vue
+Nuxt
+Svelte
+Angular
+Astro
+Vite
+Tailwind
+Node.js
+Deno
+Bun
+Express
+NestJS
+Django
+Flask
+FastAPI
+Spring Boot
+Laravel
+Rails
+Flutter
+React Native
+Electron
+Tauri
+Qt
+PySide
+NumPy
+pandas
+Prisma
+GraphQL
+Redux
+jQuery
+Bootstrap
+
+# tools
+Git
+GitHub
+GitLab
+Bitbucket
+VS Code
+Visual Studio
+IntelliJ
+PyCharm
+Xcode
+Android Studio
+Vim
+Neovim
+Emacs
+npm
+pnpm
+yarn
+pip
+uv
+conda
+Homebrew
+Docker
+Kubernetes
+Postman
+ESLint
+Prettier
+Jest
+Vitest
+pytest
+Playwright
+Cypress
+Selenium
+Webpack
+Storybook
+Sentry
+Jenkins
+GitHub Actions
+terminal
+WSL
+
+# English said inside Chinese
+repo
+commit
+push
+pull
+merge
+rebase
+branch
+pull request
+PR
+code review
+diff
+main
+release
+deploy
+build
+debug
+bug
+issue
+refactor
+framework
+library
+package
+dependency
+API
+endpoint
+frontend
+backend
+full stack
+database
+schema
+query
+cache
+config
+env
+runtime
+compiler
+script
+function
+class
+variable
+array
+string
+null
+async
+callback
+hook
+component
+props
+state
+test
+unit test
+CI
+CD
+localhost
+port
+SSH
+HTTP
+HTTPS
+REST
+JSON
+IDE
+CLI
+SDK
