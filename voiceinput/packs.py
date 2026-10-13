@@ -7,7 +7,11 @@ PCT measured with Windows TTS (2026-10-13). The AI pack alone: 130% hit 11/18, 1
 我把檔案存到 cloud 上面 became Claude. All seven packs (723 words, 38 sentences with a term, 37 without; with
 spelling.py, which alone gets 18/38): 120% 24/38, 130% 25/38 but 開 task manager lost 開, 150% 28/38 but Gira 的
 ticket became Key the ticket, 170% also Kimi task manager: many short English words take over a sentence's start.
-No time cost. The TTS voice says English badly, so real hit rates should be higher.
+No time cost. Those runs had a bug: app._bias dropped a word another one starts with, so Gemini (Gemini CLI),
+Claude (Claude Code), token (tokenizer) ... were never boosted. Fixed (Chinese only), the user's real recordings
+(14 times Gemini): 120% 8, 150% 10, 170% 12 but the user's Cloud became Claude, 200% 13 with more damage; TTS 150%
+28/38, nothing correct broken except 開 task manager with all seven packs (fine with the AI pack alone). So 150%;
+picks raise a word from there (Gemini picked once: 180%).
 
 File format: the first line is "# <name>", other lines starting with # are comments, one term per line.
 """
@@ -18,7 +22,7 @@ from pathlib import Path
 log = logging.getLogger("voiceinput")
 
 DIR = Path(__file__).resolve().parent / "packs"
-PCT = 120
+PCT = 150
 ORDER = ["ai", "office", "dev", "cloud", "design", "marketing", "hardware"]   # as shown on the 詞庫 tab
 
 

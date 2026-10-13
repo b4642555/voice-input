@@ -189,11 +189,11 @@ lived a few hours: the user wants hotwords added quietly (they come from deliber
   設計與影音, 行銷與數據, 硬體與系統; 723 words), no version numbers (textfmt writes spoken numbers), no common words
   as capitalized products (Box, Go, Pages, Numbers, Render, Railway, Linear were dropped), nothing hotword_spec cannot
   encode (UI/UX, 4K, CI/CD). Wikidata is only a cross-check (`dev/pack_candidates.py`): it misses tools (Cursor,
-  Ollama) and is noisy (DeviantArt). Words of ticked packs bias at 120% (+20% on screen) without being listed; a pick
-  or replacement lists a word, moved from there. Strength by TTS with all packs and spelling.py (which alone gets
-  18/38): 120% 24/38, 130% 25/38 but 開 task manager lost 開, 150% 28/38 but Gira 的 ticket → Key the ticket, 170%
-  also Kimi task manager: many short English words take over a sentence's start. The AI pack alone looked safe at
-  170% on sentences that did not start that way.
+  Ollama) and is noisy (DeviantArt). Words of ticked packs bias at 150% (+50% on screen) without being listed; a pick
+  or replacement lists a word, moved from there. Strength: see `packs.py` (the user's recordings: Gemini 8/14 at
+  120%, 10/14 at 150%, 12/14 at 170% but Cloud → Claude). Until 2026-10-13 evening `_bias` dropped any word another
+  one starts with, English too, so pack words like Gemini (Gemini CLI) and Claude (Claude Code) were never boosted;
+  now only Chinese (剪貼 / 剪貼簿).
 - **Why Chinese biasing works now** (dev experiment by a subagent, 2026-10-11, Windows TTS, 16 target words + 4
   counter-examples; the scripts were deleted): sherpa-onnx's modified beam search keeps the top max_active_paths
   tokens by the model's own score and only then adds the hotword boost (offline-transducer-modified-beam-search-

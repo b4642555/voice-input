@@ -872,9 +872,14 @@ class App(QObject):
         self.qapp.quit()
 
 
+_CJK_CHAR = re.compile(r"[㐀-䶿一-鿿]")
+
+
 def _bias(words: list[tuple[str, float]]) -> list[tuple[str, float]]:
-    """Biasing words without a word another one starts with: with 剪貼 and 剪貼簿 both listed, X-ASR wrote 剪貼布
-    (the short one is matched first and takes the boost; dev experiment 2026-10-11). The first of duplicates wins.
+    """Biasing words without a Chinese word another one starts with: with 剪貼 and 剪貼簿 both listed, X-ASR wrote 剪貼布
+    (the short one is matched first and takes the boost; dev experiment 2026-10-11). English keeps both: dropping
+    Gemini for Gemini CLI left Gemini unboosted (the user's recordings, 2026-10-13: 14/14 at 3 with both or alone,
+    10/14 with Gemini CLI alone). The first of duplicates wins.
     A lowered word (negative score) sharing a start with another word is left out, so it never costs that one its
     boost or its place (城市 lowered next to 城市規劃)."""
     keys = [w.casefold() for w, _ in words]
@@ -884,7 +889,7 @@ def _bias(words: list[tuple[str, float]]) -> list[tuple[str, float]]:
     out, kept = [], set()
     for w, score in words:
         k = w.casefold()
-        if k in kept or any(o != k and o.startswith(k) for o in seen):
+        if k in kept or (_CJK_CHAR.search(k) and any(o != k and o.startswith(k) for o in seen)):
             continue
         kept.add(k)
         out.append((w, score))

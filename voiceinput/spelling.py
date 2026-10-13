@@ -29,21 +29,25 @@ def _adds_capitals(span: str, term: str) -> bool:
             and any(c.isupper() for c in term[1:]))
 
 
-def table(terms, aliases) -> dict[str, tuple[str, bool]]:
-    """key -> (term, is_alias); the first of terms with the same key wins, aliases before terms."""
-    out: dict[str, tuple[str, bool]] = {}
+def table(terms, aliases) -> dict[str, tuple[str, bool, set]]:
+    """key -> (term, is_alias, every known spelling with that key); the first of terms with the same key is written,
+    aliases before terms, and a span already spelled like any of them is left alone (CloudFlare stayed CloudFlare
+    with Cloud Flare also listed; before, it was rewritten as Cloud Flare)."""
+    out: dict[str, tuple[str, bool, set]] = {}
     for alias, term in aliases:
         k = key(alias)
-        if len(k) > 1:
-            out.setdefault(k, (term, True))
+        if len(k) > 1 and k not in out:
+            out[k] = (term, True, set())
     for term in terms:
         k = key(term)
         if len(k) > 1:
-            out.setdefault(k, (term, False))
+            if k not in out:
+                out[k] = (term, False, set())
+            out[k][2].add(term)
     return out
 
 
-def fix(text: str, known: dict[str, tuple[str, bool]]) -> tuple[str, list[tuple[str, str]]]:
+def fix(text: str, known: dict[str, tuple[str, bool, set]]) -> tuple[str, list[tuple[str, str]]]:
     """text with known terms spelled as listed, and the (before, after) changes."""
     if not known:
         return text, []
@@ -60,8 +64,8 @@ def fix(text: str, known: dict[str, tuple[str, bool]]) -> tuple[str, list[tuple[
                 hit = known.get(key(span))
                 if hit is None:
                     continue
-                term, alias = hit
-                if span == term:   # already right: its pieces are not tried as shorter terms
+                term, alias, spellings = hit
+                if span == term or span in spellings:   # already right: its pieces are not tried as shorter terms
                     i += n
                     break
                 if not alias and span.lower() == term.lower() and not _adds_capitals(span, term):
