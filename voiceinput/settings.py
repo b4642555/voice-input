@@ -1,6 +1,6 @@
 """Settings window in four tabs: 一般 (general), 辨識紀錄 (live transcript log), 自訂操作 (custom operations,
 rules.py) and 詞庫 (hotwords.py, the UI name for hotwords since 2026-10-13: term packs to tick (packs.py), then every
-listed word with its 優先度 percentage, −/+ by 10%, removable). Every change is applied
+listed word with its 優先度 (−100% .. +100%, 0 does nothing; stored as 0 .. 200%), −/+ by 10%, removable). Every change is applied
 and saved immediately."""
 import html
 import os
@@ -26,6 +26,17 @@ _STEP_DEFAULTS = {rules.COMMAND: rules.DELETE_SELECTION, rules.KEYS: "", rules.T
 
 HOTWORD_SORTS = [("weight", "優先度（高→低）"), ("name", "名稱 A→Z"), ("name_desc", "名稱 Z→A"),
                  ("date", "日期（新→舊）"), ("date_old", "日期（舊→新）")]
+def _shown(pct: int) -> str:
+    """The 優先度 as the user sees it (2026-10-13, the user's choice): 0 does nothing, lowered words are negative."""
+    d = pct - hotwords.NEUTRAL
+    return f"{d:+d}%" if d else "0%"
+
+
+def _show_pct(label, pct: int):
+    label.setText(_shown(pct))
+    label.setStyleSheet("color: #d03030" if pct < hotwords.NEUTRAL else "")
+
+
 _CARD_STYLE = "QFrame#card { border: 1px solid palette(mid); border-radius: 6px; }"
 
 
@@ -207,7 +218,7 @@ class SettingsDialog(QDialog):
         pack_row.addWidget(QLabel("詞包"))
         for pack in packs.available():
             box = QCheckBox(f"{pack.name}（{len(pack.words)}）", checked=pack.id in self.cfg.packs)
-            box.setToolTip(f"整包的詞以優先度 {packs.PCT}% 辨識；選字選過或被換掉的詞會列在下面，以那裡的優先度為準")
+            box.setToolTip(f"整包的詞以優先度 {_shown(packs.PCT)} 辨識；選字選過或被換掉的詞會列在下面，以那裡的優先度為準")
             box.toggled.connect(lambda on, i=pack.id: self._toggle_pack(i, on))
             pack_row.addWidget(box)
         pack_row.addStretch()
@@ -254,9 +265,10 @@ class SettingsDialog(QDialog):
             down.setFixedWidth(28)
             down.setEnabled(h.pct > low)
             row.addWidget(down)
-            percent = QLabel(f"{h.pct}%")
-            percent.setToolTip("優先度：100% 不影響辨識；越高越容易辨識成這個詞，越低越不容易"
-                               + ("" if low == 0 else "（英文最低 100%）"))
+            percent = QLabel()
+            _show_pct(percent, h.pct)
+            percent.setToolTip("優先度：0% 不影響辨識；正的越容易辨識成這個詞，負的越不容易"
+                               + ("" if low == 0 else "（英文最低 0%）"))
             percent.setMinimumWidth(40)
             percent.setAlignment(Qt.AlignCenter)
             row.addWidget(percent)
@@ -297,7 +309,7 @@ class SettingsDialog(QDialog):
             self.refresh_hotwords()
             return
         down, percent, up = self._hw_rows[word]
-        percent.setText(f"{h.pct}%")
+        _show_pct(percent, h.pct)
         down.setEnabled(h.pct > hotwords.floor(word))
         up.setEnabled(h.pct < hotwords.TOP)
 

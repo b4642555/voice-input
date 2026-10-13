@@ -103,7 +103,8 @@ Four tabs, sized for the log: 一般 (microphone, "mute the speakers while recor
 ，", "節日的節" (described characters), autostart, a button that opens smart-picks.json; the menu timeout was
 removed 2026-10-11), 辨識紀錄 (the transcript log), 自訂操作 (custom operations, below) and 詞庫 (hotwords; the UI
 says 詞庫 and 優先度 instead of 熱詞 and weight since 2026-10-13, the code keeps "hotwords": term pack check boxes on
-top, then the list: date added, the 優先度 percentage between −/+ buttons (10% a click; the row is updated in place,
+top, then the list: date added, the 優先度 between −/+ buttons (shown as stored − 100: 0% does nothing, −30% in
+red is lowered, +100% is the top; the user found 70% did not read as lowered, 2026-10-13) (10% a click; the row is updated in place,
 re-sorting made it jump away), remove; the source is not shown; a 排序 drop-down: 優先度, name A→Z / Z→A by pinyin,
 date; remembered). Mute (2026-10-06, `mute.py`): Core Audio via
 comtypes; muted when the recording indicator shows, unmuted once the text is pasted or the press ends in nothing; a
