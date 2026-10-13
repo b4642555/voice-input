@@ -183,6 +183,7 @@ class Memory:
         """The user picked value for text[start:end] (the selection, with its line around it)."""
         old = text[start:end]
         key = reading_key(old)
+        self._forget(text, start, old, value)
         if not key or not (_single(old) and _single(value)):
             self._learn_style(old, value)
             self.save()
@@ -199,8 +200,32 @@ class Memory:
         log.info("smart pick: %s -> %s (%s %s / %s)", old, value, key, "".join(left), "-".join(right))
         self.save()
 
-    def apply(self, text: str, prefix: str = "") -> str:
-        """Replace every span of text that the examples decide otherwise. prefix: the line before it (context)."""
+    def _forget(self, text: str, start: int, old: str, new: str):
+        """A pick that puts back characters a smart pick changed (依瞬間 -> 一瞬間, or 依 -> 一) deletes the examples
+        that made the change here (2026-10-14: 一 -> 依 learned in 右的依序 kept turning 一瞬間 into 依瞬間, as the
+        right side's shun agreed, and picking the word back only moved hotwords)."""
+        if len(old) != len(new):
+            return
+        with self._lock:
+            for i, (o, n) in enumerate(zip(old, new)):
+                if o == n or not (_single(o) and _single(n)):
+                    continue
+                key = reading_key(n)
+                exs = self.examples.get(key, [])
+                left, right = situation(text, start + i, start + i + 1)
+                gone = [e for e in exs if e["value"] == o and sum(_agreement(e["left"], e["right"], left, right)[:2])]
+                if gone:
+                    self.examples[key] = [e for e in exs if e not in gone]
+                    if not self.examples[key]:
+                        del self.examples[key]
+                    for e in gone:
+                        log.info("smart pick forgotten: %s -> %s (%s %s / %s)", n, o, key, "".join(e["left"]),
+                                 "-".join(e["right"]))
+
+    def apply(self, text: str, prefix: str = "", levels: dict[str, int] | None = None) -> str:
+        """Replace every span of text that the examples decide otherwise. prefix: the line before it (context).
+        levels: hotword percentages (Hotwords.levels); a change that breaks a raised word or makes a lowered one
+        is not made."""
         with self._lock:
             if not self.examples:
                 return text
@@ -222,6 +247,10 @@ class Memory:
                 left, right = situation(full, a, b)
                 value = self.lookup(key, left, right, single=(n == 1 and run[0].kind == "cjk"))
                 if value is None:
+                    continue
+                why = _blocked(full, a, b, value, levels) if levels and value != full[a:b] else ""
+                if why:
+                    log.info("smart pick skipped: %s -> %s (%s)", full[a:b], value, why)
                     continue
                 if value != full[a:b]:
                     log.info("smart pick applied: %s -> %s", full[a:b], value)
@@ -246,6 +275,28 @@ class Memory:
         with self._lock:
             vs.sort(key=lambda sv: -self.styles.get(sv[0], 0))   # stable: default order breaks ties
         return [form for _, form in vs]
+
+
+def _covers(text: str, word: str, a: int, b: int) -> bool:
+    """word occurs in text overlapping text[a:b]."""
+    i = text.find(word, max(0, a - len(word) + 1))
+    while i != -1 and i < b:
+        if i + len(word) > a:
+            return True
+        i = text.find(word, i + 1)
+    return False
+
+
+def _blocked(full: str, a: int, b: int, value: str, levels: dict[str, int]) -> str:
+    """Why replacing full[a:b] with value goes against the hotwords: it breaks a raised word or makes a lowered
+    one ("" when it does not)."""
+    new = full[:a] + value + full[b:]
+    for word, pct in levels.items():
+        if pct > 100 and _covers(full, word, a, b) and not _covers(new, word, a, a + len(value)):
+            return f"keeps {word} {pct - 100:+d}%"
+        if pct < 100 and _covers(new, word, a, a + len(value)) and not _covers(full, word, a, b):
+            return f"would make {word} {pct - 100:+d}%"
+    return ""
 
 
 def _single(text: str) -> bool:

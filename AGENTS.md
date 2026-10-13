@@ -170,7 +170,10 @@ lived a few hours: the user wants hotwords added quietly (they come from deliber
 - **Smart picks** (`memory.py`, DATA_DIR/smart-picks.json, one example per line, opened from the 一般 tab): single
   Chinese characters only (the user's choice). Modelled on art-shuangpin's core/user_preferences (spec §7): key
   (toned pinyin) + left (two characters, `^` boundary) + right (two toneless readings) + value; applied after
-  formatting when at least one token agrees, most agreement wins, left alone on a tie. Phrases and English were
+  formatting when at least one token agrees, most agreement wins, left alone on a tie. Since 2026-10-14 a change that breaks
+  a raised hotword or makes a lowered one is not made (`Hotwords.levels`; 一 -> 依 learned in 右的依序 turned
+  一瞬間 into 依瞬間 through the agreeing shun, though the user had 依瞬間 at −100%), and a pick that puts back
+  characters a smart pick changed (依瞬間 -> 一瞬間, or 依 -> 一) deletes the examples that made the change there. Phrases and English were
   learned for a few hours the same day and are ignored on load.
 - **Hotwords** (`hotwords.py`, DATA_DIR/hotword-list.json, one list on the 熱詞 tab; the old key -> value
   hotwords.json is not read). Percentages since 2026-10-13 (the user's design; the scores behind them are not

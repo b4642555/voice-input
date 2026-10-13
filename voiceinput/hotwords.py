@@ -121,6 +121,14 @@ class Hotwords:
         h = self.find(word)
         return h.pct if h is not None else self.base(word)
 
+    def levels(self) -> dict[str, int]:
+        """Words raised or lowered (listed, or in a ticked term pack) -> percentage: smart picks neither break a
+        raised one nor make a lowered one (2026-10-14)."""
+        with self._lock:
+            out = {w: p for w, p in self.pack_pct.items() if p != NEUTRAL}
+            out.update({h.word: h.pct for h in self.items})
+            return {w: p for w, p in out.items() if p != NEUTRAL}
+
     def add(self, word: str) -> bool:
         """A word typed in the 選字 menu: a hotword at 200% (a picked one is promoted). False if not eligible."""
         word = word.strip()

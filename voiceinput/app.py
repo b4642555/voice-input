@@ -662,7 +662,7 @@ class App(QObject):
             text = sym or formatted
             if not sym:   # smart picks (single characters)
                 prefix = ctx.selection.before if selected else (ctx.caret[0] if ctx.caret else "")
-                text = self.memory.apply(text, prefix)
+                text = self.memory.apply(text, prefix, self.hotwords.levels())
             entry = {"time": stamp, "asr": to_traditional(raw), "asr_s": t_asr, "fmt": text}
             if described:
                 entry["edit"] = f"指定字：{formatted.strip()} → {described}"
