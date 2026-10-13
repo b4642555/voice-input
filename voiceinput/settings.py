@@ -1,5 +1,5 @@
 """Settings window in four tabs: 一般 (general), 辨識紀錄 (live transcript log), 自訂操作 (custom operations,
-rules.py) and 熱詞 (hotwords.py: every word with its weight and source, removable). Every change is applied
+rules.py) and 熱詞 (hotwords.py: every word with its percentage, −/+ by 10%, removable). Every change is applied
 and saved immediately."""
 import html
 import os
@@ -23,7 +23,7 @@ COMMANDS = [(rules.RECORD, "錄音"), (rules.PICK, "選字"),
             (rules.DELETE_DICTATION, "刪除剛輸入的文字")]
 _STEP_DEFAULTS = {rules.COMMAND: rules.DELETE_SELECTION, rules.KEYS: "", rules.TEXT: "", rules.WAIT: 100}
 
-HOTWORD_SORTS = [("weight", "權重比例（高→低）"), ("name", "名稱 A→Z"), ("name_desc", "名稱 Z→A"),
+HOTWORD_SORTS = [("weight", "百分比（高→低）"), ("name", "名稱 A→Z"), ("name_desc", "名稱 Z→A"),
                  ("date", "日期（新→舊）"), ("date_old", "日期（舊→新）")]
 _CARD_STYLE = "QFrame#card { border: 1px solid palette(mid); border-radius: 6px; }"
 
@@ -206,7 +206,7 @@ class SettingsDialog(QDialog):
         top.addWidget(QLabel("排序"))
         top.addWidget(self.hw_sort)
         top.addStretch()
-        self.hw_empty = QLabel("還沒有熱詞。選字時選了詞語，或在選字選單的輸入框輸入文字，就會加到這裡。")
+        self.hw_empty = QLabel("還沒有熱詞。選字時選了詞語（被換掉的詞也會列出，百分比較低），或在選字選單的輸入框輸入文字，就會加到這裡。")
         self.hw_empty.setStyleSheet("color: gray")
         self.hw_empty.setWordWrap(True)
         page = QWidget()
@@ -231,16 +231,21 @@ class SettingsDialog(QDialog):
             added.setStyleSheet("color: gray")
             added.setToolTip("加入的日期")
             row.addWidget(added)
-            weight = QLabel(f"{h.weight:g} / {hotwords.cap(h.word):g}")
-            weight.setToolTip("權重 / 上限（中文 5、英文 3）")
-            weight.setMinimumWidth(56)
-            weight.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            row.addWidget(weight)
-            percent = QLabel(f"{self.hotwords.percent(h):.0f}%")
-            percent.setToolTip("權重佔上限的比例；依權重排序時看這個")
+            low = hotwords.floor(h.word)
+            down = QPushButton("−", toolTip="降低 10%", clicked=lambda _=False, w=h.word: self._adjust_hotword(w, -1))
+            down.setFixedWidth(28)
+            down.setEnabled(h.pct > low)
+            row.addWidget(down)
+            percent = QLabel(f"{h.pct}%")
+            percent.setToolTip("100% 不影響辨識；越高越容易辨識成這個詞，越低越不容易"
+                               + ("" if low == 0 else "（英文最低 100%）"))
             percent.setMinimumWidth(40)
-            percent.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            percent.setAlignment(Qt.AlignCenter)
             row.addWidget(percent)
+            up = QPushButton("+", toolTip="提高 10%", clicked=lambda _=False, w=h.word: self._adjust_hotword(w, 1))
+            up.setFixedWidth(28)
+            up.setEnabled(h.pct < hotwords.TOP)
+            row.addWidget(up)
             remove = QPushButton("✕", toolTip="刪除這個熱詞", clicked=lambda _=False, w=h.word: self._remove_hotword(w))
             remove.setFixedWidth(28)
             row.addWidget(remove)
@@ -248,12 +253,11 @@ class SettingsDialog(QDialog):
         self.hw_empty.setVisible(not self.hotwords.items)
 
     def _sorted_hotwords(self) -> list:
-        """The list in the chosen order; ties by weight (as a share of the cap: Chinese and English caps differ),
-        then name. Names sort by their pinyin, so Chinese words sit among the English ones by sound (程式 near
-        Claude)."""
+        """The list in the chosen order; ties by percentage, then name. Names sort by their pinyin, so Chinese words
+        sit among the English ones by sound (程式 near Claude)."""
         def name(h):
             return "".join(lazy_pinyin(h.word)).casefold()
-        items = sorted(self.hotwords.items, key=lambda h: (-self.hotwords.percent(h), name(h)))
+        items = sorted(self.hotwords.items, key=lambda h: (-h.pct, name(h)))
         order = self.cfg.hotword_sort
         if order in ("name", "name_desc"):
             items.sort(key=name, reverse=order == "name_desc")
@@ -264,6 +268,10 @@ class SettingsDialog(QDialog):
     def _sort_hotwords(self):
         self.cfg.hotword_sort = self.hw_sort.currentData()
         self.cfg.save()
+        self.refresh_hotwords()
+
+    def _adjust_hotword(self, word: str, steps: int):
+        self.hotwords.adjust(word, steps)
         self.refresh_hotwords()
 
     def _remove_hotword(self, word: str):

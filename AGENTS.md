@@ -102,8 +102,8 @@ CJK/ASCII spacing → trailing punctuation.
 Four tabs, sized for the log: 一般 (microphone, "mute the speakers while recording", punctuation names, "selected 。 →
 ，", "節日的節" (described characters), autostart, a button that opens smart-picks.json; the menu timeout was
 removed 2026-10-11), 辨識紀錄 (the transcript log), 自訂操作 (custom operations, below) and 熱詞 (the hotword list:
-date added, weight / cap and its percentage; remove only; the source is not shown since 2026-10-11; a 排序
-drop-down: weight percentage (the caps differ), name A→Z / Z→A by pinyin, date; remembered). Mute (2026-10-06, `mute.py`): Core Audio via
+date added, the percentage between −/+ buttons (10% a click, since 2026-10-13), remove; the source is not shown; a
+排序 drop-down: percentage, name A→Z / Z→A by pinyin, date; remembered). Mute (2026-10-06, `mute.py`): Core Audio via
 comtypes; muted when the recording indicator shows, unmuted once the text is pasted or the press ends in nothing; a
 mute the user set is left alone. Selection edits and on-screen terms are always on.
 
@@ -144,7 +144,7 @@ lived a few hours: the user wants hotwords added quietly (they come from deliber
   activated menu closes when it loses focus. Not yet tried with a real IME and a terminal selection.
 - **選字** (command): the menu under the selection. One Chinese character: what the smart picks decide here, what
   was picked for it before, then same-sounding characters. A Chinese word: homophones (`candidates.ranked`), the same reading with tones
-  first (the user's choice, 2026-10-11), then without tones, then fuzzy; within each: hotwords by weight, common
+  first (the user's choice, 2026-10-11), then without tones, then fuzzy; within each: hotwords by weight (lowered ones last), common
   words (frequency ≥ 5, since McBopomofo lists obscure entries like 逆號 at 1), frequency. (Single characters still
   use `candidates.homophones`: common first, then the reading tiers.) English: spellings (`memory.variants`: Claude / claude / CLAUDE; voiceInput /
   VoiceInput / Voice Input / voice input / VOICE INPUT / voice_input / voice-input / voiceinput, the styles picked
@@ -154,12 +154,22 @@ lived a few hours: the user wants hotwords added quietly (they come from deliber
   (toned pinyin) + left (two characters, `^` boundary) + right (two toneless readings) + value; applied after
   formatting when at least one token agrees, most agreement wins, left alone on a tie. Phrases and English were
   learned for a few hours the same day and are ignored on load.
-- **Hotwords** (`hotwords.py`, DATA_DIR/hotword-list.json, one list with weights on the 熱詞 tab, removable; the old
-  key -> value hotwords.json is not read). A word typed in the menu (source "manual"; until 2026-10-11 the 加入熱詞
-  command) sits at the cap; 選字 (a word of 2+ characters or English picked in the menu) starts at half the cap,
-  +0.5 per pick, and the word a pick replaced loses 1 (dropped at 0; typed ones never lose). Caps: Chinese 5, English 3. Single characters never become hotwords. No replacement after
-  recognition: words are left to X-ASR biasing. A biasing word that another one starts with is not sent (剪貼 next to
-  剪貼簿 made X-ASR write 剪貼布).
+- **Hotwords** (`hotwords.py`, DATA_DIR/hotword-list.json, one list on the 熱詞 tab; the old key -> value
+  hotwords.json is not read). Percentages since 2026-10-13 (the user's design; the scores behind them are not
+  shown): 100% does nothing, 200% pulls hardest (score +5 Chinese, +3 English), 0% pushes away (−3). A word typed in
+  the menu (source "manual") is 200% and picks never move it; a 選字 pick (2+ characters or English) raises the
+  picked word 30% and lowers the replaced one 30%, so swapping 程式 / 城市 back and forth returns both to 100%, where
+  they leave the list. The −/+ buttons move any word 10%. English never goes below 100%: a negative English word only
+  changed its case (clock -> Clock). Measured with TTS: 程式 130% / 城市 70% already turns 寫了一個新的城市 into 程式;
+  up to 200% / 0% 台北是一個美麗的城市 is left alone; −5 made it 城池, and lowering 城市 alone gave 程序, not 程式. Old
+  weights were converted (typed 200%, picked 100% + weight / cap). Single characters never become hotwords. No
+  replacement after recognition: words are left to X-ASR biasing. A biasing word that another one starts with is not
+  sent (剪貼 next to 剪貼簿 made X-ASR write 剪貼布), and a lowered word sharing a start with another is dropped.
+- **Hotword volume** (TTS, 2026-10-13): random dictionary words at score 2 cost nothing up to 5k (0.50s → 0.54s for
+  9.5s of audio), 20k 0.73s, 50k 1.12s (the hotword graph is rebuilt per stream), but from 20k on 熱詞 came out as
+  熱刺: large term lists hurt accuracy before speed. Planned instead: curated term packs to tick (Wikidata + LLM-added
+  new terms, built offline, shipped with the app), then English 選字 by sound against hotwords, packs and on-screen
+  terms (clock code → Claude Code).
 - **Why Chinese biasing works now** (dev experiment by a subagent, 2026-10-11, Windows TTS, 16 target words + 4
   counter-examples; the scripts were deleted): sherpa-onnx's modified beam search keeps the top max_active_paths
   tokens by the model's own score and only then adds the hotword boost (offline-transducer-modified-beam-search-

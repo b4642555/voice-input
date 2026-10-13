@@ -845,7 +845,12 @@ class App(QObject):
 
 def _bias(words: list[tuple[str, float]]) -> list[tuple[str, float]]:
     """Biasing words without a word another one starts with: with 剪貼 and 剪貼簿 both listed, X-ASR wrote 剪貼布
-    (the short one is matched first and takes the boost; dev experiment 2026-10-11). The first of duplicates wins."""
+    (the short one is matched first and takes the boost; dev experiment 2026-10-11). The first of duplicates wins.
+    A lowered word (negative score) sharing a start with another word is left out, so it never costs that one its
+    boost or its place (城市 lowered next to 城市規劃)."""
+    keys = [w.casefold() for w, _ in words]
+    words = [(w, s) for (w, s), k in zip(words, keys)
+             if s >= 0 or not any(o != k and (o.startswith(k) or k.startswith(o)) for o in keys)]
     seen = {w.casefold() for w, _ in words}
     out, kept = [], set()
     for w, score in words:
