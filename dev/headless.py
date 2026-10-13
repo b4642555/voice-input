@@ -106,6 +106,8 @@ for name in ("hotwords.test.json", "smart-picks.test.json"):
     (Path(S) / name).unlink(missing_ok=True)
 appmod.Hotwords = lambda: _Hotwords(Path(S) / "hotwords.test.json")
 appmod.Memory = lambda: _Memory(Path(S) / "smart-picks.test.json")
+appmod.recordings.DIR = Path(S) / "recordings"   # set:save_recordings=1 saves here, never in the real folder
+appmod.recordings.INDEX = appmod.recordings.DIR / "index.jsonl"
 qapp = QApplication(sys.argv)
 qapp.setQuitOnLastWindowClosed(False)
 A = appmod.App(qapp)

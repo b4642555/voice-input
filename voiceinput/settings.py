@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDia
                                QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea,
                                QSpinBox, QTabWidget, QTextBrowser, QVBoxLayout, QWidget)
 
-from . import audio, hotwords, packs, rules
+from . import audio, hotwords, packs, recordings, rules
 from .keys import KEY_TRIGGERS, MOUSE_TRIGGERS, combo_text, is_modifier
 from .rules import Rule, Step
 
@@ -142,6 +142,14 @@ class SettingsDialog(QDialog):
         memory_row = QHBoxLayout()
         memory_row.addWidget(memory)
         memory_row.addStretch()
+        # development only, to be removed before release (the user's plan): recordings.py
+        self.keep_audio = QCheckBox("保存錄音（測試用）")
+        self.keep_audio.setToolTip("每句話存成 wav，並記下辨識結果與之後的選字、刪除，用來以真實聲音檢查辨識；不會自動刪除")
+        folder = QPushButton("開啟錄音資料夾", clicked=self._open_recordings)
+        audio_row = QHBoxLayout()
+        audio_row.addWidget(self.keep_audio)
+        audio_row.addWidget(folder)
+        audio_row.addStretch()
         self.status = QLabel()
         self.status.setStyleSheet("color: gray")
         self.status.setWordWrap(True)
@@ -154,6 +162,7 @@ class SettingsDialog(QDialog):
         form.addRow("", self.describe)
         form.addRow("", self.autostart)
         form.addRow("智慧選字", memory_row)
+        form.addRow("開發測試", audio_row)
         page = QWidget()
         v = QVBoxLayout(page)
         v.addLayout(form)
@@ -161,7 +170,7 @@ class SettingsDialog(QDialog):
         v.addWidget(self.status)
 
         self.mic.currentIndexChanged.connect(self._apply)
-        for box in (self.punct, self.period_comma, self.describe, self.autostart, self.mute):
+        for box in (self.punct, self.period_comma, self.describe, self.autostart, self.mute, self.keep_audio):
             box.toggled.connect(self._apply)
         return page
 
@@ -173,6 +182,7 @@ class SettingsDialog(QDialog):
         self.autostart.setChecked(self.cfg.autostart)
         self.mute.setChecked(self.cfg.mute_while_recording)
         self.describe.setChecked(self.cfg.describe_char)
+        self.keep_audio.setChecked(self.cfg.save_recordings)
         self._loading = False
         self.refresh_rules()
         self.refresh_hotwords()
@@ -189,11 +199,16 @@ class SettingsDialog(QDialog):
         self.cfg.autostart = self.autostart.isChecked()
         self.cfg.mute_while_recording = self.mute.isChecked()
         self.cfg.describe_char = self.describe.isChecked()
+        self.cfg.save_recordings = self.keep_audio.isChecked()
         self._save()
 
     def _save(self):
         self.cfg.save()
         self.applied.emit()
+
+    def _open_recordings(self):
+        recordings.DIR.mkdir(parents=True, exist_ok=True)
+        os.startfile(recordings.DIR)
 
     def _open_memory(self):
         if not self.memory_path.exists():

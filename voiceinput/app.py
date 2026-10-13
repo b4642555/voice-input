@@ -32,8 +32,8 @@ from PySide6.QtCore import QLockFile, QObject, QPointF, QRectF, Qt, QTimer, Sign
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
-from . import autostart, candidates, edit, models, packs, paths, rules, sounds, spelling
-from .asr import Recognizer
+from . import autostart, candidates, edit, models, packs, paths, recordings, rules, sounds, spelling
+from .asr import SAMPLE_RATE, Recognizer
 from .audio import Recorder
 from .config import Config
 from .hotwords import Hotwords
@@ -554,6 +554,8 @@ class App(QObject):
             return
         n, tail = s.plan_to(step.before)
         log.info("delete last: %d backspaces + %r", n, tail)
+        if self.cfg.save_recordings:
+            recordings.note("delete_last")
         backspace(n)
         paste_text(tail)
         s.deleted_last(step)
@@ -593,6 +595,7 @@ class App(QObject):
             op = rules.pick(rules.candidates(self.cfg.rules, rules.SPEECH, formatted), selected, press.dictated)
             if op is not None:
                 log.info("spoken operation: %s", op.phrase)
+                self._keep(audio, asr=raw, fmt=formatted, result="", op=op.phrase)
                 self.record.emit({"time": stamp, "asr": to_traditional(raw), "asr_s": t_asr, "fmt": "",
                                   "edit": f"操作：「{op.phrase}」"})
                 self.main.emit(lambda: self._spoken_operation(press, op))
@@ -610,6 +613,7 @@ class App(QObject):
             if described:
                 entry["edit"] = f"指定字：{formatted.strip()} → {described}"
             if selected:
+                self._keep(audio, asr=raw, fmt=formatted, result=text, op=None, selection=ctx.selection.text)
                 self._edit_job(ctx.selection, text, bool(sym), entry, press)
                 return
             replaced = press.deleted
@@ -617,12 +621,19 @@ class App(QObject):
                 if not sym:
                     text = edit.replacement(replaced.text, text)
                 entry["edit"] = f"{replaced.text} → {text}（刪除後重講）"
+            self._keep(audio, asr=raw, fmt=formatted, result=text, op=None,
+                       replaced=replaced.text if replaced is not None else None)
             self.record.emit(entry)
             self.main.emit(lambda: self._dictate(text, audio, hwnd, press))
         except Exception:
             log.exception("transcribe failed")
             self.main.emit(self.overlay.hide_overlay)
             self.main.emit(self._input_done)
+
+    def _keep(self, audio, **info):
+        """Development only (the user will remove it before release): save the utterance (recordings.py)."""
+        if self.cfg.save_recordings and audio is not None and audio.size:
+            recordings.save(audio, SAMPLE_RATE, **info)
 
     def _command_words(self) -> list[str]:
         """What may be said alone as a command: speech operations' phrases, and punctuation names when they are on.
@@ -777,6 +788,8 @@ class App(QObject):
         line = sel.before + sel.text + sel.after
         start = len(sel.before) + lead
         self.memory.record(line, start, start + len(text), word)
+        if self.cfg.save_recordings:
+            recordings.note("typed" if typed else "pick", before=text, after=word, line=line)
         self.hotwords.picked(text, word)
         if typed and self.hotwords.add(word):
             log.info("hotword typed: %s", word)

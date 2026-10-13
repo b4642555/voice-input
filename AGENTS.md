@@ -294,6 +294,13 @@ removed the same day they were built: the user corrects by selecting with the mo
   our own frozen window until the timeout: the three dots stood still and 找不到選取的文字 appeared. The overlay is
   now hidden at once (`Overlay.hide_now`) before a terminal edit, delete or pick.
 - **Clipboard**: every format is restored after a paste (images copied before dictating used to be lost).
+- **Saved recordings** (`recordings.py`, 2026-10-13, DEVELOPMENT ONLY: the user will remove it before release so
+  users never keep recordings locally; keep it in that module plus `App._keep`, the 一般 tab's 開發測試 row and
+  `save_recordings` in config): when ticked, every utterance is saved to DATA_DIR/recordings/<time>.wav with an
+  index.jsonl line (raw ASR, formatted, typed result or operation) and later picks / typed replacements /
+  刪除剛輸入的文字 as lines pointing at the last saved id. Not deleted automatically (the user's choice). Use these
+  for spot checks with the user's real voice instead of TTS; note the app decoded them with the hotwords and packs
+  of that moment. `dev/headless.py` redirects them to its test folder.
 - Tests without a microphone, with Windows TTS audio (zh-TW Hanhan voice via `dev/tts.ps1`):
   `dev/headless.py` runs the real App against a simulated text box; use it by default. Never let a test write the
   user's real data files while their VoiceInput is running.
