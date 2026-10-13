@@ -136,30 +136,41 @@ class SettingsDialog(QDialog):
         self.autostart = QCheckBox("開機時自動啟動")
         self.start_sound, self.stop_sound = QComboBox(), QComboBox()
         for box in (self.start_sound, self.stop_sound):
-            for cue_id, name, _source in cues.SOUNDS:
+            for cue_id, name, *_sources in cues.SOUNDS:
                 box.addItem(name, cue_id)
-            box.addItem("None", "")
-        self.start_sound.setToolTip("錄音提示出現時播放；選了會先播一次")
-        self.stop_sound.setToolTip("錄音結束時播放（有靜音電腦音效時，在恢復聲音後播）；選了會先播一次")
-        # a set picks both sounds at once; it reads 自定義 when they differ (the user's design, 2026-10-13)
-        self.sound_set = QComboBox(toolTip="一組開始音與結束音；兩個不同時顯示「自定義」")
-        for cue_id, name, _source in cues.SOUNDS:
+            box.addItem("無", "")
+        self.start_sound.setToolTip("確定開始錄音時播放（按住約 0.3 秒，連按兩下不會響）；選了會先播一次")
+        self.stop_sound.setToolTip("錄音結束時播放；選了會先播一次")
+        # a set picks both sounds at once; 自定義 shows a drop-down for each (the user's design, 2026-10-13)
+        self.sound_set = QComboBox(toolTip="同一組的開始音與結束音；選「自定義」可分別挑選")
+        for cue_id, name, *_sources in cues.SOUNDS:
             self.sound_set.addItem(name, cue_id)
-        self.sound_set.addItem("None", "")
+        self.sound_set.addItem("無", "")
         self.sound_set.addItem("自定義", None)
         self._set_timer = QTimer(self, singleShot=True,
                                  timeout=lambda: cues.play(self._set_timer.property("cue"), "stop"))
+        self.sound_listen = QPushButton("試聽", clicked=self._play_sounds, toolTip="依序播放開始音與結束音")
+        self.sound_listen.setFixedWidth(44)
+        self.custom_sounds = QWidget()
+        custom = QHBoxLayout(self.custom_sounds)
+        custom.setContentsMargins(8, 0, 0, 0)
+        for label, box in (("開始", self.start_sound), ("結束", self.stop_sound)):
+            custom.addWidget(QLabel(label))
+            custom.addWidget(box)
+            custom.addSpacing(8)
         sound_row = QHBoxLayout()
         sound_row.addWidget(self.sound_set)
-        sound_row.addSpacing(8)
-        for label, box, kind in (("開始", self.start_sound, "start"), ("結束", self.stop_sound, "stop")):
-            listen = QPushButton("試聽", clicked=lambda _=False, b=box, k=kind: cues.play(b.currentData(), k))
-            listen.setFixedWidth(44)
-            sound_row.addWidget(QLabel(label))
-            sound_row.addWidget(box)
-            sound_row.addWidget(listen)
-            sound_row.addSpacing(8)
+        sound_row.addWidget(self.sound_listen)
+        sound_row.addWidget(self.custom_sounds)
         sound_row.addStretch()
+        self.stop_at = QComboBox(toolTip="開了「錄音時暫時靜音電腦音效」時，停止錄音就恢復聲音，好播結束音")
+        self.stop_at.addItem("停止錄音時", "stop")
+        self.stop_at.addItem("文字輸入完成時", "done")
+        stop_at_row = QHBoxLayout()
+        stop_at_row.addWidget(QLabel("結束音在"))
+        stop_at_row.addWidget(self.stop_at)
+        stop_at_row.addWidget(QLabel("播放"))
+        stop_at_row.addStretch()
         self.mute = QCheckBox("錄音時暫時靜音電腦音效")
         self.mute.setToolTip("錄音期間把喇叭靜音，文字輸入完成後恢復；原本就靜音的話不會動")
         self.describe = QCheckBox("說「詞＋的＋字」時只輸入那個字，例如「節日的節」")
@@ -184,6 +195,7 @@ class SettingsDialog(QDialog):
         form = QFormLayout()
         form.addRow("麥克風", self.mic)
         form.addRow("提示音", sound_row)
+        form.addRow("", stop_at_row)
         form.addRow("", self.mute)
         form.addRow("", self.punct)
         form.addRow("", self.period_comma)
@@ -201,6 +213,7 @@ class SettingsDialog(QDialog):
         self.start_sound.currentIndexChanged.connect(lambda: self._sound_changed(self.start_sound, "start"))
         self.stop_sound.currentIndexChanged.connect(lambda: self._sound_changed(self.stop_sound, "stop"))
         self.sound_set.currentIndexChanged.connect(self._sound_set_changed)
+        self.stop_at.currentIndexChanged.connect(self._apply)
         for box in (self.punct, self.period_comma, self.describe, self.autostart, self.mute, self.keep_audio):
             box.toggled.connect(self._apply)
         return page
@@ -216,7 +229,11 @@ class SettingsDialog(QDialog):
         self.keep_audio.setChecked(self.cfg.save_recordings)
         self.start_sound.setCurrentIndex(max(0, self.start_sound.findData(self.cfg.start_sound)))
         self.stop_sound.setCurrentIndex(max(0, self.stop_sound.findData(self.cfg.stop_sound)))
-        self._show_sound_set()
+        self.stop_at.setCurrentIndex(max(0, self.stop_at.findData(self.cfg.stop_sound_at)))
+        same = self.cfg.start_sound == self.cfg.stop_sound
+        self.sound_set.setCurrentIndex(self.sound_set.findData(self.cfg.start_sound) if same
+                                       else self.sound_set.count() - 1)
+        self._show_sounds()
         self._loading = False
         self.refresh_rules()
         self.refresh_hotwords()
@@ -236,41 +253,43 @@ class SettingsDialog(QDialog):
         self.cfg.save_recordings = self.keep_audio.isChecked()
         self.cfg.start_sound = self.start_sound.currentData()
         self.cfg.stop_sound = self.stop_sound.currentData()
+        self.cfg.stop_sound_at = self.stop_at.currentData()
         self._save()
 
     def _sound_changed(self, box, kind: str):
         if not self._loading:
             cues.play(box.currentData(), kind)
-            self._show_sound_set()
+            self._show_sounds()
         self._apply()
 
-    def _show_sound_set(self):
-        """The set drop-down follows the two sounds: their name when they are the same, else 自定義."""
-        start, stop = self.start_sound.currentData(), self.stop_sound.currentData()
-        i = self.sound_set.findData(start) if start == stop else self.sound_set.count() - 1
-        self.sound_set.blockSignals(True)
-        self.sound_set.setCurrentIndex(i)
-        self.sound_set.blockSignals(False)
+    def _custom(self) -> bool:
+        return self.sound_set.currentData() is None
+
+    def _show_sounds(self):
+        """The 開始 / 結束 drop-downs only for 自定義; 試聽 and the timing only when there is something to play."""
+        self.custom_sounds.setVisible(self._custom())
+        self.sound_listen.setEnabled(bool(self.start_sound.currentData() or self.stop_sound.currentData()))
+        self.stop_at.setEnabled(bool(self.stop_sound.currentData()))
 
     def _sound_set_changed(self):
         cue_id = self.sound_set.currentData()
-        if cue_id is None or self._loading:   # 自定義 picked by hand: the sounds stay as they are
-            self._show_sound_set()
-            return
-        self._loading = True                  # set both without previewing each
-        self.start_sound.setCurrentIndex(self.start_sound.findData(cue_id))
-        self.stop_sound.setCurrentIndex(self.stop_sound.findData(cue_id))
-        self._loading = False
-        self._play_set(cue_id)
-        self._apply()
+        if cue_id is not None and not self._loading:   # a set: both sounds, previewed together
+            self._loading = True
+            self.start_sound.setCurrentIndex(self.start_sound.findData(cue_id))
+            self.stop_sound.setCurrentIndex(self.stop_sound.findData(cue_id))
+            self._loading = False
+            self._play_sounds()
+            self._apply()
+        self._show_sounds()   # 自定義: the sounds stay as they are, their drop-downs show
 
-    def _play_set(self, cue_id: str):
-        """A set is previewed as a recording: the start sound, a pause, the end sound (the user's request)."""
+    def _play_sounds(self):
+        """Previewed as a recording: the start sound, a pause, the end sound (the user's request)."""
         self._set_timer.stop()
-        cues.play(cue_id, "start")
-        if cue_id:
-            self._set_timer.setProperty("cue", cue_id)
-            self._set_timer.start(int((cues.duration(cue_id, "start") + _SET_PAUSE) * 1000))
+        start, stop = self.start_sound.currentData(), self.stop_sound.currentData()
+        cues.play(start, "start")
+        if stop:
+            self._set_timer.setProperty("cue", stop)
+            self._set_timer.start(int(((cues.duration(start, "start") + _SET_PAUSE) if start else 0) * 1000))
 
     def _save(self):
         self.cfg.save()

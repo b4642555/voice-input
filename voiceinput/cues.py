@@ -14,20 +14,22 @@ import numpy as np
 log = logging.getLogger("voiceinput")
 
 DIR = Path(__file__).resolve().parent / "cues"
-# (id, name shown, source in dev/sound-preview): the 簡潔 UI and 柔和木質 sets, the user's choice
+# (id, name shown, start and end sources in dev/sound-preview): the 簡潔 UI and 柔和木質 sets, the user's choice;
+# Pop's start sound and Kalimba's two were generated again on 2026-10-13 (Pop's was only a click once shortened,
+# Kalimba's end sound was too like Xylophone's; picked by the user from three each)
 SOUNDS = [
-    ("blip", "Blip", "ui-{kind}-1.mp3"),
-    ("chime", "Chime", "ui-{kind}-2.mp3"),
-    ("pop", "Pop", "ui-{kind}-3.mp3"),
-    ("glass", "Glass", "ui-{kind}-4.mp3"),
-    ("bubble", "Bubble", "ui-{kind}-5.mp3"),
-    ("triad", "Triad", "ui-{kind}-6.mp3"),
-    ("marimba", "Marimba", "wood-{kind}-1.mp3"),
-    ("woodblock", "Woodblock", "wood-{kind}-2.mp3"),
-    ("kalimba", "Kalimba", "wood-{kind}-3.mp3"),
-    ("xylophone", "Xylophone", "wood-{kind}-4.mp3"),
-    ("mallet", "Mallet", "wood-{kind}-5.mp3"),
-    ("music_box", "Music Box", "wood-{kind}-6.mp3"),
+    ("blip", "Blip", "ui-start-1.mp3", "ui-stop-1.mp3"),
+    ("chime", "Chime", "ui-start-2.mp3", "ui-stop-2.mp3"),
+    ("pop", "Pop", "pop-start-new-1.mp3", "ui-stop-3.mp3"),
+    ("glass", "Glass", "ui-start-4.mp3", "ui-stop-4.mp3"),
+    ("bubble", "Bubble", "ui-start-5.mp3", "ui-stop-5.mp3"),
+    ("triad", "Triad", "ui-start-6.mp3", "ui-stop-6.mp3"),
+    ("marimba", "Marimba", "wood-start-1.mp3", "wood-stop-1.mp3"),
+    ("woodblock", "Woodblock", "wood-start-2.mp3", "wood-stop-2.mp3"),
+    ("kalimba", "Kalimba", "kalimba-start-new-3.mp3", "kalimba-stop-new-2.mp3"),
+    ("xylophone", "Xylophone", "wood-start-4.mp3", "wood-stop-4.mp3"),
+    ("mallet", "Mallet", "wood-start-5.mp3", "wood-stop-5.mp3"),
+    ("music_box", "Music Box", "wood-start-6.mp3", "wood-stop-6.mp3"),
 ]
 DEFAULT = SOUNDS[0][0]
 MATCH = 0.6     # below it the start sound is subtracted, not cut out (see remove)
@@ -60,10 +62,10 @@ def _samples(cue_id: str, rate: int) -> np.ndarray | None:
     return np.interp(np.arange(0, len(x) * rate / src) * src / rate, np.arange(len(x)), x).astype(np.float32)
 
 
-def _locate(audio: np.ndarray, x: np.ndarray, rate: int) -> tuple[int, float]:
-    """Where the start sound begins in the recording and how well it matches (normalized correlation). It plays as
-    the indicator shows (0.1s) and reaches the microphone ~0.17s later, so it is looked for 0.1-0.6s in."""
-    lo, hi = int(0.1 * rate), int(0.6 * rate)
+def _locate(audio: np.ndarray, x: np.ndarray, rate: int, at: float = 0.1) -> tuple[int, float]:
+    """Where the start sound begins in the recording and how well it matches (normalized correlation). It played
+    `at` seconds in and reaches the microphone ~0.17s later, so it is looked for in the 0.5s from there."""
+    lo, hi = int(at * rate), int((at + 0.5) * rate)
     seg = audio[: hi + len(x)]
     size = 1 << (len(seg) + len(x)).bit_length()     # cross-correlation by FFT (np.correlate took ~100ms)
     cc = np.fft.irfft(np.fft.rfft(seg, size) * np.conj(np.fft.rfft(x, size)), size)[: len(seg)]
@@ -72,7 +74,7 @@ def _locate(audio: np.ndarray, x: np.ndarray, rate: int) -> tuple[int, float]:
     return lag, float(abs(cc[lag]) / (np.linalg.norm(x[: len(win)]) * np.linalg.norm(win) + 1e-9))
 
 
-def remove(audio: np.ndarray, cue_id: str, rate: int) -> np.ndarray:
+def remove(audio: np.ndarray, cue_id: str, rate: int, at: float = 0.1) -> np.ndarray:
     """The recording with the start sound the microphone heard cut out (2026-10-13, the user's choice: the
     recording counts from the end of the sound). X-ASR heard Bubble, Mallet and Kalimba as "Yeah.", Triad as "One"
     when nothing was said. The stretch from where the sound arrives to its end is spliced out with a 10ms
@@ -84,12 +86,12 @@ def remove(audio: np.ndarray, cue_id: str, rate: int) -> np.ndarray:
     ends are lost. A weak match (headphones, or speech over it lowers it; recordings with no sound scored up to
     0.36) falls back to `cancel`."""
     x = _samples(cue_id, rate) if cue_id else None
-    if x is None or len(audio) <= int(0.1 * rate) + len(x):
+    if x is None or len(audio) <= int(at * rate) + len(x):
         return audio
-    lag, match = _locate(audio, x, rate)
+    lag, match = _locate(audio, x, rate, at)
     if match < MATCH:
         log.info("start sound match %.2f at %.2fs: cancelled, not cut", match, lag / rate)
-        return cancel(audio, cue_id, rate)
+        return cancel(audio, cue_id, rate, at=at)
     pre, post = audio[:lag], audio[lag + len(x):].copy()
     n = min(int(0.01 * rate), len(pre), len(post))
     if n:
@@ -99,16 +101,16 @@ def remove(audio: np.ndarray, cue_id: str, rate: int) -> np.ndarray:
     return np.concatenate([pre, post]).astype(np.float32)
 
 
-def cancel(audio: np.ndarray, cue_id: str, rate: int, taps: int = 256) -> np.ndarray:
+def cancel(audio: np.ndarray, cue_id: str, rate: int, taps: int = 256, at: float = 0.1) -> np.ndarray:
     """The start sound subtracted where `remove` cannot cut it: a least-squares FIR (speaker and room) of `taps`
     samples. On the user's recordings (2026-10-13, before `remove`):
     presses with nothing said that gave text 6/29 -> 2/29 (Triad's One left); 換行 with a start sound mixed in
     178/216 -> 186/216 (83% without any sound). Turning that stretch down to 10% left no text but cut words said over
     it (162/216)."""
     x = _samples(cue_id, rate) if cue_id else None
-    if x is None or len(audio) <= int(0.1 * rate) + taps:
+    if x is None or len(audio) <= int(at * rate) + taps:
         return audio
-    lag, _match = _locate(audio, x, rate)
+    lag, _match = _locate(audio, x, rate, at)
     n = min(len(x) + taps, len(audio) - lag)
     if n <= taps:
         return audio

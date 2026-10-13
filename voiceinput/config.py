@@ -20,6 +20,7 @@ class Config:
     pack_hints: list = field(default_factory=list)   # packs a notice already suggested (App._suggest_pack)
     start_sound: str = "blip"     # cues.py id played when the recording indicator shows, "" for none
     stop_sound: str = "blip"      # cues.py id played when the recording ends, "" for none
+    stop_sound_at: str = "stop"   # when the end sound plays: "stop" (recording stops) or "done" (text is in)
     save_recordings: bool = False   # development only, to be removed before release (recordings.py)
     rules: list = field(default_factory=rules.defaults)   # custom operations (rules.Rule)
     rules_version: int = RULES_VERSION

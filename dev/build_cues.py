@@ -37,9 +37,9 @@ def _trim(x: np.ndarray, rate: int, db: float, fade_s: float) -> np.ndarray:
 
 def main():
     OUT.mkdir(exist_ok=True)
-    for cue_id, _name, source in SOUNDS:
-        for kind in ("start", "stop"):
-            mp3 = SRC / source.format(kind=kind)
+    for cue_id, _name, *sources in SOUNDS:
+        for kind, source in zip(("start", "stop"), sources):
+            mp3 = SRC / source
             d = miniaudio.decode_file(str(mp3), output_format=miniaudio.SampleFormat.FLOAT32)
             x = np.frombuffer(d.samples, np.float32).reshape(-1, d.nchannels).mean(axis=1)
             loud = np.abs(x) > 0.005

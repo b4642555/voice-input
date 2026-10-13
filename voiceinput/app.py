@@ -90,8 +90,11 @@ class _Press:
     released: bool = False
     finished: bool = False
     recording: bool = False           # the microphone is on for it
-    shown: bool = False               # the recording indicator showed (and the start sound played)
+    shown: bool = False               # the recording indicator showed
+    confirmed: bool = False           # its operation records: the start sound played, the speakers may be muted
     cue: str = ""                     # the start sound played for it (taken out of the audio before recognition)
+    cue_at: float = 0.0               # seconds into the recording when it played
+    mic_at: float = 0.0               # monotonic time the microphone started for it
     consumed: bool = False            # it only stopped a recording a tap had started
     deleted: object = None            # Selection a 刪除 step removed (the dictation goes there)
     resolved: threading.Event = field(default_factory=threading.Event)   # steps before 錄音 are done
@@ -138,7 +141,7 @@ class App(QObject):
         self._records = deque(maxlen=100)       # transcript log, kept for this session only
         self.session = Session()
         self.muter = Muter()
-        self._stop_cue = False                   # the end sound waits for the speakers to be unmuted
+        self._stop_cue = False                   # the end sound waits for the text to be in (stop_sound_at "done")
         self._press: _Press | None = None        # the key or button held now
         self._pending: _Press | None = None      # a tap waiting to see whether a second press follows
         self._pending_timer = QTimer(self, singleShot=True, timeout=self._pending_expired)
@@ -396,7 +399,7 @@ class App(QObject):
         else:
             if not press.recording:
                 self._start_mic(press)
-            self._show_recording(press)
+            self._show_recording(press, confirmed=True)
             self._run_steps(press, rule.steps[:i], done=press.resolved.set)
         if press.gesture == DOUBLE and press.held:
             self._maybe_redictate(press)
@@ -413,7 +416,7 @@ class App(QObject):
             press.redictate = hold
             if not press.recording:
                 self._start_mic(press)
-            self._show_recording(press)
+            self._show_recording(press, confirmed=True)
 
     def _finish(self, press: _Press):
         """Main thread: the press is released and its operation known."""
@@ -444,7 +447,7 @@ class App(QObject):
             log.exception("mic start failed")
             self._notify(f"無法開啟麥克風：{e}")
             return
-        self._mic, press.recording = press, True
+        self._mic, press.recording, press.mic_at = press, True, time.monotonic()
         self._hwnd = foreground()
         self._stop_cue = False   # an end sound still waiting for the speakers belongs to an older recording
         # the indicator waits a little so taps and double taps do not flash it (0.1s, not TAP_THRESHOLD: the user
@@ -453,15 +456,20 @@ class App(QObject):
         if press.first is None:
             QTimer.singleShot(int(_INDICATOR_DELAY * 1000), lambda: self._show_recording(press))
 
-    def _show_recording(self, press: _Press):
-        """The indicator fades in and the start sound plays with it. Called again when the gesture is decided
-        (0.3s, a key with a double-tap rule): that replayed the sound until 2026-10-13."""
-        if press.recording and self._mic is press and not press.shown:
+    def _show_recording(self, press: _Press, confirmed: bool = False):
+        """The indicator fades in (0.1s held, or when the gesture is decided). The start sound waits for the
+        decision (`confirmed`, from _apply): played with the indicator at 0.1s, a double tap's first press beeped
+        whenever it was held a little (the user's request, 2026-10-13)."""
+        if not (press.recording and self._mic is press):
+            return
+        if not press.shown:
             press.shown = True
             self.tray.setIcon(self.icon_rec)
             self.overlay.show_recording()
+        if confirmed and not press.confirmed:
+            press.confirmed = True
             cues.play(self.cfg.start_sound, "start")
-            press.cue = self.cfg.start_sound
+            press.cue, press.cue_at = self.cfg.start_sound, time.monotonic() - press.mic_at
             # while the start sound plays the level bars stay still and the speakers on; recording goes on (the
             # user speaks over it); muting waits for its end (the user's choices, 2026-10-13)
             wait = cues.duration(self.cfg.start_sound, "start")
@@ -496,12 +504,14 @@ class App(QObject):
             self.overlay.hide_overlay()
             self._input_done()
             return
-        if press.shown and audio.size:
+        if press.confirmed and audio.size and self.cfg.stop_sound:
             # the end sound, only for a recording that goes to recognition (not a tap or a double tap's first
-            # press, which flashed the indicator): now, or once the speakers are unmuted (_input_done)
-            if self.muter.active:
+            # press, which may flash the indicator): now, or once the text is in (_input_done), the user's setting
+            # (2026-10-13). Now: the microphone is off, so muted speakers come back for it.
+            if self.cfg.stop_sound_at == "done":
                 self._stop_cue = True
             else:
+                self.muter.restore()
                 cues.play(self.cfg.stop_sound, "stop")
         self.overlay.show_thinking()
         self.worker.submit(self._transcribe_job, self.recognizer, audio, press, self._hwnd)
@@ -618,7 +628,7 @@ class App(QObject):
             ctx = press.probe.result()
             press.resolved.wait(3.0)
             t0 = time.monotonic()
-            heard = cues.remove(audio, press.cue, SAMPLE_RATE) if press.cue else audio
+            heard = cues.remove(audio, press.cue, SAMPLE_RATE, press.cue_at) if press.cue else audio
             words = self.hotwords.bias() + [(t, _SCREEN_TERM_SCORE) for t in ctx.terms]
             raw = rec.recognize(heard, _bias(words))
             commands = self._command_words()

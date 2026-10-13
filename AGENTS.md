@@ -294,24 +294,27 @@ removed the same day they were built: the user corrects by selecting with the mo
   our own frozen window until the timeout: the three dots stood still and 找不到選取的文字 appeared. The overlay is
   now hidden at once (`Overlay.hide_now`) before a terminal edit, delete or pick.
 - **Clipboard**: every format is restored after a paste (images copied before dictating used to be lost).
-- **Sounds** (`cues.py`, `voiceinput/cues/*.wav`, 2026-10-13): one row of the 一般 tab: a set drop-down (picks both
-  sounds and previews them like a recording: start, 0.8s, end; reads 自定義 when they differ), then 開始 / 結束
-  drop-downs with 試聽 buttons (12 each plus None last, Blip by default: the user's choices). The 簡潔 UI and 柔和木質 sets of ElevenLabs effects
-  another agent made in `dev/sound-preview` (untracked), converted by `dev/build_cues.py` (loudness matched like the
+- **Sounds** (`cues.py`, `voiceinput/cues/*.wav`, 2026-10-13): the 一般 tab's 提示音 row: a set drop-down (12 sets,
+  無, 自定義; the user's design), a 試聽 button (start sound, 0.8s, end sound; picking a set plays it too), and only
+  for 自定義 the 開始 / 結束 drop-downs (a sound picked there plays). Below it 結束音在 [停止錄音時 / 文字輸入完成時]
+  播放 (`stop_sound_at`, the user's request): at stop, muted speakers are unmuted then (the microphone is off). Blip
+  by default. The 簡潔 UI and 柔和木質 sets of ElevenLabs effects
+another agent made in `dev/sound-preview` (untracked), converted by `dev/build_cues.py` (loudness matched like the
   preview page; an end sound's tail cut at -40 dB, a start sound's at -20 dB plus a 50ms fade, 0.07s (Pop) to 0.45s
-  (Triad), since it is cut out of the recording). The start sound plays as the indicator fades in, once (`_show_recording` is called again when the gesture is decided at 0.3s and
-  replayed it until 2026-10-13). For its length plus `_CUE_LATENCY` (0.25s; PlaySound to microphone measured 0.17s
+  (Triad), since it is cut out of the recording). The start sound plays once the gesture is decided to record (`_show_recording(confirmed=True)` from `_apply`: a
+  hold at 0.3s, a tap at its release); the indicator still fades in at 0.1s. Played with the indicator, a double
+  tap's first press beeped when held a little (the user's request, 2026-10-13); muting and the end sound follow the
+  decision too. `cues.remove` looks for it from when it played (`_Press.cue_at`). For its length plus `_CUE_LATENCY` (0.25s; PlaySound to microphone measured 0.17s
   on the user's machine) the level bars stay still (`Recorder.still`) and the speakers on; muting starts after.
   Recording still runs from key-down: dropping the audio while the sound played (tried the same day, the user's
   idea) cut the first syllable, as the user starts speaking 0.25-0.98s after the press (median 0.45s; 換行 15/18 →
-  1-2/18 on their recordings). The end sound plays only for a recording that goes to recognition, after unmuting
-  when muted (a tap that flashed the indicator played it before). A double tap's second press shows no indicator
+  1-2/18 on their recordings). The end sound plays only for a recording that goes to recognition (a tap that flashed the indicator played it before). A double tap's second press shows no indicator
   until it records (it flashed with a second start sound). Each press and gesture is logged (`press ...`,
   `gesture ...`).
 - **Start sound cut out before recognition** (`cues.remove`, 2026-10-13, the user's choice: the recording counts from
   the end of the start sound): with nothing said, X-ASR heard the sound the microphone picked up as text (Bubble /
-  Mallet / Kalimba "Yeah.", Triad "One" / "Four.", Blip "Blip."). It is found by cross-correlation 0.1-0.6s in and
-  that stretch spliced out (10ms crossfade), keeping the room noise before it: dropping everything before its end, or
+  Mallet / Kalimba "Yeah.", Triad "One" / "Four.", Blip "Blip."). It is found by cross-correlation in the 0.5s after it
+  played and that stretch spliced out (10ms crossfade), keeping the room noise before it: dropping everything before its end, or
   silencing it, made X-ASR hear short commands wrong (送出 -> Somehow). The start sounds were shortened for this
   (their -40 dB tails reached 0.36-0.60s and the user's first word, ASR timestamps: 0.80s after the press, median,
   vs 0.48s before sounds existed, often came while the tail still played). User's recordings: silent presses with
