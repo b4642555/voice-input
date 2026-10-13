@@ -307,7 +307,11 @@ removed the same day they were built: the user corrects by selecting with the mo
   1-2/18 on their recordings). The end sound plays only for a recording that goes to recognition, after unmuting
   when muted (a tap that flashed the indicator played it before). A double tap's second press shows no indicator
   until it records (it flashed with a second start sound). Each press and gesture is logged (`press ...`,
-  `gesture ...`). The microphone hears the start
+  `gesture ...`).
+- **Hold check uses the hook's key state** (`Hotkeys.is_down`, 2026-10-13): the 0.3s hold timer runs on the main
+  thread, which a double tap's delete in a terminal keeps busy; the release was still queued, the second press
+  counted as held, recorded (delete and say it again) and played the end sound. Now the timer asks the hook whether
+  the key is still down, and `on_key_up` decides from the hook's times. The microphone hears the start
   sound: mixed into 91 of the user's recordings (not played through speakers), Woodblock, Kalimba and Marimba
   changed long sentences no more than inaudible noise (~2%), Blip, Glass, Triad, Xylophone, Mallet and Music Box
   ~5-7%, commands barely; the user kept all 12 until real recordings (with the sound picked up) can be checked.

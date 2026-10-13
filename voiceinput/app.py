@@ -309,10 +309,15 @@ class App(QObject):
             self._start_mic(press)
         if double:
             self._decide(press, DOUBLE)
-        QTimer.singleShot(int(TAP_THRESHOLD * 1000), lambda: self._hold_check(press))
+        QTimer.singleShot(int(TAP_THRESHOLD * 1000), lambda: self._hold_check(press, timer=True))
 
-    def _hold_check(self, press: _Press):
+    def _hold_check(self, press: _Press, timer: bool = False):
         if press.released or press.held:
+            return
+        if timer and not self.hotkeys.is_down(press.key):
+            # released already, the main thread has not handled it yet: a double tap's delete in a terminal kept it
+            # busy past 0.3s, the press counted as held, recorded (delete and say it again) and played the end sound
+            # (2026-10-13). on_key_up decides from the hook's times.
             return
         press.held = True
         if press.first is None:

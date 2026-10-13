@@ -9,7 +9,7 @@ box), click (the user clicks: ends what the app knows about the text), tap (one 
 hotkey:NAME (the key or button the next steps press, default mouse_middle), rules:default (the default operations),
 rule:JSON (add an operation, rules.Rule.from_dict), at:WORD (put the caret right after the last WORD; at: puts it at
 the end), say:TEXT (dictate TEXT as if recognized), set:NAME=VALUE (change a setting in memory only), packs:ID+ID (tick term packs, in memory only) or key:BACK (the
-user presses Backspace n times: key:BACK*3), dbl:MS (a double tap, each press MS ms long), pick:N / pickw:WORD (click a row of the 選字 menu), type:TEXT (type TEXT in the menu's input box and press Enter). Settings are never saved; hotwords and smart picks live in <dir> (hotwords.test.json,
+user presses Backspace n times: key:BACK*3), dbl:MS (a double tap, each press MS ms long), dblbusy (a double tap whose release is handled 0.5s late), pick:N / pickw:WORD (click a row of the 選字 menu), type:TEXT (type TEXT in the menu's input box and press Enter). Settings are never saved; hotwords and smart picks live in <dir> (hotwords.test.json,
 smart-picks.test.json, emptied at the start), never in the real files.
 """
 import json
@@ -185,10 +185,12 @@ def menu() -> str:
 
 
 def down():
+    A.hotkeys._held.add(KEY)       # what the hook would record
     A.on_key_down(KEY, time.monotonic())
 
 
 def up():
+    A.hotkeys._held.discard(KEY)
     A.on_key_up(KEY, time.monotonic())
 
 
@@ -283,6 +285,15 @@ try:
         if step == "click":
             A.session.on_input()
             print("[點滑鼠]")
+            continue
+        if step == "dblbusy":   # a double tap whose second release reaches the main thread 0.5s late (busy)
+            down(), pump(0.05), up(), pump(0.05), down(), pump(0.1)
+            A.hotkeys._held.discard(KEY)
+            t_up = time.monotonic()
+            pump(0.5)
+            A.on_key_up(KEY, t_up)
+            pump(1.0)
+            print(f"[{step}] → 文字框：{box.text[:box.caret] + '|' + box.text[box.caret:]!r}")
             continue
         if step.startswith("dbl:"):   # a double tap whose presses last MS milliseconds each
             ms = int(step[4:]) / 1000

@@ -51,6 +51,10 @@ class Hotkeys:
         self._vks = {KEY_TRIGGERS[n][1]: n for n in self._names if n in KEY_TRIGGERS}
         self._held &= self._names
 
+    def is_down(self, name: str) -> bool:
+        """The key is down now, as the hook saw it (the main thread may not have handled its release yet)."""
+        return name in self._held
+
     def is_bound_mouse(self, msg: int, mouse_data: int) -> bool:
         return _mouse_key(self._names, msg, mouse_data) is not None
 
