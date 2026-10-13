@@ -55,6 +55,30 @@ def continue_sentence(formatted: str) -> str:
     return "，" + _TRAILING.sub("", formatted.strip()) + "。"
 
 
+_SPELLED = re.compile(r"\s*((?:[A-Za-z]\s+)+[A-Za-z])\s*[.。,，!！?？]?\s*")
+_LATIN_WORD = re.compile(r"(\W*)([A-Za-z](?:[A-Za-z0-9'_ -]*[A-Za-z0-9])?)(\W*)")
+
+
+def spelled(selected: str, raw: str) -> tuple[str, str, str] | None:
+    """Letters spelled over a selected English word (2026-10-13, the user's request): B L I P over Bleep types Blip,
+    A P P over API types APP, D O G over doggy types dog: the letters written in the selection's case (all
+    capitals, a capital first, or lower case), the selection's surrounding punctuation kept. raw is the recognizer's
+    text (X-ASR writes spelled letters as "B L I P."). Returns (replacement, old word, new word)."""
+    m, w = _SPELLED.fullmatch(raw), _LATIN_WORD.fullmatch(selected)
+    if not m or not w:
+        return None
+    letters = re.sub(r"\s+", "", m.group(1)).lower()
+    word = w.group(2)
+    cased = [c for c in word if c.isalpha()]
+    if len(cased) > 1 and all(c.isupper() for c in cased):
+        new = letters.upper()
+    elif word[0].isupper():
+        new = letters.capitalize()
+    else:
+        new = letters
+    return w.group(1) + new + w.group(3), word, new
+
+
 def replacement(selected: str, formatted: str) -> str:
     """The text that replaces a selection: sentence-final punctuation only if the selection had some."""
     text = formatted.strip()

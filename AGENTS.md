@@ -302,6 +302,12 @@ removed the same day they were built: the user corrects by selecting with the mo
   sound: mixed into 91 of the user's recordings (not played through speakers), Woodblock, Kalimba and Marimba
   changed long sentences no more than inaudible noise (~2%), Blip, Glass, Triad, Xylophone, Mallet and Music Box
   ~5-7%, commands barely; the user kept all 12 until real recordings (with the sound picked up) can be checked.
+  A 試聽 button follows each drop-down. Played from the wav file: winsound cannot play asynchronously from memory
+  (RuntimeError), so the first version made no sound at all.
+- **Spelling over a selection** (`edit.spelled`, 2026-10-13, the user's request): letters spoken over a selected
+  English word (X-ASR writes "B L I P.") type that word in the selection's case: Bleep → Blip, API → APP, doggy →
+  dog. It counts like a 選字 pick (priority +30%, and the old word becomes an alias: the user chose that knowing
+  doggy would then always become dog).
 - **Saved recordings** (`recordings.py`, 2026-10-13, DEVELOPMENT ONLY: the user will remove it before release so
   users never keep recordings locally; keep it in that module plus `App._keep`, the 一般 tab's 開發測試 row and
   `save_recordings` in config): when ticked, every utterance is saved to DATA_DIR/recordings/<time>.wav with an

@@ -632,6 +632,12 @@ class App(QObject):
             entry = {"time": stamp, "asr": to_traditional(raw), "asr_s": t_asr, "fmt": text}
             if described:
                 entry["edit"] = f"指定字：{formatted.strip()} → {described}"
+            if selected and not sym:
+                spelt = edit.spelled(ctx.selection.text, raw)
+                if spelt:   # letters over an English word: that word, spelled, in the selection's case
+                    text, sym = spelt[0], True
+                    entry["fmt"], entry["edit"] = text, f"拼字：{spelt[1]} → {spelt[2]}"
+                    self.main.emit(lambda: self._learn_spelled(spelt[1], spelt[2]))
             if selected:
                 self._keep(audio, asr=raw, fmt=formatted, result=text, op=None, selection=ctx.selection.text)
                 self._edit_job(ctx.selection, text, bool(sym), entry, press)
@@ -649,6 +655,14 @@ class App(QObject):
             log.exception("transcribe failed")
             self.main.emit(self.overlay.hide_overlay)
             self.main.emit(self._input_done)
+
+    def _learn_spelled(self, old: str, new: str):
+        """A word spelled over a selection counts like a 選字 pick: priority, and old as a misheard spelling."""
+        log.info("spelled: %s -> %s", old, new)
+        if self.cfg.save_recordings:
+            recordings.note("spelled", before=old, after=new)
+        self.hotwords.picked(old, new)
+        self.settings.refresh_hotwords()
 
     def _keep(self, audio, **info):
         """Development only (the user will remove it before release): save the utterance (recordings.py)."""
