@@ -37,6 +37,7 @@ def _show_pct(label, pct: int):
     label.setStyleSheet("color: #d03030" if pct < hotwords.NEUTRAL else "")
 
 
+_SET_PAUSE = 0.8   # seconds between the start and end sound when a set is previewed
 _CARD_STYLE = "QFrame#card { border: 1px solid palette(mid); border-radius: 6px; }"
 
 
@@ -146,6 +147,8 @@ class SettingsDialog(QDialog):
             self.sound_set.addItem(name, cue_id)
         self.sound_set.addItem("None", "")
         self.sound_set.addItem("自定義", None)
+        self._set_timer = QTimer(self, singleShot=True,
+                                 timeout=lambda: cues.play(self._set_timer.property("cue"), "stop"))
         sound_row = QHBoxLayout()
         sound_row.addWidget(self.sound_set)
         sound_row.addSpacing(8)
@@ -258,8 +261,16 @@ class SettingsDialog(QDialog):
         self.start_sound.setCurrentIndex(self.start_sound.findData(cue_id))
         self.stop_sound.setCurrentIndex(self.stop_sound.findData(cue_id))
         self._loading = False
-        cues.play(cue_id, "start")
+        self._play_set(cue_id)
         self._apply()
+
+    def _play_set(self, cue_id: str):
+        """A set is previewed as a recording: the start sound, a pause, the end sound (the user's request)."""
+        self._set_timer.stop()
+        cues.play(cue_id, "start")
+        if cue_id:
+            self._set_timer.setProperty("cue", cue_id)
+            self._set_timer.start(int((cues.duration(cue_id, "start") + _SET_PAUSE) * 1000))
 
     def _save(self):
         self.cfg.save()
