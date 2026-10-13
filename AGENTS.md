@@ -308,6 +308,12 @@ removed the same day they were built: the user corrects by selecting with the mo
   when muted (a tap that flashed the indicator played it before). A double tap's second press shows no indicator
   until it records (it flashed with a second start sound). Each press and gesture is logged (`press ...`,
   `gesture ...`).
+- **Start sound taken out before recognition** (`cues.cancel`, 2026-10-13): with nothing said, X-ASR heard the start
+  sound the microphone picked up as text (Bubble / Mallet / Kalimba "Yeah.", Triad "One" / "Four.", Blip "Blip.").
+  The sound is found by cross-correlation 0.1-0.6s in and a least-squares FIR (256 taps, FFT + normal equations,
+  5-70ms) is subtracted (~10 dB). User's recordings: text from silent presses 6/29 → 2-4/29 (Triad's One left);
+  換行 with a sound mixed in 178/216 → 184-186/216 (83% with no sound). Turning the stretch down instead removed all
+  text but cut words said over it. Saved recordings keep the raw audio.
 - **Hold check uses the hook's key state** (`Hotkeys.is_down`, 2026-10-13): the 0.3s hold timer runs on the main
   thread, which a double tap's delete in a terminal keeps busy; the release was still queued, the second press
   counted as held, recorded (delete and say it again) and played the end sound. Now the timer asks the hook whether

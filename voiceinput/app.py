@@ -91,6 +91,7 @@ class _Press:
     finished: bool = False
     recording: bool = False           # the microphone is on for it
     shown: bool = False               # the recording indicator showed (and the start sound played)
+    cue: str = ""                     # the start sound played for it (taken out of the audio before recognition)
     consumed: bool = False            # it only stopped a recording a tap had started
     deleted: object = None            # Selection a 刪除 step removed (the dictation goes there)
     resolved: threading.Event = field(default_factory=threading.Event)   # steps before 錄音 are done
@@ -460,6 +461,7 @@ class App(QObject):
             self.tray.setIcon(self.icon_rec)
             self.overlay.show_recording()
             cues.play(self.cfg.start_sound, "start")
+            press.cue = self.cfg.start_sound
             # while the start sound plays the level bars stay still and the speakers on; recording goes on (the
             # user speaks over it); muting waits for its end (the user's choices, 2026-10-13)
             wait = cues.duration(self.cfg.start_sound, "start")
@@ -616,11 +618,12 @@ class App(QObject):
             ctx = press.probe.result()
             press.resolved.wait(3.0)
             t0 = time.monotonic()
+            heard = cues.cancel(audio, press.cue, SAMPLE_RATE) if press.cue else audio
             words = self.hotwords.bias() + [(t, _SCREEN_TERM_SCORE) for t in ctx.terms]
-            raw = rec.recognize(audio, _bias(words))
+            raw = rec.recognize(heard, _bias(words))
             commands = self._command_words()
             if commands and len(_TEXT_CHARS.sub("", raw)) <= max(map(len, commands)) + _COMMAND_SLACK:
-                again = rec.recognize(audio, _bias([(w, _COMMAND_SCORE) for w in commands] + words))
+                again = rec.recognize(heard, _bias([(w, _COMMAND_SCORE) for w in commands] + words))
                 if again != raw:
                     log.info("asr with commands boosted: %s -> %s", raw, again)
                 raw = again
