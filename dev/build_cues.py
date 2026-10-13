@@ -6,6 +6,9 @@ fades out over 50 ms (2026-10-13): it is cut out of the recording before recogni
 (0.36-0.60s) the user's first word often came while it was still playing. miniaudio is only needed here:
 
   .tools\uv.exe run --no-project --with miniaudio --with numpy python dev\build_cues.py
+
+Only the mp3s cues.SOUNDS names are in git (.gitignore skips the rest of dev/sound-preview): add a new one with
+`git add -f`.
 """
 import sys
 import wave
