@@ -15,7 +15,8 @@ class Config:
     period_to_comma: bool = True   # speaking on a selected 。 turns it into ， + the utterance + 。
     punctuation_names: bool = True  # an utterance of just a punctuation name (逗號, 句號 …) types the mark
     describe_char: bool = True     # 節日的節 types 節 (edit.described)
-    hotword_sort: str = "weight"   # order of the 熱詞 tab (settings.HOTWORD_SORTS)
+    hotword_sort: str = "weight"   # order of the 詞庫 tab (settings.HOTWORD_SORTS)
+    packs: list = field(default_factory=list)   # ids of the ticked term packs (packs.py)
     rules: list = field(default_factory=rules.defaults)   # custom operations (rules.Rule)
     rules_version: int = RULES_VERSION
 

@@ -1,11 +1,13 @@
 """Hotwords: words that bias X-ASR, each with a percentage (2026-10-13, the user's design).
 
-One list (DATA_DIR/hotword-list.json, shown on the 熱詞 tab). 100% leaves recognition alone, 200% pulls hardest
+One list (DATA_DIR/hotword-list.json, shown on the 詞庫 tab; the UI calls hotwords 詞庫 since 2026-10-13). 100% leaves recognition alone, 200% pulls hardest
 toward the word, 0% pushes hardest away from it; the scores behind the percentages are not shown.
 - typed (source "manual"): a word typed in the 選字 menu's input box; 200%, never changed by picks.
 - 選字: picking a word of two or more characters (or English) in the menu raises it by 30% and lowers the word it
   replaced by 30%, so swapping 程式 and 城市 back and forth returns both to 100% (where they leave the list).
-- the −/+ buttons on the 熱詞 tab move any word by 10%.
+- the −/+ buttons on the 詞庫 tab move any word by 10%.
+- words of ticked term packs (packs.py) count as being at the pack's percentage without being listed; a pick or a
+  replacement lists one, moved from there, and the listed percentage wins (back at the pack's, it leaves the list).
 Scores: 200% is +5 for Chinese (+3 for English), 0% is −3. Measured with TTS (dev experiments): with
 max_active_paths 12, Chinese hotwords at 5 hit 16/16 targets with no false hits, at 6 台北是一個美麗的城市 became
 程式, at 8 even English broke (2026-10-11); 程式 130% / 城市 70% (+1.5 / −0.9) already turns 寫了一個新的城市 into
@@ -79,6 +81,7 @@ class Hotwords:
         self.path = path
         self._lock = threading.Lock()
         self.items: list[Hotword] = []
+        self.pack_pct: dict[str, int] = {}    # words of the ticked term packs -> their percentage
         try:
             for d in json.loads(path.read_text(encoding="utf-8")):
                 if isinstance(d, str):    # the first format (2026-10-11): a plain list of 加入熱詞 words
@@ -101,6 +104,17 @@ class Hotwords:
     def find(self, word: str) -> Hotword | None:
         return next((h for h in self.items if h.word == word), None)
 
+    def set_packs(self, words, pct: int):
+        self.pack_pct = {w: pct for w in words}
+
+    def base(self, word: str) -> int:
+        """The percentage of a word that is not listed: its term pack's, or 100%."""
+        return self.pack_pct.get(word, NEUTRAL)
+
+    def pct_of(self, word: str) -> int:
+        h = self.find(word)
+        return h.pct if h is not None else self.base(word)
+
     def add(self, word: str) -> bool:
         """A word typed in the 選字 menu: a hotword at 200% (a picked one is promoted). False if not eligible."""
         word = word.strip()
@@ -115,15 +129,16 @@ class Hotwords:
         return True
 
     def _move(self, word: str, delta: int):
-        """A pick moves a word by delta; typed words stay put and a word back at 100% leaves the list."""
+        """A pick moves a word by delta from where it is (listed, in a term pack or 100%); typed words stay put and
+        a word back where it would be unlisted leaves the list."""
         h = self.find(word)
         if h is None:
-            h = Hotword(word, NEUTRAL, PICKED, _today())
+            h = Hotword(word, self.base(word), PICKED, _today())
             self.items.append(h)
         elif h.source == MANUAL:
             return
         h.pct = max(floor(word), min(TOP, h.pct + delta))
-        if h.pct == NEUTRAL:
+        if h.pct == self.base(word):
             self.items.remove(h)
 
     def picked(self, old: str, new: str):
@@ -143,7 +158,7 @@ class Hotwords:
         self.save()
 
     def adjust(self, word: str, steps: int):
-        """The −/+ buttons on the 熱詞 tab: steps of 10%, within 0% (100% for English) .. 200%. A word set to
+        """The −/+ buttons on the 詞庫 tab: steps of 10%, within 0% (100% for English) .. 200%. A word set to
         100% stays listed (it does nothing) so the next click can go on."""
         h = self.find(word)
         if h is not None:
@@ -157,9 +172,13 @@ class Hotwords:
             self.save()
 
     def bias(self) -> list[tuple[str, float]]:
-        """(word, score) pairs for X-ASR; words at 100% are left out."""
-        return [(h.word, score(h.word, h.pct)) for h in self.items if h.pct != NEUTRAL]
+        """(word, score) pairs for X-ASR: the list, then the term packs' words not in it; words at 100% are left
+        out."""
+        listed = {h.word for h in self.items}
+        out = [(h.word, score(h.word, h.pct)) for h in self.items if h.pct != NEUTRAL]
+        return out + [(w, score(w, pct)) for w, pct in self.pack_pct.items() if w not in listed and pct != NEUTRAL]
 
     def weights_for(self, words) -> dict[str, float]:
-        """Scores of those of words that are hotwords (to put picked words first in 選字 and lowered ones last)."""
-        return {h.word: score(h.word, h.pct) for h in self.items if h.word in words}
+        """Scores of those of words that are hotwords or in a ticked term pack (to put picked words first in 選字
+        and lowered ones last)."""
+        return {w: score(w, self.pct_of(w)) for w in words if self.find(w) is not None or w in self.pack_pct}

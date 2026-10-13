@@ -1,5 +1,6 @@
 """Settings window in four tabs: 一般 (general), 辨識紀錄 (live transcript log), 自訂操作 (custom operations,
-rules.py) and 熱詞 (hotwords.py: every word with its percentage, −/+ by 10%, removable). Every change is applied
+rules.py) and 詞庫 (hotwords.py, the UI name for hotwords since 2026-10-13: term packs to tick (packs.py), then every
+listed word with its 優先度 percentage, −/+ by 10%, removable). Every change is applied
 and saved immediately."""
 import html
 import os
@@ -10,7 +11,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDia
                                QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea, QSpinBox, QTabWidget,
                                QTextBrowser, QVBoxLayout, QWidget)
 
-from . import audio, hotwords, rules
+from . import audio, hotwords, packs, rules
 from .keys import KEY_TRIGGERS, MOUSE_TRIGGERS, combo_text, is_modifier
 from .rules import Rule, Step
 
@@ -23,7 +24,7 @@ COMMANDS = [(rules.RECORD, "錄音"), (rules.PICK, "選字"),
             (rules.DELETE_DICTATION, "刪除剛輸入的文字")]
 _STEP_DEFAULTS = {rules.COMMAND: rules.DELETE_SELECTION, rules.KEYS: "", rules.TEXT: "", rules.WAIT: 100}
 
-HOTWORD_SORTS = [("weight", "百分比（高→低）"), ("name", "名稱 A→Z"), ("name_desc", "名稱 Z→A"),
+HOTWORD_SORTS = [("weight", "優先度（高→低）"), ("name", "名稱 A→Z"), ("name_desc", "名稱 Z→A"),
                  ("date", "日期（新→舊）"), ("date_old", "日期（舊→新）")]
 _CARD_STYLE = "QFrame#card { border: 1px solid palette(mid); border-radius: 6px; }"
 
@@ -101,7 +102,7 @@ class SettingsDialog(QDialog):
         self.tabs.addTab(self._general_page(), "一般")
         self.tabs.addTab(self._log_page(), "辨識紀錄")
         self.tabs.addTab(self._rules_page(), "自訂操作")
-        self.tabs.addTab(self._hotwords_page(), "熱詞")
+        self.tabs.addTab(self._hotwords_page(), "詞庫")
 
         buttons = QDialogButtonBox(QDialogButtonBox.Close)
         buttons.rejected.connect(self.close)
@@ -189,7 +190,7 @@ class SettingsDialog(QDialog):
             self.memory_path.write_text('{\n"examples": [\n],\n"styles": {}\n}\n', encoding="utf-8")
         os.startfile(self.memory_path)
 
-    # --- 熱詞 ---
+    # --- 詞庫 (hotwords) ---
     def _hotwords_page(self) -> QWidget:
         self.hw_list = QVBoxLayout()
         self.hw_list.setSpacing(4)
@@ -202,21 +203,31 @@ class SettingsDialog(QDialog):
         scroll.setWidget(inner)
         self.hw_sort = _combo(HOTWORD_SORTS, self.cfg.hotword_sort)
         self.hw_sort.currentIndexChanged.connect(self._sort_hotwords)
+        pack_row = QHBoxLayout()
+        pack_row.addWidget(QLabel("詞包"))
+        for pack in packs.available():
+            box = QCheckBox(f"{pack.name}（{len(pack.words)}）", checked=pack.id in self.cfg.packs)
+            box.setToolTip(f"整包的詞以優先度 {packs.PCT}% 辨識；選字選過或被換掉的詞會列在下面，以那裡的優先度為準")
+            box.toggled.connect(lambda on, i=pack.id: self._toggle_pack(i, on))
+            pack_row.addWidget(box)
+        pack_row.addStretch()
         top = QHBoxLayout()
         top.addWidget(QLabel("排序"))
         top.addWidget(self.hw_sort)
         top.addStretch()
-        self.hw_empty = QLabel("還沒有熱詞。選字時選了詞語（被換掉的詞也會列出，百分比較低），或在選字選單的輸入框輸入文字，就會加到這裡。")
+        self.hw_empty = QLabel("詞庫裡還沒有詞。選字時選了詞語（被換掉的詞也會列出，優先度較低），或在選字選單的輸入框輸入文字，就會加到這裡。")
         self.hw_empty.setStyleSheet("color: gray")
         self.hw_empty.setWordWrap(True)
         page = QWidget()
         layout = QVBoxLayout(page)
+        layout.addLayout(pack_row)
         layout.addLayout(top)
         layout.addWidget(self.hw_empty)
         layout.addWidget(scroll, 1)
         return page
 
     def refresh_hotwords(self):
+        self._hw_rows = {}
         while self.hw_list.count():
             w = self.hw_list.takeAt(0).widget()
             w.setParent(None)
@@ -237,7 +248,7 @@ class SettingsDialog(QDialog):
             down.setEnabled(h.pct > low)
             row.addWidget(down)
             percent = QLabel(f"{h.pct}%")
-            percent.setToolTip("100% 不影響辨識；越高越容易辨識成這個詞，越低越不容易"
+            percent.setToolTip("優先度：100% 不影響辨識；越高越容易辨識成這個詞，越低越不容易"
                                + ("" if low == 0 else "（英文最低 100%）"))
             percent.setMinimumWidth(40)
             percent.setAlignment(Qt.AlignCenter)
@@ -246,7 +257,8 @@ class SettingsDialog(QDialog):
             up.setFixedWidth(28)
             up.setEnabled(h.pct < hotwords.TOP)
             row.addWidget(up)
-            remove = QPushButton("✕", toolTip="刪除這個熱詞", clicked=lambda _=False, w=h.word: self._remove_hotword(w))
+            self._hw_rows[h.word] = (down, percent, up)
+            remove = QPushButton("✕", toolTip="從詞庫刪除", clicked=lambda _=False, w=h.word: self._remove_hotword(w))
             remove.setFixedWidth(28)
             row.addWidget(remove)
             self.hw_list.addWidget(card)
@@ -271,8 +283,22 @@ class SettingsDialog(QDialog):
         self.refresh_hotwords()
 
     def _adjust_hotword(self, word: str, steps: int):
+        """Updates the row in place: re-sorting made the row jump away after a click (the user's report)."""
         self.hotwords.adjust(word, steps)
-        self.refresh_hotwords()
+        h = self.hotwords.find(word)
+        if h is None or word not in self._hw_rows:
+            self.refresh_hotwords()
+            return
+        down, percent, up = self._hw_rows[word]
+        percent.setText(f"{h.pct}%")
+        down.setEnabled(h.pct > hotwords.floor(word))
+        up.setEnabled(h.pct < hotwords.TOP)
+
+    def _toggle_pack(self, pack_id: str, on: bool):
+        ids = [i for i in self.cfg.packs if i != pack_id] + ([pack_id] if on else [])
+        self.cfg.packs = ids
+        self.cfg.save()
+        self.hotwords.set_packs(packs.words_for(ids), packs.PCT)
 
     def _remove_hotword(self, word: str):
         self.hotwords.remove(word)

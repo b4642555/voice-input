@@ -1,7 +1,7 @@
 """The 選字 menu: a small dark window that does not take focus, so the target app keeps its caret and selection.
 
 The candidate list has the look from before the lean branch (2026-10-11). Since the same day (the user's choice)
-its top row is an input box ("輸入加入熱詞", as tall as a row) instead of a title: a click there activates the menu
+its top row is an input box ("輸入加入詞庫", as tall as a row) instead of a title: a click there activates the menu
 so an input method can be used, Enter replaces the selection with the typed text and saves it as a hotword, and
 focus goes back to the app the menu was opened in. Rows are answered with the mouse only (decided 2026-09-29: short
 spoken answers like 對 / 第二個 were often misheard). There is no timeout any more: the app closes the menu when
@@ -54,7 +54,7 @@ class Picker(QWidget):
         self.frame.setStyleSheet(_STYLE)
         self.frame.setMaximumWidth(_MAX_WIDTH)
         self.frame.setMinimumWidth(_MIN_WIDTH)
-        self.input = _Input(placeholderText="輸入加入熱詞")
+        self.input = _Input(placeholderText="輸入加入詞庫")
         self.input.clicked.connect(self._activate)
         self.input.returnPressed.connect(self._submit)
         self.rows = QVBoxLayout()

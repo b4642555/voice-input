@@ -101,9 +101,11 @@ CJK/ASCII spacing → trailing punctuation.
 
 Four tabs, sized for the log: 一般 (microphone, "mute the speakers while recording", punctuation names, "selected 。 →
 ，", "節日的節" (described characters), autostart, a button that opens smart-picks.json; the menu timeout was
-removed 2026-10-11), 辨識紀錄 (the transcript log), 自訂操作 (custom operations, below) and 熱詞 (the hotword list:
-date added, the percentage between −/+ buttons (10% a click, since 2026-10-13), remove; the source is not shown; a
-排序 drop-down: percentage, name A→Z / Z→A by pinyin, date; remembered). Mute (2026-10-06, `mute.py`): Core Audio via
+removed 2026-10-11), 辨識紀錄 (the transcript log), 自訂操作 (custom operations, below) and 詞庫 (hotwords; the UI
+says 詞庫 and 優先度 instead of 熱詞 and weight since 2026-10-13, the code keeps "hotwords": term pack check boxes on
+top, then the list: date added, the 優先度 percentage between −/+ buttons (10% a click; the row is updated in place,
+re-sorting made it jump away), remove; the source is not shown; a 排序 drop-down: 優先度, name A→Z / Z→A by pinyin,
+date; remembered). Mute (2026-10-06, `mute.py`): Core Audio via
 comtypes; muted when the recording indicator shows, unmuted once the text is pasted or the press ends in nothing; a
 mute the user set is left alone. Selection edits and on-screen terms are always on.
 
@@ -136,7 +138,7 @@ rule records any more, a tray notice warns that dictation is impossible (the use
 The one popup is the 選字 menu (`picker.py`, the pre-lean look; a redesign is planned). The 加入熱詞 notice with 撤銷
 lived a few hours: the user wants hotwords added quietly (they come from deliberate picks and typing).
 - **The menu** (reworked 2026-10-11, the user's design): no title row; on top an input box as tall as a row,
-  placeholder 輸入加入熱詞. A click there activates the menu (WS_EX_NOACTIVATE is lifted, SetForegroundWindow) so an
+  placeholder 輸入加入詞庫 (輸入加入熱詞 until 2026-10-13). A click there activates the menu (WS_EX_NOACTIVATE is lifted, SetForegroundWindow) so an
   input method works; Enter hides it, gives focus back to the window that had it and, 150ms later, replaces the
   selection with the text like a pick and makes it a hotword at the cap (a single character is learned as a smart
   pick instead); Esc closes. No timeout: any click outside the menu or key in another window closes it (mouse /
@@ -167,9 +169,16 @@ lived a few hours: the user wants hotwords added quietly (they come from deliber
   sent (剪貼 next to 剪貼簿 made X-ASR write 剪貼布), and a lowered word sharing a start with another is dropped.
 - **Hotword volume** (TTS, 2026-10-13): random dictionary words at score 2 cost nothing up to 5k (0.50s → 0.54s for
   9.5s of audio), 20k 0.73s, 50k 1.12s (the hotword graph is rebuilt per stream), but from 20k on 熱詞 came out as
-  熱刺: large term lists hurt accuracy before speed. Planned instead: curated term packs to tick (Wikidata + LLM-added
-  new terms, built offline, shipped with the app), then English 選字 by sound against hotwords, packs and on-screen
-  terms (clock code → Claude Code).
+  熱刺: large term lists hurt accuracy before speed.
+- **Term packs** (詞包, `packs.py`, `voiceinput/packs/<id>.txt`, ticked on the 詞庫 tab, `packs` in config.json;
+  2026-10-13): curated lists, a few hundred words each, no version numbers (textfmt writes spoken numbers). Wikidata
+  is only a cross-check (`dev/pack_candidates.py` lists linked items a pack lacks): it misses tools (Cursor, Ollama)
+  and is noisy (DeviantArt). Words of ticked packs bias at 170% without being listed; a pick or replacement lists a
+  word, moved from 170%. TTS (18 sentences with a term, 28 without): 130% 11/18, 150-170% 12/18, 200% 14/18 but
+  存到 cloud 上面 became Claude, so 170%. First pack: AI 工具與模型 (the user's pick; products, companies, models and
+  English terms said in Chinese). Other domains suggested to the user: 辦公與協作, 程式開發, 雲端服務, 設計與影音,
+  行銷與數據, 硬體與系統. Next: English 選字 by sound against the list, packs and on-screen terms (clock code →
+  Claude Code).
 - **Why Chinese biasing works now** (dev experiment by a subagent, 2026-10-11, Windows TTS, 16 target words + 4
   counter-examples; the scripts were deleted): sherpa-onnx's modified beam search keeps the top max_active_paths
   tokens by the model's own score and only then adds the hotword boost (offline-transducer-modified-beam-search-

@@ -32,7 +32,7 @@ from PySide6.QtCore import QLockFile, QObject, QPointF, QRectF, Qt, QTimer, Sign
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
-from . import autostart, candidates, edit, models, paths, rules
+from . import autostart, candidates, edit, models, packs, paths, rules
 from .asr import Recognizer
 from .audio import Recorder
 from .config import Config
@@ -140,6 +140,7 @@ class App(QObject):
         self._ignored: set[str] = set()          # keys pressed while another was held
         self._could_record = rules.can_record(self.cfg.rules)
         self.hotwords = Hotwords()
+        self.hotwords.set_packs(packs.words_for(self.cfg.packs), packs.PCT)
         self.memory = Memory()
         self._menu = None                        # ("pick", Selection) while the 選字 menu is up
 

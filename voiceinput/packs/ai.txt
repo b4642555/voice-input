@@ -1,0 +1,194 @@
+# AI 工具與模型
+# One term per line: products, companies and models without version numbers (GPT 四 -> GPT 4 is left to textfmt),
+# then English terms said inside Chinese. Curated by hand; dev/pack_candidates.py lists Wikidata items not here yet.
+
+# companies and labs
+Anthropic
+OpenAI
+Google DeepMind
+DeepMind
+Meta AI
+Mistral
+xAI
+Hugging Face
+Perplexity
+ByteDance
+Alibaba
+Moonshot
+Zhipu
+MiniMax
+Stability AI
+Runway
+ElevenLabs
+Cohere
+NVIDIA
+
+# assistants and chat apps
+Claude
+ChatGPT
+Gemini
+Copilot
+Grok
+Le Chat
+DeepSeek
+Qwen
+Kimi
+Doubao
+Llama
+Character.ai
+NotebookLM
+Poe
+Felo
+Genspark
+Manus
+
+# model families and names
+GPT
+Opus
+Sonnet
+Haiku
+Fable
+Mythos
+Gemma
+Phi
+Mixtral
+Codestral
+Nemotron
+Whisper
+SenseVoice
+Sora
+Veo
+Seedance
+Seedream
+Kling
+Hailuo
+Imagen
+DALL-E
+Midjourney
+Stable Diffusion
+Flux
+Firefly
+Suno
+Udio
+Nano Banana
+
+# coding and agent tools
+Claude Code
+Codex
+Cursor
+Windsurf
+GitHub Copilot
+Cline
+Roo Code
+Aider
+Devin
+Antigravity
+Gemini CLI
+Lovable
+Bolt
+v0
+Replit
+Kiro
+Trae
+OpenCode
+
+# platforms and developer tools
+Ollama
+LM Studio
+llama.cpp
+vLLM
+LangChain
+LangGraph
+LlamaIndex
+CrewAI
+AutoGen
+n8n
+Dify
+Zapier
+OpenRouter
+Groq
+Cerebras
+Together AI
+Replicate
+Vertex AI
+AI Studio
+Bedrock
+Azure OpenAI
+Hugging Face Hub
+ComfyUI
+Automatic1111
+Open WebUI
+SillyTavern
+PyTorch
+TensorFlow
+JAX
+ONNX
+sherpa-onnx
+GGUF
+safetensors
+Transformers
+Jupyter
+Colab
+Kaggle
+
+# terms said inside Chinese
+AI
+AGI
+LLM
+prompt
+system prompt
+token
+tokenizer
+context window
+agent
+subagent
+multi-agent
+workflow
+MCP
+RAG
+embedding
+vector database
+fine-tune
+fine-tuning
+LoRA
+RLHF
+benchmark
+inference
+reasoning
+chain of thought
+hallucination
+multimodal
+diffusion
+transformer
+attention
+GPU
+TPU
+CUDA
+VRAM
+API
+API key
+SDK
+CLI
+OCR
+TTS
+ASR
+text-to-speech
+speech-to-text
+text-to-image
+text-to-video
+image-to-video
+open source
+open weights
+checkpoint
+quantization
+distillation
+temperature
+top-p
+few-shot
+zero-shot
+vibe coding
+skill
+plugin
+hook
+slash command
+worktree
