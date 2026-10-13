@@ -130,7 +130,7 @@ Enter.
 Gestures (`app.py`, `hotkey.Hotkeys`; `gesture_time`, 0.3s by default, is both how long a press makes a hold and
 how soon after a tap a press makes a double tap: one setting on the 自訂操作 tab, 0.15-0.8s, the user's request
 2026-10-13; constants of 0.3 / 0.35s before): bound keys are suppressed by the hooks; the microphone starts at key-down when
-the press may record; a single tap waits DOUBLE_TAP_GAP only when that key has a double-tap rule; a gesture no rule
+the press may record; a single tap waits `gesture_time` only when that key has a double-tap rule; a gesture no rule
 takes is given back (keyboard key replayed, mouse button clicked: the user's choice, so an unbound middle click
 still works, `gesture_time` late when a double tap is bound; a hold is given back as one click). Invalid rules (two 錄音,
 錄音 in a speech rule, empty combination, a duplicate of an earlier rule) are flagged in red and skipped. When no
