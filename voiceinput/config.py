@@ -7,6 +7,9 @@ from .rules import VERSION as RULES_VERSION
 from .paths import CONFIG_PATH
 
 
+GESTURE_TIME_RANGE = (0.15, 0.8)
+
+
 @dataclass
 class Config:
     mic: str = ""                  # input device name, "" = system default
@@ -20,6 +23,9 @@ class Config:
     pack_hints: list = field(default_factory=list)   # packs a notice already suggested (App._suggest_pack)
     start_sound: str = "blip"     # cues.py id played when the recording indicator shows, "" for none
     stop_sound: str = "blip"      # cues.py id played when the recording ends, "" for none
+    # seconds: a press this long is a hold, a press this soon after a tap's release makes a double tap (on the
+    # 自訂操作 tab since 2026-10-13; 0.3 / 0.35 constants before, made the same at the user's request)
+    gesture_time: float = 0.3
     stop_sound_at: str = "stop"   # when the end sound plays: "stop" (recording stops) or "done" (text is in)
     save_recordings: bool = False   # development only, to be removed before release (recordings.py)
     rules: list = field(default_factory=rules.defaults)   # custom operations (rules.Rule)
@@ -33,6 +39,7 @@ class Config:
             return cls()
         known = {k: v for k, v in data.items() if k in cls.__dataclass_fields__ and k not in ("rules", "rules_version")}
         cfg = cls(**known)
+        cfg.gesture_time = min(max(float(cfg.gesture_time), GESTURE_TIME_RANGE[0]), GESTURE_TIME_RANGE[1])
         if "rules" in data:
             cfg.rules = rules.upgrade(rules.migrate([rules.Rule.from_dict(d) for d in data["rules"]]),
                                       data.get("rules_version", 1))

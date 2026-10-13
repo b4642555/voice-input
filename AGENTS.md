@@ -127,10 +127,12 @@ Defaults: hold middle = 錄音; double middle on a selection = 刪除選取的�
 (in neither situation the double click goes back to the button); tap middle on a selection = 選字 (added
 2026-10-11; `rules.upgrade` appends it to configs saved before, rules_version 2); 說出 換行 = Shift+Enter, 說出 送出 =
 Enter.
-Gestures (`app.py`, `hotkey.Hotkeys`): bound keys are suppressed by the hooks; the microphone starts at key-down when
+Gestures (`app.py`, `hotkey.Hotkeys`; `gesture_time`, 0.3s by default, is both how long a press makes a hold and
+how soon after a tap a press makes a double tap: one setting on the 自訂操作 tab, 0.15-0.8s, the user's request
+2026-10-13; constants of 0.3 / 0.35s before): bound keys are suppressed by the hooks; the microphone starts at key-down when
 the press may record; a single tap waits DOUBLE_TAP_GAP only when that key has a double-tap rule; a gesture no rule
 takes is given back (keyboard key replayed, mouse button clicked: the user's choice, so an unbound middle click
-still works, 0.3s late when a double tap is bound (DOUBLE_TAP_GAP, 0.35s until 2026-10-13); a hold is given back as one click). Invalid rules (two 錄音,
+still works, `gesture_time` late when a double tap is bound; a hold is given back as one click). Invalid rules (two 錄音,
 錄音 in a speech rule, empty combination, a duplicate of an earlier rule) are flagged in red and skipped. When no
 rule records any more, a tray notice warns that dictation is impossible (the user's request).
 
@@ -302,8 +304,8 @@ removed the same day they were built: the user corrects by selecting with the mo
 another agent made in `dev/sound-preview` (untracked), converted by `dev/build_cues.py` (loudness matched like the
   preview page; an end sound's tail cut at -40 dB, a start sound's at -20 dB plus a 50ms fade, 0.07s (Pop) to 0.45s
   (Triad), since it is cut out of the recording). The indicator fades in and the start sound plays together once the press is known to record
-  (`_show_recording`, the user's design, 2026-10-13): a hold at TAP_THRESHOLD (0.3s), a tap at its release (0.3s
-  later when the key has a double tap), at key-down when the key's only operations are recording taps. The
+  (`_show_recording`, the user's design, 2026-10-13): a hold at `gesture_time` (0.3s), a tap at its release
+  (`gesture_time` later when the key has a double tap), at key-down when the key's only operations are recording taps. The
   indicator at 0.1s with the sound beeped on double taps; at 0.1s after the microphone opened, the user's double
   taps (first press ~0.12s) rarely flashed it. Muting and the end sound follow. `cues.remove` looks for it from when it played (`_Press.cue_at`). For its length plus `_CUE_LATENCY` (0.25s; PlaySound to microphone measured 0.17s
   on the user's machine) the level bars stay still (`Recorder.still`) and the speakers on; muting starts after.

@@ -37,7 +37,7 @@ from .asr import SAMPLE_RATE, Recognizer
 from .audio import Recorder
 from .config import Config
 from .hotwords import Hotwords
-from .hotkey import DOUBLE_TAP_GAP, TAP_THRESHOLD, Hotkeys
+from .hotkey import Hotkeys
 from .keys import MOUSE_TRIGGERS, combo_vks
 from .memory import Memory, is_latin, situation
 from .mute import Muter
@@ -85,7 +85,7 @@ class _Press:
     rule: object = None               # the operation it runs (None: unbound, the gesture goes back to the key)
     redictate: object = None          # a held second press: the hold operation whose recording it does
     decided: bool = False             # rule is known
-    held: bool = False                # down for TAP_THRESHOLD or longer
+    held: bool = False                # down for gesture_time or longer
     released: bool = False
     finished: bool = False
     recording: bool = False           # the microphone is on for it
@@ -287,7 +287,7 @@ class App(QObject):
 
     def _only_tap_records(self, key: str) -> bool:
         """The key's only operations are taps that record: a press is a recording from key-down (held past
-        TAP_THRESHOLD it is given back, after the indicator and start sound)."""
+        gesture_time it is given back, after the indicator and start sound)."""
         taps = self._rules_for(key, TAP)
         return (bool(taps) and all(r.record_index() is not None for r in taps)
                 and not self._rules_for(key, DOUBLE) and not self._rules_for(key, HOLD))
@@ -304,7 +304,7 @@ class App(QObject):
             return
         pending, self._pending = self._pending, None
         self._pending_timer.stop()
-        double = pending is not None and pending.key == key and t - pending.up_at < DOUBLE_TAP_GAP
+        double = pending is not None and pending.key == key and t - pending.up_at < self.cfg.gesture_time
         if pending is not None and not double:
             self._discard_mic(pending)
             self._decide(pending, TAP)       # another key came first: the tap is just a tap
@@ -320,7 +320,7 @@ class App(QObject):
                 self._show_recording(press)
         if double:
             self._decide(press, DOUBLE)
-        QTimer.singleShot(int(TAP_THRESHOLD * 1000), lambda: self._hold_check(press, timer=True))
+        QTimer.singleShot(int(self.cfg.gesture_time * 1000), lambda: self._hold_check(press, timer=True))
 
     def _hold_check(self, press: _Press, timer: bool = False):
         if press.released or press.held:
@@ -349,14 +349,14 @@ class App(QObject):
                  ", indicator shown" if press.shown else "")
         if press.consumed:
             return
-        if not press.held and t - press.down_at >= TAP_THRESHOLD:   # the hold timer has not run yet
+        if not press.held and t - press.down_at >= self.cfg.gesture_time:   # the hold timer has not run yet
             self._hold_check(press)
         if press.first is None and not press.held:
             if self._rules_for(key, DOUBLE):     # wait to see whether a second press follows
                 if not self._records_on(key, (TAP,)):
                     self._discard_mic(press)
                 self._pending = press
-                self._pending_timer.start(int(DOUBLE_TAP_GAP * 1000))
+                self._pending_timer.start(int(self.cfg.gesture_time * 1000))
                 return
             self._decide(press, TAP)
             return
@@ -460,8 +460,8 @@ class App(QObject):
 
     def _show_recording(self, press: _Press):
         """The indicator fades in and the start sound plays together, once the press is known to record (the
-        user's design, 2026-10-13): from `_apply` when the gesture is decided (a hold at TAP_THRESHOLD, a tap at
-        its release or DOUBLE_TAP_GAP later), at key-down when the key only has recording taps. Until then the
+        user's design, 2026-10-13): from `_apply` when the gesture is decided (a hold at gesture_time, a tap at
+        its release or gesture_time later), at key-down when the key only has recording taps. Until then the
         microphone records unseen. The indicator showed at 0.1s before (0.1s after the microphone opened, so a
         double tap's ~0.12s first press rarely flashed it) and the sound with it, which beeped on double taps."""
         if press.recording and self._mic is press and not press.shown:

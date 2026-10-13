@@ -7,11 +7,12 @@ import os
 
 from pypinyin import lazy_pinyin
 from PySide6.QtCore import QEvent, Qt, QTimer, Signal
-from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QFrame,
-                               QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea,
-                               QSpinBox, QTabWidget, QTextBrowser, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
+                               QFormLayout, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
+                               QPushButton, QScrollArea, QSpinBox, QTabWidget, QTextBrowser, QVBoxLayout, QWidget)
 
 from . import audio, cues, hotwords, packs, recordings, rules
+from .config import GESTURE_TIME_RANGE
 from .keys import KEY_TRIGGERS, MOUSE_TRIGGERS, combo_text, is_modifier
 from .rules import Rule, Step
 
@@ -230,6 +231,7 @@ class SettingsDialog(QDialog):
         self.start_sound.setCurrentIndex(max(0, self.start_sound.findData(self.cfg.start_sound)))
         self.stop_sound.setCurrentIndex(max(0, self.stop_sound.findData(self.cfg.stop_sound)))
         self.stop_at.setCurrentIndex(max(0, self.stop_at.findData(self.cfg.stop_sound_at)))
+        self.gesture_time.setValue(self.cfg.gesture_time)
         same = self.cfg.start_sound == self.cfg.stop_sound
         self.sound_set.setCurrentIndex(self.sound_set.findData(self.cfg.start_sound) if same
                                        else self.sound_set.count() - 1)
@@ -457,11 +459,24 @@ class SettingsDialog(QDialog):
         self.log.verticalScrollBar().setValue(0)
 
     # --- 自訂操作: one card per rule ---
+    def _gesture_time_changed(self, value: float):
+        if not self._loading:
+            self.cfg.gesture_time = round(value, 2)
+            self._save()
+
     def _rules_page(self) -> QWidget:
         add = QPushButton("＋ 新增操作", clicked=self._add_rule)
         reset = QPushButton("還原預設", clicked=self._reset_rules)
+        self.gesture_time = QDoubleSpinBox(decimals=2, singleStep=0.05, suffix=" 秒", minimum=GESTURE_TIME_RANGE[0],
+                                           maximum=GESTURE_TIME_RANGE[1], value=self.cfg.gesture_time)
+        self.gesture_time.setToolTip("按著超過這個時間算「按住」；放開後在這個時間內再按一次算「連按兩下」。"
+                                     "也是按住時錄音提示出現的時間")
+        self.gesture_time.valueChanged.connect(self._gesture_time_changed)
         top = QHBoxLayout()
         top.addWidget(add)
+        top.addSpacing(16)
+        top.addWidget(QLabel("按住／連按判定時間"))
+        top.addWidget(self.gesture_time)
         top.addStretch()
         top.addWidget(reset)
 
