@@ -299,12 +299,14 @@ removed the same day they were built: the user corrects by selecting with the mo
   another agent made in `dev/sound-preview` (untracked), converted by `dev/build_cues.py` (loudness matched like the
   preview page; silent tails cut at -40 dB, so a start sound lasts 0.19s (Woodblock) to 0.60s). The start sound
   plays as the indicator fades in, once (`_show_recording` is called again when the gesture is decided at 0.3s and
-  replayed it until 2026-10-13). While it plays nothing is recorded (`Recorder.hold`: what was heard since key-down
-  is dropped too, the level stays 0) and the speakers stay on; muting starts at its end (the user's choice: the
-  indicator should not react to the sound, and nobody speaks over it). With None, recording runs from key-down as
-  before. The end sound plays only for a recording that goes to recognition, after unmuting when muted: a tap or a
-  double tap's first press that flashed the indicator played it until 2026-10-13. Known: a double tap whose presses
-  last over 0.1s each still plays the start sound twice (the indicator flashes). The microphone hears the start
+  replayed it until 2026-10-13). For its length plus `_CUE_LATENCY` (0.25s; PlaySound to microphone measured 0.17s
+  on the user's machine) the level bars stay still (`Recorder.still`) and the speakers on; muting starts after.
+  Recording still runs from key-down: dropping the audio while the sound played (tried the same day, the user's
+  idea) cut the first syllable, as the user starts speaking 0.25-0.98s after the press (median 0.45s; 換行 15/18 →
+  1-2/18 on their recordings). The end sound plays only for a recording that goes to recognition, after unmuting
+  when muted (a tap that flashed the indicator played it before). A double tap's second press shows no indicator
+  until it records (it flashed with a second start sound). Each press and gesture is logged (`press ...`,
+  `gesture ...`). The microphone hears the start
   sound: mixed into 91 of the user's recordings (not played through speakers), Woodblock, Kalimba and Marimba
   changed long sentences no more than inaudible noise (~2%), Blip, Glass, Triad, Xylophone, Mallet and Music Box
   ~5-7%, commands barely; the user kept all 12 until real recordings (with the sound picked up) can be checked.

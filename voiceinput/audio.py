@@ -38,12 +38,12 @@ class Recorder:
         self._stream = None
         self._lock = threading.Lock()
         self.level = 0.0   # latest RMS level, 0..1, read by the overlay
-        self._hold_until = 0.0   # monotonic time before which input is dropped (hold)
+        self._still_until = 0.0   # monotonic time before which the level stays 0 (still)
 
     def start(self, device_name: str = "") -> None:
         self._chunks = []
         self.level = 0.0
-        self._hold_until = 0.0
+        self._still_until = 0.0
         self._stream = sd.InputStream(
             samplerate=SAMPLE_RATE,
             channels=1,
@@ -54,22 +54,19 @@ class Recorder:
         )
         self._stream.start()
 
-    def hold(self, seconds: float) -> None:
-        """Drop what was heard so far and the next seconds, level at 0 meanwhile: the start sound plays then
-        (2026-10-13, the user's choice: the indicator should not react to it, and nobody speaks over it)."""
-        with self._lock:
-            self._chunks = []
-            self._hold_until = time.monotonic() + seconds
+    def still(self, seconds: float) -> None:
+        """Level at 0 for the next seconds while the start sound plays, so the indicator does not react to it.
+        Recording goes on: dropping that audio (the first version, 2026-10-13) cut the user's first syllable, who
+        starts speaking 0.25-0.98s after the press (median 0.45s): 換行 fell from 15/18 to 1-2/18."""
+        self._still_until = time.monotonic() + seconds
         self.level = 0.0
 
     def _callback(self, indata, frames, time_info, status):
-        if time.monotonic() < self._hold_until:
-            return
         mono = indata[:, 0].copy()
         with self._lock:
             self._chunks.append(mono)
         rms = float(np.sqrt(np.mean(mono * mono)))
-        self.level = min(1.0, rms * 12)
+        self.level = 0.0 if time.monotonic() < self._still_until else min(1.0, rms * 12)
 
     def stop(self) -> np.ndarray:
         if self._stream is not None:

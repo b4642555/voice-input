@@ -125,11 +125,27 @@ class Recorder:
     def stop(self):
         return self.audio
 
-    def hold(self, seconds):
+    def still(self, seconds):
         pass
 
 
 A.recorder = Recorder()
+class Muter:
+    """Stands in for the speaker mute (never mutes the real speakers): prints what it would do."""
+    active = False
+
+    def mute(self):
+        if not self.active:
+            self.active = True
+            print("      [靜音]")
+
+    def restore(self):
+        if self.active:
+            self.active = False
+            print("      [解除靜音]")
+
+
+A.muter = Muter()
 A.cfg.save = lambda: None   # settings are never saved (the pack hint saves config.json)
 appmod.cues.play = lambda cue, kind: print(f"      [音效] {kind}: {cue or '（無）'}")   # printed, not played
 

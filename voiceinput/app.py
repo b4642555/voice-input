@@ -65,6 +65,10 @@ _TEXT_CHARS = re.compile(r"[\s\W_]+")
 _SEL_LOST = "找不到選取的文字，沒有修改"   # a terminal selection that moved or the cursor could not reach
 _NO_RECORD = "目前沒有任何操作會錄音，無法語音輸入。請到「設定 → 自訂操作」加入「錄音」。"
 _INDICATOR_DELAY = 0.1     # seconds held before the recording indicator shows (a tap is < TAP_THRESHOLD)
+# from the call to PlaySound until the start sound has left the speakers: measured 0.17s on the user's machine
+# (Realtek speakers, Logi C270 microphone, 2026-10-13); the level bars and muting wait the sound's length plus this,
+# or Kalimba's tail moved the bars and Woodblock (0.19s) was muted before it was heard
+_CUE_LATENCY = 0.25
 _STEP_GAP = 0.03           # seconds between the steps of an operation
 _MENU_ROWS = 8
 
@@ -325,6 +329,8 @@ class App(QObject):
             return
         self._press = None
         press.released, press.up_at = True, t
+        log.info("press %s: %.2fs%s%s", key, t - press.down_at, " (second of a double tap)" if press.first else "",
+                 ", indicator shown" if press.shown else "")
         if press.consumed:
             return
         if not press.held and t - press.down_at >= TAP_THRESHOLD:   # the hold timer has not run yet
@@ -366,6 +372,8 @@ class App(QObject):
     def _apply(self, press: _Press, rule):
         """Main thread: start the operation: its steps (those before 錄音 when it records)."""
         press.rule, press.decided = rule, True
+        log.info("gesture %s %s: %s", press.key, press.gesture,
+                 [f"{st.type}:{st.value}" for st in rule.steps] if rule else "none (given back)")
         i = rule.record_index() if rule else None
         if rule is None:
             self._discard_mic(press)
@@ -432,9 +440,12 @@ class App(QObject):
             return
         self._mic, press.recording = press, True
         self._hwnd = foreground()
+        self._stop_cue = False   # an end sound still waiting for the speakers belongs to an older recording
         # the indicator waits a little so taps and double taps do not flash it (0.1s, not TAP_THRESHOLD: the user
-        # found 0.3s and 0.2s too slow; a slow tap may flash it)
-        QTimer.singleShot(int(_INDICATOR_DELAY * 1000), lambda: self._show_recording(press))
+        # found 0.3s and 0.2s too slow; a slow tap may flash it). Not for a double tap's second press: it shows
+        # only once that press records (held: delete and say it again); it flashed with the start sound before.
+        if press.first is None:
+            QTimer.singleShot(int(_INDICATOR_DELAY * 1000), lambda: self._show_recording(press))
 
     def _show_recording(self, press: _Press):
         """The indicator fades in and the start sound plays with it. Called again when the gesture is decided
@@ -444,11 +455,12 @@ class App(QObject):
             self.tray.setIcon(self.icon_rec)
             self.overlay.show_recording()
             cues.play(self.cfg.start_sound, "start")
-            # while the start sound plays nothing is recorded (what came before is dropped too) and the speakers
-            # stay on; muting waits for its end (the user's choice, 2026-10-13)
+            # while the start sound plays the level bars stay still and the speakers on; recording goes on (the
+            # user speaks over it); muting waits for its end (the user's choices, 2026-10-13)
             wait = cues.duration(self.cfg.start_sound, "start")
             if wait:
-                self.recorder.hold(wait)
+                wait += _CUE_LATENCY
+                self.recorder.still(wait)
             if self.cfg.mute_while_recording:
                 QTimer.singleShot(int(wait * 1000), lambda: self._mute_for(press))
 
