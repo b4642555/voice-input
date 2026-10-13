@@ -12,7 +12,8 @@ from .keys import KEY_TRIGGERS
 from .output import press_key
 
 TAP_THRESHOLD = 0.3     # seconds; shorter presses are taps
-DOUBLE_TAP_GAP = 0.35   # seconds from a tap's release to the next press to count as a double tap
+DOUBLE_TAP_GAP = 0.3    # seconds from a tap's release to the next press to count as a double tap (0.35 until
+                        # 2026-10-13, the same as a hold at the user's request; their gaps: median 0.09s)
 
 _WM_KEYDOWN, _WM_SYSKEYDOWN = 0x0100, 0x0104
 _LLKHF_INJECTED = 0x10

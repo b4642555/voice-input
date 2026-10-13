@@ -64,7 +64,6 @@ _COMMAND_SLACK = 2
 _TEXT_CHARS = re.compile(r"[\s\W_]+")
 _SEL_LOST = "找不到選取的文字，沒有修改"   # a terminal selection that moved or the cursor could not reach
 _NO_RECORD = "目前沒有任何操作會錄音，無法語音輸入。請到「設定 → 自訂操作」加入「錄音」。"
-_INDICATOR_DELAY = 0.1     # seconds held before the recording indicator shows (a tap is < TAP_THRESHOLD)
 # from the call to PlaySound until the start sound has left the speakers: measured 0.17s on the user's machine
 # (Realtek speakers, Logi C270 microphone, 2026-10-13); the level bars and muting wait the sound's length plus this,
 # or Kalimba's tail moved the bars and Woodblock (0.19s) was muted before it was heard
@@ -90,8 +89,7 @@ class _Press:
     released: bool = False
     finished: bool = False
     recording: bool = False           # the microphone is on for it
-    shown: bool = False               # the recording indicator showed
-    confirmed: bool = False           # its operation records: the start sound played, the speakers may be muted
+    shown: bool = False               # its operation records: the indicator showed, the start sound played
     cue: str = ""                     # the start sound played for it (taken out of the audio before recognition)
     cue_at: float = 0.0               # seconds into the recording when it played
     mic_at: float = 0.0               # monotonic time the microphone started for it
@@ -287,6 +285,13 @@ class App(QObject):
     def _records_on(self, key: str, gestures) -> bool:
         return any(r.record_index() is not None for g in gestures for r in self._rules_for(key, g))
 
+    def _only_tap_records(self, key: str) -> bool:
+        """The key's only operations are taps that record: a press is a recording from key-down (held past
+        TAP_THRESHOLD it is given back, after the indicator and start sound)."""
+        taps = self._rules_for(key, TAP)
+        return (bool(taps) and all(r.record_index() is not None for r in taps)
+                and not self._rules_for(key, DOUBLE) and not self._rules_for(key, HOLD))
+
     def on_key_down(self, key: str, t: float):
         if self._press is not None:          # another key is held: this one is ignored
             self._ignored.add(key)
@@ -311,6 +316,8 @@ class App(QObject):
         # recording starts now (no lost first syllable) whenever this press may turn into a recording
         if self._records_on(key, (DOUBLE, HOLD) if double else (TAP, HOLD)):
             self._start_mic(press)
+            if not double and self._only_tap_records(key):
+                self._show_recording(press)
         if double:
             self._decide(press, DOUBLE)
         QTimer.singleShot(int(TAP_THRESHOLD * 1000), lambda: self._hold_check(press, timer=True))
@@ -399,7 +406,7 @@ class App(QObject):
         else:
             if not press.recording:
                 self._start_mic(press)
-            self._show_recording(press, confirmed=True)
+            self._show_recording(press)
             self._run_steps(press, rule.steps[:i], done=press.resolved.set)
         if press.gesture == DOUBLE and press.held:
             self._maybe_redictate(press)
@@ -416,7 +423,7 @@ class App(QObject):
             press.redictate = hold
             if not press.recording:
                 self._start_mic(press)
-            self._show_recording(press, confirmed=True)
+            self._show_recording(press)
 
     def _finish(self, press: _Press):
         """Main thread: the press is released and its operation known."""
@@ -450,24 +457,17 @@ class App(QObject):
         self._mic, press.recording, press.mic_at = press, True, time.monotonic()
         self._hwnd = foreground()
         self._stop_cue = False   # an end sound still waiting for the speakers belongs to an older recording
-        # the indicator waits a little so taps and double taps do not flash it (0.1s, not TAP_THRESHOLD: the user
-        # found 0.3s and 0.2s too slow; a slow tap may flash it). Not for a double tap's second press: it shows
-        # only once that press records (held: delete and say it again); it flashed with the start sound before.
-        if press.first is None:
-            QTimer.singleShot(int(_INDICATOR_DELAY * 1000), lambda: self._show_recording(press))
 
-    def _show_recording(self, press: _Press, confirmed: bool = False):
-        """The indicator fades in (0.1s held, or when the gesture is decided). The start sound waits for the
-        decision (`confirmed`, from _apply): played with the indicator at 0.1s, a double tap's first press beeped
-        whenever it was held a little (the user's request, 2026-10-13)."""
-        if not (press.recording and self._mic is press):
-            return
-        if not press.shown:
+    def _show_recording(self, press: _Press):
+        """The indicator fades in and the start sound plays together, once the press is known to record (the
+        user's design, 2026-10-13): from `_apply` when the gesture is decided (a hold at TAP_THRESHOLD, a tap at
+        its release or DOUBLE_TAP_GAP later), at key-down when the key only has recording taps. Until then the
+        microphone records unseen. The indicator showed at 0.1s before (0.1s after the microphone opened, so a
+        double tap's ~0.12s first press rarely flashed it) and the sound with it, which beeped on double taps."""
+        if press.recording and self._mic is press and not press.shown:
             press.shown = True
             self.tray.setIcon(self.icon_rec)
             self.overlay.show_recording()
-        if confirmed and not press.confirmed:
-            press.confirmed = True
             cues.play(self.cfg.start_sound, "start")
             press.cue, press.cue_at = self.cfg.start_sound, time.monotonic() - press.mic_at
             # while the start sound plays the level bars stay still and the speakers on; recording goes on (the
@@ -504,9 +504,8 @@ class App(QObject):
             self.overlay.hide_overlay()
             self._input_done()
             return
-        if press.confirmed and audio.size and self.cfg.stop_sound:
-            # the end sound, only for a recording that goes to recognition (not a tap or a double tap's first
-            # press, which may flash the indicator): now, or once the text is in (_input_done), the user's setting
+        if press.shown and audio.size and self.cfg.stop_sound:
+            # the end sound, only for a recording that goes to recognition: now, or once the text is in (_input_done), the user's setting
             # (2026-10-13). Now: the microphone is off, so muted speakers come back for it.
             if self.cfg.stop_sound_at == "done":
                 self._stop_cue = True

@@ -130,7 +130,7 @@ Enter.
 Gestures (`app.py`, `hotkey.Hotkeys`): bound keys are suppressed by the hooks; the microphone starts at key-down when
 the press may record; a single tap waits DOUBLE_TAP_GAP only when that key has a double-tap rule; a gesture no rule
 takes is given back (keyboard key replayed, mouse button clicked: the user's choice, so an unbound middle click
-still works, 0.35s late when a double tap is bound; a hold is given back as one click). Invalid rules (two 錄音,
+still works, 0.3s late when a double tap is bound (DOUBLE_TAP_GAP, 0.35s until 2026-10-13); a hold is given back as one click). Invalid rules (two 錄音,
 錄音 in a speech rule, empty combination, a duplicate of an earlier rule) are flagged in red and skipped. When no
 rule records any more, a tray notice warns that dictation is impossible (the user's request).
 
@@ -274,8 +274,8 @@ removed the same day they were built: the user corrects by selecting with the mo
   moved; only that one (2026-10-04: the user had undo of picked suggestions and repeated undo removed). Text spoken
   over a selection counts as a dictation (2026-10-07, the user's model: like typing over it): it removes it, the
   selected text stays gone (a selected 。 turned into ，…。 gets its 。 back). Recording starts at key-down, but the
-  indicator (overlay, tray icon) only after 0.1s (0.3s = TAP_THRESHOLD, then 0.2s, felt slow), so taps and double
-  taps do not flash it.
+  indicator (overlay, tray icon) only once the press is known to record, with the start sound (see Sounds). It was
+  0.3s, then 0.2s and 0.1s (felt slow); on 2026-10-13 the user chose to show it with the sound at the decision.
 - **X-ASR biasing** (`asr.py`, used for on-screen terms): modified beam search + per-stream hotwords, same speed as greedy (0.11-0.22s
   on 3s clips). The model's vocab is pure BPE with CJK as "▁X" pieces: `modeling_unit="bpe"`, CJK hotwords
   space-separated and converted to Simplified, and a `bpe.vocab` exported from `bpe.model` by a tiny protobuf reader
@@ -301,10 +301,11 @@ removed the same day they were built: the user corrects by selecting with the mo
   by default. The 簡潔 UI and 柔和木質 sets of ElevenLabs effects
 another agent made in `dev/sound-preview` (untracked), converted by `dev/build_cues.py` (loudness matched like the
   preview page; an end sound's tail cut at -40 dB, a start sound's at -20 dB plus a 50ms fade, 0.07s (Pop) to 0.45s
-  (Triad), since it is cut out of the recording). The start sound plays once the gesture is decided to record (`_show_recording(confirmed=True)` from `_apply`: a
-  hold at 0.3s, a tap at its release); the indicator still fades in at 0.1s. Played with the indicator, a double
-  tap's first press beeped when held a little (the user's request, 2026-10-13); muting and the end sound follow the
-  decision too. `cues.remove` looks for it from when it played (`_Press.cue_at`). For its length plus `_CUE_LATENCY` (0.25s; PlaySound to microphone measured 0.17s
+  (Triad), since it is cut out of the recording). The indicator fades in and the start sound plays together once the press is known to record
+  (`_show_recording`, the user's design, 2026-10-13): a hold at TAP_THRESHOLD (0.3s), a tap at its release (0.3s
+  later when the key has a double tap), at key-down when the key's only operations are recording taps. The
+  indicator at 0.1s with the sound beeped on double taps; at 0.1s after the microphone opened, the user's double
+  taps (first press ~0.12s) rarely flashed it. Muting and the end sound follow. `cues.remove` looks for it from when it played (`_Press.cue_at`). For its length plus `_CUE_LATENCY` (0.25s; PlaySound to microphone measured 0.17s
   on the user's machine) the level bars stay still (`Recorder.still`) and the speakers on; muting starts after.
   Recording still runs from key-down: dropping the audio while the sound played (tried the same day, the user's
   idea) cut the first syllable, as the user starts speaking 0.25-0.98s after the press (median 0.45s; 換行 15/18 →
