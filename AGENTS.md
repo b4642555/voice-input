@@ -297,13 +297,21 @@ removed the same day they were built: the user corrects by selecting with the mo
 - **Sounds** (`cues.py`, `voiceinput/cues/*.wav`, 2026-10-13): two drop-downs on one row of the 一般 tab (開始 / 結束,
   12 each plus None last, Blip by default: the user's choice). The 簡潔 UI and 柔和木質 sets of ElevenLabs effects
   another agent made in `dev/sound-preview` (untracked), converted by `dev/build_cues.py` (loudness matched like the
-  preview page). The start sound plays when the indicator shows (taps make none), and "mute while recording" waits
-  for it to end; the end sound plays when the recording stops, or after unmuting. The microphone hears the start
+  preview page; silent tails cut at -40 dB, so a start sound lasts 0.19s (Woodblock) to 0.60s). The start sound
+  plays as the indicator fades in, once (`_show_recording` is called again when the gesture is decided at 0.3s and
+  replayed it until 2026-10-13). While it plays nothing is recorded (`Recorder.hold`: what was heard since key-down
+  is dropped too, the level stays 0) and the speakers stay on; muting starts at its end (the user's choice: the
+  indicator should not react to the sound, and nobody speaks over it). With None, recording runs from key-down as
+  before. The end sound plays only for a recording that goes to recognition, after unmuting when muted: a tap or a
+  double tap's first press that flashed the indicator played it until 2026-10-13. Known: a double tap whose presses
+  last over 0.1s each still plays the start sound twice (the indicator flashes). The microphone hears the start
   sound: mixed into 91 of the user's recordings (not played through speakers), Woodblock, Kalimba and Marimba
   changed long sentences no more than inaudible noise (~2%), Blip, Glass, Triad, Xylophone, Mallet and Music Box
   ~5-7%, commands barely; the user kept all 12 until real recordings (with the sound picked up) can be checked.
   A 試聽 button follows each drop-down. Played from the wav file: winsound cannot play asynchronously from memory
   (RuntimeError), so the first version made no sound at all.
+- **Pack hints** (`App._suggest_pack`, 2026-10-13): a word picked, typed in the menu or spelled that an unticked
+  term pack lists brings a tray notice suggesting the pack, once per pack (`pack_hints` in config.json).
 - **Spelling over a selection** (`edit.spelled`, 2026-10-13, the user's request): letters spoken over a selected
   English word (X-ASR writes "B L I P.") type that word in the selection's case: Bleep → Blip, API → APP, doggy →
   dog. It counts like a 選字 pick (priority +30%, and the old word becomes an alias: the user chose that knowing

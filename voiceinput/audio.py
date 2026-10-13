@@ -1,5 +1,6 @@
 """Microphone capture with sounddevice."""
 import threading
+import time
 
 import numpy as np
 import sounddevice as sd
@@ -37,10 +38,12 @@ class Recorder:
         self._stream = None
         self._lock = threading.Lock()
         self.level = 0.0   # latest RMS level, 0..1, read by the overlay
+        self._hold_until = 0.0   # monotonic time before which input is dropped (hold)
 
     def start(self, device_name: str = "") -> None:
         self._chunks = []
         self.level = 0.0
+        self._hold_until = 0.0
         self._stream = sd.InputStream(
             samplerate=SAMPLE_RATE,
             channels=1,
@@ -51,7 +54,17 @@ class Recorder:
         )
         self._stream.start()
 
+    def hold(self, seconds: float) -> None:
+        """Drop what was heard so far and the next seconds, level at 0 meanwhile: the start sound plays then
+        (2026-10-13, the user's choice: the indicator should not react to it, and nobody speaks over it)."""
+        with self._lock:
+            self._chunks = []
+            self._hold_until = time.monotonic() + seconds
+        self.level = 0.0
+
     def _callback(self, indata, frames, time_info, status):
+        if time.monotonic() < self._hold_until:
+            return
         mono = indata[:, 0].copy()
         with self._lock:
             self._chunks.append(mono)

@@ -9,7 +9,7 @@ box), click (the user clicks: ends what the app knows about the text), tap (one 
 hotkey:NAME (the key or button the next steps press, default mouse_middle), rules:default (the default operations),
 rule:JSON (add an operation, rules.Rule.from_dict), at:WORD (put the caret right after the last WORD; at: puts it at
 the end), say:TEXT (dictate TEXT as if recognized), set:NAME=VALUE (change a setting in memory only), packs:ID+ID (tick term packs, in memory only) or key:BACK (the
-user presses Backspace n times: key:BACK*3), pick:N / pickw:WORD (click a row of the 選字 menu), type:TEXT (type TEXT in the menu's input box and press Enter). Settings are never saved; hotwords and smart picks live in <dir> (hotwords.test.json,
+user presses Backspace n times: key:BACK*3), dbl:MS (a double tap, each press MS ms long), pick:N / pickw:WORD (click a row of the 選字 menu), type:TEXT (type TEXT in the menu's input box and press Enter). Settings are never saved; hotwords and smart picks live in <dir> (hotwords.test.json,
 smart-picks.test.json, emptied at the start), never in the real files.
 """
 import json
@@ -125,8 +125,13 @@ class Recorder:
     def stop(self):
         return self.audio
 
+    def hold(self, seconds):
+        pass
+
 
 A.recorder = Recorder()
+A.cfg.save = lambda: None   # settings are never saved (the pack hint saves config.json)
+appmod.cues.play = lambda cue, kind: print(f"      [音效] {kind}: {cue or '（無）'}")   # printed, not played
 
 
 def pump(sec):
@@ -262,6 +267,11 @@ try:
         if step == "click":
             A.session.on_input()
             print("[點滑鼠]")
+            continue
+        if step.startswith("dbl:"):   # a double tap whose presses last MS milliseconds each
+            ms = int(step[4:]) / 1000
+            down(), pump(ms), up(), pump(0.05), down(), pump(ms), up(), pump(1.0)
+            print(f"[{step}] → 文字框：{box.text[:box.caret] + '|' + box.text[box.caret:]!r}")
             continue
         if step.startswith("key:BACK"):
             n = int(step.split("*")[1]) if "*" in step else 1

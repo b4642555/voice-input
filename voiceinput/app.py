@@ -437,14 +437,19 @@ class App(QObject):
         QTimer.singleShot(int(_INDICATOR_DELAY * 1000), lambda: self._show_recording(press))
 
     def _show_recording(self, press: _Press):
-        if press.recording and self._mic is press:
+        """The indicator fades in and the start sound plays with it. Called again when the gesture is decided
+        (0.3s, a key with a double-tap rule): that replayed the sound until 2026-10-13."""
+        if press.recording and self._mic is press and not press.shown:
             press.shown = True
             self.tray.setIcon(self.icon_rec)
             self.overlay.show_recording()
             cues.play(self.cfg.start_sound, "start")
+            # while the start sound plays nothing is recorded (what came before is dropped too) and the speakers
+            # stay on; muting waits for its end (the user's choice, 2026-10-13)
+            wait = cues.duration(self.cfg.start_sound, "start")
+            if wait:
+                self.recorder.hold(wait)
             if self.cfg.mute_while_recording:
-                # after the start sound, or it is cut off (the user's choice; the microphone hears it)
-                wait = cues.duration(self.cfg.start_sound, "start")
                 QTimer.singleShot(int(wait * 1000), lambda: self._mute_for(press))
 
     def _mute_for(self, press: _Press):
@@ -458,14 +463,7 @@ class App(QObject):
         if self._mic is press:
             self._mic = None
         self.tray.setIcon(self.icon_idle)
-        audio = self.recorder.stop()
-        if press.shown:
-            # the end sound: now, or once the speakers are unmuted (_input_done)
-            if self.muter.active:
-                self._stop_cue = True
-            else:
-                cues.play(self.cfg.stop_sound, "stop")
-        return audio
+        return self.recorder.stop()
 
     def _discard_mic(self, press: _Press):
         if press.recording:
@@ -479,6 +477,13 @@ class App(QObject):
             self.overlay.hide_overlay()
             self._input_done()
             return
+        if press.shown and audio.size:
+            # the end sound, only for a recording that goes to recognition (not a tap or a double tap's first
+            # press, which flashed the indicator): now, or once the speakers are unmuted (_input_done)
+            if self.muter.active:
+                self._stop_cue = True
+            else:
+                cues.play(self.cfg.stop_sound, "stop")
         self.overlay.show_thinking()
         self.worker.submit(self._transcribe_job, self.recognizer, audio, press, self._hwnd)
 
@@ -663,6 +668,22 @@ class App(QObject):
             recordings.note("spelled", before=old, after=new)
         self.hotwords.picked(old, new)
         self.settings.refresh_hotwords()
+        self._suggest_pack(new)
+
+    def _suggest_pack(self, word: str):
+        """A word picked, typed or spelled that an unticked term pack lists: a notice suggests the pack, once per
+        pack (the user's request, 2026-10-13; remembered in config.pack_hints)."""
+        word = word.strip()
+        for pack in packs.available():
+            if pack.id in self.cfg.packs or pack.id in self.cfg.pack_hints:
+                continue
+            if any(w == word or (is_latin(word) and w.casefold() == word.casefold()) for w in pack.words):
+                log.info("pack hint: %s in %s", word, pack.id)
+                self.cfg.pack_hints.append(pack.id)
+                self.cfg.save()
+                self.tray.showMessage("VoiceInput", f"「{word}」收錄在詞包「{pack.name}」。到設定的詞庫頁勾選它，"
+                                      "同類的詞會更容易辨識。", self.icon_idle, 8000)
+                return
 
     def _keep(self, audio, **info):
         """Development only (the user will remove it before release): save the utterance (recordings.py)."""
@@ -827,6 +848,7 @@ class App(QObject):
         self.hotwords.picked(text, word)
         if typed and self.hotwords.add(word):
             log.info("hotword typed: %s", word)
+        self._suggest_pack(word)
         self.settings.refresh_hotwords()
         self.session.replaced_selection(sel.before, word, foreground())
         self.record.emit({"time": time.strftime("%H:%M:%S"), "asr": "", "asr_s": None, "fmt": "",
