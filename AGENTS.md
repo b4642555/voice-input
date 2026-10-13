@@ -294,8 +294,9 @@ removed the same day they were built: the user corrects by selecting with the mo
   our own frozen window until the timeout: the three dots stood still and 找不到選取的文字 appeared. The overlay is
   now hidden at once (`Overlay.hide_now`) before a terminal edit, delete or pick.
 - **Clipboard**: every format is restored after a paste (images copied before dictating used to be lost).
-- **Sounds** (`cues.py`, `voiceinput/cues/*.wav`, 2026-10-13): two drop-downs on one row of the 一般 tab (開始 / 結束,
-  12 each plus None last, Blip by default: the user's choice). The 簡潔 UI and 柔和木質 sets of ElevenLabs effects
+- **Sounds** (`cues.py`, `voiceinput/cues/*.wav`, 2026-10-13): one row of the 一般 tab: a set drop-down (picks both
+  sounds; reads 自定義 when they differ), then 開始 / 結束 drop-downs with 試聽 buttons (12 each plus None last, Blip
+  by default: the user's choices). The 簡潔 UI and 柔和木質 sets of ElevenLabs effects
   another agent made in `dev/sound-preview` (untracked), converted by `dev/build_cues.py` (loudness matched like the
   preview page; silent tails cut at -40 dB, so a start sound lasts 0.19s (Woodblock) to 0.60s). The start sound
   plays as the indicator fades in, once (`_show_recording` is called again when the gesture is decided at 0.3s and

@@ -140,13 +140,22 @@ class SettingsDialog(QDialog):
             box.addItem("None", "")
         self.start_sound.setToolTip("錄音提示出現時播放；選了會先播一次")
         self.stop_sound.setToolTip("錄音結束時播放（有靜音電腦音效時，在恢復聲音後播）；選了會先播一次")
+        # a set picks both sounds at once; it reads 自定義 when they differ (the user's design, 2026-10-13)
+        self.sound_set = QComboBox(toolTip="一組開始音與結束音；兩個不同時顯示「自定義」")
+        for cue_id, name, _source in cues.SOUNDS:
+            self.sound_set.addItem(name, cue_id)
+        self.sound_set.addItem("None", "")
+        self.sound_set.addItem("自定義", None)
         sound_row = QHBoxLayout()
+        sound_row.addWidget(self.sound_set)
+        sound_row.addSpacing(8)
         for label, box, kind in (("開始", self.start_sound, "start"), ("結束", self.stop_sound, "stop")):
             listen = QPushButton("試聽", clicked=lambda _=False, b=box, k=kind: cues.play(b.currentData(), k))
+            listen.setFixedWidth(44)
             sound_row.addWidget(QLabel(label))
             sound_row.addWidget(box)
             sound_row.addWidget(listen)
-            sound_row.addSpacing(12)
+            sound_row.addSpacing(8)
         sound_row.addStretch()
         self.mute = QCheckBox("錄音時暫時靜音電腦音效")
         self.mute.setToolTip("錄音期間把喇叭靜音，文字輸入完成後恢復；原本就靜音的話不會動")
@@ -188,6 +197,7 @@ class SettingsDialog(QDialog):
         self.mic.currentIndexChanged.connect(self._apply)
         self.start_sound.currentIndexChanged.connect(lambda: self._sound_changed(self.start_sound, "start"))
         self.stop_sound.currentIndexChanged.connect(lambda: self._sound_changed(self.stop_sound, "stop"))
+        self.sound_set.currentIndexChanged.connect(self._sound_set_changed)
         for box in (self.punct, self.period_comma, self.describe, self.autostart, self.mute, self.keep_audio):
             box.toggled.connect(self._apply)
         return page
@@ -203,6 +213,7 @@ class SettingsDialog(QDialog):
         self.keep_audio.setChecked(self.cfg.save_recordings)
         self.start_sound.setCurrentIndex(max(0, self.start_sound.findData(self.cfg.start_sound)))
         self.stop_sound.setCurrentIndex(max(0, self.stop_sound.findData(self.cfg.stop_sound)))
+        self._show_sound_set()
         self._loading = False
         self.refresh_rules()
         self.refresh_hotwords()
@@ -227,6 +238,27 @@ class SettingsDialog(QDialog):
     def _sound_changed(self, box, kind: str):
         if not self._loading:
             cues.play(box.currentData(), kind)
+            self._show_sound_set()
+        self._apply()
+
+    def _show_sound_set(self):
+        """The set drop-down follows the two sounds: their name when they are the same, else 自定義."""
+        start, stop = self.start_sound.currentData(), self.stop_sound.currentData()
+        i = self.sound_set.findData(start) if start == stop else self.sound_set.count() - 1
+        self.sound_set.blockSignals(True)
+        self.sound_set.setCurrentIndex(i)
+        self.sound_set.blockSignals(False)
+
+    def _sound_set_changed(self):
+        cue_id = self.sound_set.currentData()
+        if cue_id is None or self._loading:   # 自定義 picked by hand: the sounds stay as they are
+            self._show_sound_set()
+            return
+        self._loading = True                  # set both without previewing each
+        self.start_sound.setCurrentIndex(self.start_sound.findData(cue_id))
+        self.stop_sound.setCurrentIndex(self.stop_sound.findData(cue_id))
+        self._loading = False
+        cues.play(cue_id, "start")
         self._apply()
 
     def _save(self):
