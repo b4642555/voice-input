@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDia
                                QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea,
                                QSpinBox, QTabWidget, QTextBrowser, QVBoxLayout, QWidget)
 
-from . import audio, hotwords, packs, recordings, rules
+from . import audio, cues, hotwords, packs, recordings, rules
 from .keys import KEY_TRIGGERS, MOUSE_TRIGGERS, combo_text, is_modifier
 from .rules import Rule, Step
 
@@ -133,6 +133,20 @@ class SettingsDialog(QDialog):
         self.period_comma = QCheckBox("選取句號後講話，句號改成逗號並接上講的內容")
         self.period_comma.setToolTip("今天很好。明天見 → 選取「。」講「我們去公園」→ 今天很好，我們去公園。明天見")
         self.autostart = QCheckBox("開機時自動啟動")
+        self.start_sound, self.stop_sound = QComboBox(), QComboBox()
+        for box in (self.start_sound, self.stop_sound):
+            for cue_id, name, _source in cues.SOUNDS:
+                box.addItem(name, cue_id)
+            box.addItem("None", "")
+        self.start_sound.setToolTip("錄音提示出現時播放；選了會先播一次")
+        self.stop_sound.setToolTip("錄音結束時播放（有靜音電腦音效時，在恢復聲音後播）；選了會先播一次")
+        sound_row = QHBoxLayout()
+        sound_row.addWidget(QLabel("開始"))
+        sound_row.addWidget(self.start_sound)
+        sound_row.addSpacing(12)
+        sound_row.addWidget(QLabel("結束"))
+        sound_row.addWidget(self.stop_sound)
+        sound_row.addStretch()
         self.mute = QCheckBox("錄音時暫時靜音電腦音效")
         self.mute.setToolTip("錄音期間把喇叭靜音，文字輸入完成後恢復；原本就靜音的話不會動")
         self.describe = QCheckBox("說「詞＋的＋字」時只輸入那個字，例如「節日的節」")
@@ -156,6 +170,7 @@ class SettingsDialog(QDialog):
 
         form = QFormLayout()
         form.addRow("麥克風", self.mic)
+        form.addRow("提示音", sound_row)
         form.addRow("", self.mute)
         form.addRow("", self.punct)
         form.addRow("", self.period_comma)
@@ -170,6 +185,8 @@ class SettingsDialog(QDialog):
         v.addWidget(self.status)
 
         self.mic.currentIndexChanged.connect(self._apply)
+        self.start_sound.currentIndexChanged.connect(lambda: self._sound_changed(self.start_sound, "start"))
+        self.stop_sound.currentIndexChanged.connect(lambda: self._sound_changed(self.stop_sound, "stop"))
         for box in (self.punct, self.period_comma, self.describe, self.autostart, self.mute, self.keep_audio):
             box.toggled.connect(self._apply)
         return page
@@ -183,6 +200,8 @@ class SettingsDialog(QDialog):
         self.mute.setChecked(self.cfg.mute_while_recording)
         self.describe.setChecked(self.cfg.describe_char)
         self.keep_audio.setChecked(self.cfg.save_recordings)
+        self.start_sound.setCurrentIndex(max(0, self.start_sound.findData(self.cfg.start_sound)))
+        self.stop_sound.setCurrentIndex(max(0, self.stop_sound.findData(self.cfg.stop_sound)))
         self._loading = False
         self.refresh_rules()
         self.refresh_hotwords()
@@ -200,7 +219,14 @@ class SettingsDialog(QDialog):
         self.cfg.mute_while_recording = self.mute.isChecked()
         self.cfg.describe_char = self.describe.isChecked()
         self.cfg.save_recordings = self.keep_audio.isChecked()
+        self.cfg.start_sound = self.start_sound.currentData()
+        self.cfg.stop_sound = self.stop_sound.currentData()
         self._save()
+
+    def _sound_changed(self, box, kind: str):
+        if not self._loading:
+            cues.play(box.currentData(), kind)
+        self._apply()
 
     def _save(self):
         self.cfg.save()

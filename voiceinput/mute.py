@@ -72,6 +72,11 @@ class Muter:
     def __init__(self):
         self._ours = False   # the speakers are muted by us, so restore() unmutes them
 
+    @property
+    def active(self) -> bool:
+        """The speakers are muted by us."""
+        return self._ours
+
     def mute(self):
         if self._ours:
             return

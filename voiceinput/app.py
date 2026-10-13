@@ -32,7 +32,7 @@ from PySide6.QtCore import QLockFile, QObject, QPointF, QRectF, Qt, QTimer, Sign
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
-from . import autostart, candidates, edit, models, packs, paths, recordings, rules, sounds, spelling
+from . import autostart, candidates, cues, edit, models, packs, paths, recordings, rules, sounds, spelling
 from .asr import SAMPLE_RATE, Recognizer
 from .audio import Recorder
 from .config import Config
@@ -86,6 +86,7 @@ class _Press:
     released: bool = False
     finished: bool = False
     recording: bool = False           # the microphone is on for it
+    shown: bool = False               # the recording indicator showed (and the start sound played)
     consumed: bool = False            # it only stopped a recording a tap had started
     deleted: object = None            # Selection a 刪除 step removed (the dictation goes there)
     resolved: threading.Event = field(default_factory=threading.Event)   # steps before 錄音 are done
@@ -132,6 +133,7 @@ class App(QObject):
         self._records = deque(maxlen=100)       # transcript log, kept for this session only
         self.session = Session()
         self.muter = Muter()
+        self._stop_cue = False                   # the end sound waits for the speakers to be unmuted
         self._press: _Press | None = None        # the key or button held now
         self._pending: _Press | None = None      # a tap waiting to see whether a second press follows
         self._pending_timer = QTimer(self, singleShot=True, timeout=self._pending_expired)
@@ -436,10 +438,18 @@ class App(QObject):
 
     def _show_recording(self, press: _Press):
         if press.recording and self._mic is press:
+            press.shown = True
             self.tray.setIcon(self.icon_rec)
             self.overlay.show_recording()
+            cues.play(self.cfg.start_sound, "start")
             if self.cfg.mute_while_recording:
-                self.muter.mute()
+                # after the start sound, or it is cut off (the user's choice; the microphone hears it)
+                wait = cues.duration(self.cfg.start_sound, "start")
+                QTimer.singleShot(int(wait * 1000), lambda: self._mute_for(press))
+
+    def _mute_for(self, press: _Press):
+        if press.recording and self._mic is press:
+            self.muter.mute()
 
     def _release_mic(self, press: _Press):
         if not press.recording:
@@ -448,7 +458,14 @@ class App(QObject):
         if self._mic is press:
             self._mic = None
         self.tray.setIcon(self.icon_idle)
-        return self.recorder.stop()
+        audio = self.recorder.stop()
+        if press.shown:
+            # the end sound: now, or once the speakers are unmuted (_input_done)
+            if self.muter.active:
+                self._stop_cue = True
+            else:
+                cues.play(self.cfg.stop_sound, "stop")
+        return audio
 
     def _discard_mic(self, press: _Press):
         if press.recording:
@@ -470,6 +487,9 @@ class App(QObject):
         has started meanwhile."""
         if self._mic is None:
             self.muter.restore()
+            if self._stop_cue:
+                self._stop_cue = False
+                cues.play(self.cfg.stop_sound, "stop")
 
     # --- steps ---
     def _run_steps(self, press: _Press, steps: list, done=None):

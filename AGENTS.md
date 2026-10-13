@@ -294,6 +294,14 @@ removed the same day they were built: the user corrects by selecting with the mo
   our own frozen window until the timeout: the three dots stood still and 找不到選取的文字 appeared. The overlay is
   now hidden at once (`Overlay.hide_now`) before a terminal edit, delete or pick.
 - **Clipboard**: every format is restored after a paste (images copied before dictating used to be lost).
+- **Sounds** (`cues.py`, `voiceinput/cues/*.wav`, 2026-10-13): two drop-downs on one row of the 一般 tab (開始 / 結束,
+  12 each plus None last, Blip by default: the user's choice). The 簡潔 UI and 柔和木質 sets of ElevenLabs effects
+  another agent made in `dev/sound-preview` (untracked), converted by `dev/build_cues.py` (loudness matched like the
+  preview page). The start sound plays when the indicator shows (taps make none), and "mute while recording" waits
+  for it to end; the end sound plays when the recording stops, or after unmuting. The microphone hears the start
+  sound: mixed into 91 of the user's recordings (not played through speakers), Woodblock, Kalimba and Marimba
+  changed long sentences no more than inaudible noise (~2%), Blip, Glass, Triad, Xylophone, Mallet and Music Box
+  ~5-7%, commands barely; the user kept all 12 until real recordings (with the sound picked up) can be checked.
 - **Saved recordings** (`recordings.py`, 2026-10-13, DEVELOPMENT ONLY: the user will remove it before release so
   users never keep recordings locally; keep it in that module plus `App._keep`, the 一般 tab's 開發測試 row and
   `save_recordings` in config): when ticked, every utterance is saved to DATA_DIR/recordings/<time>.wav with an

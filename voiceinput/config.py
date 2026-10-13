@@ -17,6 +17,8 @@ class Config:
     describe_char: bool = True     # 節日的節 types 節 (edit.described)
     hotword_sort: str = "weight"   # order of the 詞庫 tab (settings.HOTWORD_SORTS)
     packs: list = field(default_factory=list)   # ids of the ticked term packs (packs.py)
+    start_sound: str = "blip"     # cues.py id played when the recording indicator shows, "" for none
+    stop_sound: str = "blip"      # cues.py id played when the recording ends, "" for none
     save_recordings: bool = False   # development only, to be removed before release (recordings.py)
     rules: list = field(default_factory=rules.defaults)   # custom operations (rules.Rule)
     rules_version: int = RULES_VERSION
