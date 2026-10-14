@@ -7,7 +7,7 @@ import subprocess
 import threading
 
 import objc
-from AppKit import (NSApp, NSApplication, NSApplicationActivationPolicyAccessory, NSPanel, NSRunningApplication,
+from AppKit import (NSApplication, NSApplicationActivationPolicyAccessory, NSPanel, NSRunningApplication,
                     NSSound, NSStatusWindowLevel, NSWorkspace)
 from PySide6.QtCore import QPoint
 
@@ -145,7 +145,7 @@ def take_focus(widget):
     """The 選字 menu's input box was clicked: our app and the menu take focus so an input method works. Returns
     the app to give focus back to."""
     prev = NSWorkspace.sharedWorkspace().frontmostApplication()
-    NSApp.activateIgnoringOtherApps_(True)
+    NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
     win = _window(widget)
     if win is not None:
         win.makeKeyAndOrderFront_(None)
@@ -159,7 +159,7 @@ def give_focus(prev) -> None:
 
 def bring_to_front(widget) -> None:
     """The settings window, opened from the menu bar: an accessory app has to activate itself."""
-    NSApp.activateIgnoringOtherApps_(True)
+    NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
     widget.raise_()
     widget.activateWindow()
 

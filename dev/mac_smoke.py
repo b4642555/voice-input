@@ -45,6 +45,48 @@ check(isinstance(hotkey.caps_remapped(), bool), "hidutil readable")
 mute.Muter()
 check(autostart._program()[0], "autostart has a program")
 
+# windows through pyobjc: the indicator ignores clicks and floats, the 選字 menu is a nonactivating panel
+from AppKit import NSPasteboard, NSPasteboardTypeString  # noqa: E402
+from PySide6.QtWidgets import QApplication  # noqa: E402
+
+from voiceinput import cues, output  # noqa: E402
+from voiceinput.overlay import Overlay  # noqa: E402
+from voiceinput.picker import Picker  # noqa: E402
+
+qapp = QApplication(sys.argv)
+system.setup(qapp)
+ov = Overlay(lambda: 0.0)
+ov.show_recording()
+qapp.processEvents()
+win = system._window(ov)
+check(win is not None and win.ignoresMouseEvents() and not win.hidesOnDeactivate(),
+      "indicator: click-through, stays when the app is inactive")
+pk = Picker()
+pk.show_loading("測試", (100, 100, 40, 20))
+pk.show_candidates("測試", ["測試", "側試"])
+qapp.processEvents()
+pw = system._window(pk)
+check(pw is not None and bool(pw.styleMask() & (1 << 7)), "選字 menu: nonactivating panel")
+handle = system.window_handle(pk)
+g = pk.frameGeometry()
+check(system.point_on(handle, g.center().x(), g.center().y()), "a point on the menu is on it")
+check(system.to_logical(10, 20).x() == 10, "Accessibility points are Qt's")
+pk.hide()
+ov.hide_now()
+
+# clipboard and keys: our text goes on the pasteboard; posting keys does not raise (dropped without permission)
+check(keyboard.set_clipboard("語音輸入 test"), "clipboard set")
+check(NSPasteboard.generalPasteboard().stringForType_(NSPasteboardTypeString) == "語音輸入 test", "clipboard read back")
+keyboard.send_chord((0x10, 0x0D))
+output.press_key(0x25, 2)
+cues.play(cues.DEFAULT, "start")
+check(cues.duration(cues.DEFAULT, "start") > 0, "start sound found")
+m = mute.Muter()
+m.mute()
+m.restore()
+mute._runner.submit(lambda: None).result(10)
+check(not m.active, "mute and restore")
+
 # recognition
 rec = Recognizer(models.MAIN_MODEL)
 for name, expect in (("a", "今天天氣很好"), ("b", "我們下午去公園散步")):
