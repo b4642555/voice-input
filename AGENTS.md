@@ -189,7 +189,8 @@ the commit 2.92s -> 0.25s). The 一般 tab's 定稿時機
 (`commit_at`) picks when a draft is committed: on a command or the end of listening (default, the user's choice) or
 at every pause; a draft longer than 60s is committed at a pause. Drafts get no sentence-final punctuation while
 speaking (a pause is not a sentence end); a commit by an operation (換行, 送出, 「X改成Y」 …) or by the end of listening
-keeps the recognizer's 。？！ (the user's choice, 2026-10-14), unless the caret had text on both sides; a commit by a
+keeps the recognizer's 。？！, or gets 。 when it gave none (. after English only; the user's choice,
+2026-10-14/15), unless the caret had text on both sides; a commit by a
 spoken punctuation mark gets that mark instead, and a mark said right after an added one replaces it (not 。。).
 「X改成Y」 (or 把X改成Y) said alone (`edit.change`, a 一般 checkbox, on by default; the user's request 2026-10-14)
 commits the draft, then changes the last X in what VoiceInput typed before the caret (`Session.buffer`) to Y: the

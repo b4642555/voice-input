@@ -649,8 +649,9 @@ class App(QObject):
     def _commit(self, text: str, start: int, anchor: int, at: int, ctx, command=None, final: bool = False):
         """Main thread: the draft's open sentence decoded again joins its settled text and the draft is done; then
         the command it ended with runs. Listening goes on from `at`. final (an operation or the end of listening):
-        the recognizer's 。？！ at the end is kept (the user's choice, 2026-10-14: not while speaking, where a pause
-        is not a sentence end, nor before a spoken punctuation mark), unless the caret had text on both sides."""
+        the recognizer's 。？！ at the end is kept, or 。 added when it gave none (the user's choice, 2026-10-14/15:
+        not while speaking, where a pause is not a sentence end, nor before a spoken punctuation mark), unless the
+        caret had text on both sides."""
         d = self._draft
         marked = False
         if start == self._draft_start and (d is None or d.anchor == anchor):
@@ -660,8 +661,9 @@ class App(QObject):
                 d.final = _TRAILING.sub("", _joined(d.settled, text))
                 end = _SENTENCE_END.search(text)
                 caret = d.ctx.caret
-                if final and end and d.final and not (caret is not None and all(s.strip() for s in caret)):
-                    d.final += end.group()
+                if final and d.final and not (caret is not None and all(s.strip() for s in caret)):
+                    # none from the recognizer (a short sentence often has none): 。 (the user's choice, 2026-10-15)
+                    d.final += end.group() if end else "。" if _CJK_CHAR.search(d.final) else "."
                     marked = True
                 self._show_draft()
                 if d.final:
