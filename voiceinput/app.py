@@ -276,7 +276,8 @@ class App(QObject):
             self.status.emit("載入模型中…")
             self.recognizer = Recognizer(key)
             models.vad_path()   # continuous listening's voice activity detection, ~2MB
-            self._load_streamer()
+            if self.cfg.live_model == "stream":
+                self._load_streamer()
             self.status.emit("就緒")
         except Exception as e:
             log.exception("model load failed")
@@ -284,6 +285,8 @@ class App(QObject):
 
     def _load_streamer(self):
         """The streaming model (~165MB), downloaded on first use. Without it the text shows at each pause."""
+        if self.streamer is not None:
+            return
         key = models.STREAM_MODEL
         try:
             if not models.is_installed(key):
@@ -474,9 +477,10 @@ class App(QObject):
         if self.recognizer is None:
             return
         try:
-            if self.listener is None or self.listener._streamer is not self.streamer:
+            streamer = self.streamer if self.cfg.live_model == "stream" else None
+            if self.listener is None or self.listener._streamer is not streamer:
                 self.listener = Listener(str(models.vad_path()), self._on_listen_speech, self._on_listen_piece,
-                                         self.streamer, self._on_listen_partial)
+                                         streamer, self._on_listen_partial)
             self.listener.start(self.cfg.mic, self._stream_spec())
         except Exception as e:
             log.exception("listen start failed")
@@ -567,7 +571,9 @@ class App(QObject):
 
     # --- the draft: text typed while listening, not committed yet ---
     def _stream_spec(self) -> str:
-        return self.streamer.hotword_spec(_bias(self.hotwords.bias())) if self.streamer else ""
+        if self.streamer is None or self.cfg.live_model != "stream":
+            return ""
+        return self.streamer.hotword_spec(_bias(self.hotwords.bias()))
 
     def on_partial(self, text: str, since: int):
         """Main thread: streaming text of the audio since `since` (stale when the draft moved on since)."""
@@ -1072,6 +1078,11 @@ class App(QObject):
         self.settings.activateWindow()
 
     def apply_settings(self):
+        if self.cfg.live_model == "stream" and self.streamer is None and self.recognizer is not None:
+            self.worker.submit(self._load_streamer)   # used from the next time listening starts
+        elif self.cfg.live_model != "stream" and self.streamer is not None and not self._listening:
+            self.streamer = None   # frees ~0.3GB
+            log.info("streaming model unloaded")
         self.hotkeys.set_keys(rules.bound_keys(self.cfg.rules))
         can = rules.can_record(self.cfg.rules)
         if self._could_record and not can:

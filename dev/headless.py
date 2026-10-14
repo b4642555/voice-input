@@ -8,7 +8,7 @@ box), click (the user clicks: ends what the app knows about the text), tap (one 
 (double tap), toggle:WAV (tap, speak, tap),
 hotkey:NAME (the key or button the next steps press, default mouse_middle), rules:default (the default operations),
 rule:JSON (add an operation, rules.Rule.from_dict), at:WORD (put the caret right after the last WORD; at: puts it at
-the end), say:TEXT (dictate TEXT as if recognized), set:NAME=VALUE (change a setting in memory only), packs:ID+ID (tick term packs, in memory only) or key:BACK (the
+the end), say:TEXT (dictate TEXT as if recognized), set:NAME=VALUE (change a setting in memory only; apply: as the settings window does after a change), packs:ID+ID (tick term packs, in memory only) or key:BACK (the
 user presses Backspace n times: key:BACK*3), dbl:MS (a double tap, each press MS ms long), dblbusy (a double tap whose release is handled 0.5s late), pick:N / pickw:WORD (click a row of the 選字 menu), feed:WAV (while
 continuous listening is on: WAV and 1s of silence reach the microphone; feed:WAV+WAV joins clips with 0.6s pauses),
 logshot:NAME (the 辨識紀錄 tab saved as <dir>/NAME.png), type:TEXT (type TEXT in the menu's input box and press Enter). Settings are never saved; hotwords and smart picks live in <dir> (hotwords.test.json,
@@ -224,7 +224,7 @@ def up():
 
 
 t0 = time.monotonic()
-while time.monotonic() - t0 < 120 and not (A.recognizer and A.streamer):
+while time.monotonic() - t0 < 120 and not (A.recognizer and (A.streamer or A.cfg.live_model != "stream")):
     pump(0.3)
 pump(2)
 try:
@@ -271,6 +271,11 @@ try:
             name, value = step[4:].split("=")
             setattr(A.cfg, name, type(getattr(A.cfg, name))(int(value) if value.isdigit() else value))
             print(f"[設定 {name} = {getattr(A.cfg, name)!r}]（只改記憶體，不存檔）")
+            continue
+        if step == "apply":   # what the settings window does after a change
+            A.apply_settings()
+            pump(8.0)
+            print(f"[套用設定] 串流模型：{'已載入' if A.streamer else '未載入'}")
             continue
         if step.startswith("packs:"):
             ids = [i for i in step[6:].split("+") if i]
