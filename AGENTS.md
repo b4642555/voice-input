@@ -135,7 +135,9 @@ comtypes; muted when the recording indicator shows, unmuted once the text is pas
 mute the user set is left alone. Selection edits and on-screen terms are always on.
 
 Later the same night the user switched to design B (what was heard next to the screen's change as a diff, one row
-per event, one group per listening session, the why and details as a row's tooltip; `logbook.py`, `set_log`);
+per event, one group per listening session, the why and details as a row's tooltip; `logbook.py`, `set_log`;
+rows newest first too, no small print under them (the kind of change is in the tooltip), a copy icon at the right
+end of a row that finished a sentence: the user's requests, 2026-10-15);
 design A, described next, is history. On the continuous-mic branch the 辨識紀錄 tab shows one card per sentence instead (`logbook.py`, rendered by
 `SettingsDialog.set_log`; the user's pick of three mockups, 2026-10-15, design A, so the workings can be seen): the
 sentence as it ended on the darker row with its kind, time, counts (pieces, pauses decoded again, 復原) and how it

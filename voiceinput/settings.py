@@ -8,7 +8,7 @@ import os
 
 from pypinyin import lazy_pinyin
 from PySide6.QtCore import QEvent, Qt, QTimer, Signal
-from PySide6.QtGui import QCursor
+from PySide6.QtGui import QColor, QCursor, QImage, QPainter, QPen, QTextDocument
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
                                QFormLayout, QFrame, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
                                QPushButton, QScrollArea, QSizePolicy, QSpinBox, QTabWidget, QTextBrowser, QToolButton,
@@ -59,6 +59,33 @@ def _scroll_instead(widget, e):
         area = area.parentWidget()
     if area is not None:
         QApplication.sendEvent(area.viewport(), e)
+
+
+_COPY_ICON = "copy-icon"
+
+
+class _LogView(QTextBrowser):
+    """The 辨識紀錄 view: the copy icon its rows show is drawn here (rich text cannot load it from a file)."""
+
+    def loadResource(self, kind, name):
+        if kind == QTextDocument.ImageResource and name.toString() == _COPY_ICON:
+            return _copy_icon()
+        return super().loadResource(kind, name)
+
+
+def _copy_icon() -> QImage:
+    """Two overlapping rounded squares, gray, drawn at twice the size for sharp edges."""
+    img = QImage(28, 28, QImage.Format_ARGB32_Premultiplied)
+    img.fill(0)
+    img.setDevicePixelRatio(2)
+    p = QPainter(img)
+    p.setRenderHint(QPainter.Antialiasing)
+    p.setPen(QPen(QColor("#6B7280"), 1.3))
+    p.drawRoundedRect(4.5, 1.5, 8, 8, 1.6, 1.6)
+    p.setBrush(QColor("#FFFFFF"))
+    p.drawRoundedRect(1.5, 4.5, 8, 8, 1.6, 1.6)
+    p.end()
+    return img
 
 
 class _NoWheelCombo(QComboBox):
@@ -624,7 +651,7 @@ class SettingsDialog(QDialog):
 
     # --- 辨識紀錄 ---
     def _log_page(self) -> QWidget:
-        self.log = QTextBrowser(openLinks=False)
+        self.log = _LogView(openLinks=False)
         self.log.setPlaceholderText("開麥克風後，每段話聽到什麼、畫面上變成什麼會顯示在這裡（只保留這次執行期間）")
         self.log.document().setDefaultStyleSheet("a { color: #1F2328; text-decoration: none; }")
         self.log.anchorClicked.connect(self._log_link)
@@ -642,38 +669,36 @@ class SettingsDialog(QDialog):
 
     def _log_hover(self, url):
         """The pointer over a row: its why and details as a tooltip."""
-        row = self._log_rows.get(int(url.path() or -1)) if url.scheme() == "tip" else None
-        if row is not None and row["tip"]:
-            QToolTip.showText(QCursor.pos(), row["tip"], self.log)
+        row = self._log_rows.get(int(url.path() or -1))
+        text = "" if row is None else "複製這句" if url.scheme() == "copy" else \
+            "\n".join(x for x in (row["tag"], row["tip"]) if x)
+        if text:
+            QToolTip.showText(QCursor.pos(), text, self.log)
         else:
             QToolTip.hideText()
 
     def set_log(self, sessions):
         """What was heard next to what the screen became, as a diff (the user's pick, 2026-10-15, design B; logbook.py
-        builds it): one group per listening session, newest first, its time and counts on top; inside, one row per
-        event, oldest first: time, what was heard (a gray cell), the change (new text green, removed struck through)
-        with a few colored words on what kind of change it was. The why and the recognizer's details are the row's
-        tooltip (the user's request: details only when the pointer goes there)."""
+        builds it): one group per listening session and one row per event, both newest first (the user's request, so
+        the latest needs no scrolling): time, what was heard (a gray cell), the change (new text green, removed red
+        and struck through) and, for a row that finished a sentence, a copy icon at its right end. What kind of change
+        it was (整句重聽, 標點 …), why, and the recognizer's details are the row's tooltip (the user's request: no small
+        print under the rows, details only when the pointer goes there)."""
         gray, ink = "#5F6670", "#1F2328"
-        colors = {"fix": "#6B3FA0", "lock": "#5F6670", "op": "#B35A00", "end": "#B35A00", "undo": "#5B6573",
-                  "note": "#5F6670"}
         self._log_sessions = list(sessions)
         self._log_rows = {r["id"]: r for g in self._log_sessions for r in g["rows"]}
 
         def row(r):
             tip = f"tip:{r['id']}"
             heard = html.escape(r["heard"]) if r["heard"] else ""
-            tag = (f"<span style='color:{colors.get(r['kind'], gray)}; font-size:11.5px'>{html.escape(r['tag'])}</span>"
-                   if r["tag"] else "")
-            copy = (f"<a href='copy:{r['id']}' style='color:#1F5FAF; font-size:11.5px'>複製</a>" if r["copy"] else "")
-            extra = "　".join(x for x in (tag, copy) if x)
+            copy = (f"<a href='copy:{r['id']}'><img src='{_COPY_ICON}' width=14 height=14></a>" if r["copy"] else "")
             return (f"<tr><td valign=top width=54 style='color:{gray}; font-size:11px; padding:5px 0 5px 0; "
                     f"font-family:Consolas,monospace'><a href='{tip}' style='color:{gray}'>{r['time']}</a></td>"
                     f"<td valign=top width='36%' style='padding:3px 8px 3px 0'>"
                     + (f"<table cellspacing=0 cellpadding=0><tr><td bgcolor='#EEF1F5' style='padding:2px 7px'>"
                        f"<a href='{tip}' style='color:{ink}'>{heard}</a></td></tr></table>" if heard else "")
                     + f"</td><td valign=top style='padding:4px 0'><a href='{tip}' style='color:{ink}'>{r['change']}</a>"
-                    + (f"<br>{extra}" if extra else "") + "</td></tr>")
+                    + f"</td><td valign=top align=right width=22 style='padding:5px 0 0 4px'>{copy}</td></tr>")
 
         def group(g):
             n = g["counts"]
@@ -685,8 +710,9 @@ class SettingsDialog(QDialog):
             title = (f"<b>{span}</b>　<span style='color:{gray}'>{head}" + ("　·　" if chips else "")
                      + "　·　".join(chips) + "</span>")
             cols = (f"<tr><td style='color:{gray}; font-size:11px'>時間</td><td style='color:{gray}; font-size:11px'>"
-                    f"聽到</td><td style='color:{gray}; font-size:11px'>畫面上</td></tr>")
-            rows = "".join(row(r) for r in g["rows"]) or (f"<tr><td colspan=3 style='color:{gray}; padding:4px 0'>"
+                    f"聽到</td><td style='color:{gray}; font-size:11px'>畫面上</td><td></td></tr>")
+            rows = "".join(row(r) for r in reversed(g["rows"])) or (f"<tr><td colspan=4 style='color:{gray}; "
+                                                                   f"padding:4px 0'>"
                                                          "（還沒有聽到講話）</td></tr>")
             return (f"<table width='100%' cellspacing=0 cellpadding=0 border=1 style='border-collapse:collapse; "
                     f"border-color:#D5DAE1; border-style:solid; margin-bottom:8px'>"

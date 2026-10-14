@@ -180,7 +180,8 @@ class LogBook:
             self._spoken_undo = (op.phrase, entry, before if drafted else "", after if drafted else "")
             return   # told with what it took back
         alone = entry.get("alone")
-        said = op.phrase if op else (entry.get("main") or typed)
+        # what was said: 句號, not the 。 it typed
+        said = op.phrase if op else ((entry.get("asr") or "").strip().rstrip("，。？！、,.?!") or typed)
         heard = f"{alone} → {said}" if alone else said
         why = []
         if alone:
