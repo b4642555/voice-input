@@ -66,6 +66,8 @@ class Hotkeys:
         self._tap = None
         self._loop = None
         self._caps = False
+        self._caps_checked = False                 # a mapping a crash left behind was looked for
+        self._cb = self._callback                  # kept referenced while the tap lives
         self.ready = threading.Event()             # the tap is installed (the permission was given)
 
     def set_keys(self, names) -> None:
@@ -74,7 +76,9 @@ class Hotkeys:
         self._buttons = {_BUTTONS[n]: n for n in self._names if n in _BUTTONS}
         self._held &= self._names
         caps = "caps_lock" in self._names
-        if caps != self._caps or (not caps and caps_remapped()):
+        stale = not caps and not self._caps_checked and caps_remapped()
+        self._caps_checked = True
+        if caps != self._caps or stale:
             _hidutil(_CAPS_TO_F18 if caps else _NO_MAPPING)
             self._caps = caps
 
@@ -108,7 +112,7 @@ class Hotkeys:
         warned = False
         while True:
             self._tap = Q.CGEventTapCreate(Q.kCGSessionEventTap, Q.kCGHeadInsertEventTap,
-                                           Q.kCGEventTapOptionDefault, mask, self._callback, None)
+                                           Q.kCGEventTapOptionDefault, mask, self._cb, None)
             if self._tap is not None:
                 break
             if not warned:

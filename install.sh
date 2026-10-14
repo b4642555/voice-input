@@ -48,7 +48,7 @@ if [ "${1:-}" = "--uninstall" ]; then
     hidutil property --set '{"UserKeyMapping":[]}' >/dev/null 2>&1 || true
     rm -rf "/Applications/VoiceInput.app" "$HOME/Applications/VoiceInput.app"
     rm -rf "$SRC" "$VENV" "$TOOLS"
-    echo "已移除。設定、詞庫和模型留在 $ROOT，不要的話可以整個資料夾刪掉。"
+    echo "已移除。設定、詞庫和模型留在 ${ROOT}，不要的話可以整個資料夾刪掉。"
     echo "系統設定 › 隱私權與安全性 裡的 VoiceInput 項目可以手動移除。"
     exit 0
 fi
@@ -59,7 +59,7 @@ if [ "$major" -lt 11 ]; then
 fi
 mkdir -p "$ROOT" "$TOOLS" "$APPS"
 
-say "1/5 取得程式碼（$BRANCH）"
+say "1/5 取得程式碼（${BRANCH}）"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 if [ -n "${VOICEINPUT_SOURCE:-}" ]; then

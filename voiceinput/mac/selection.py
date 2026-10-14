@@ -148,6 +148,8 @@ def read_selection() -> Selection | None:
         el, app = _focused()
         if el is None:
             return None
+        if app in TERMINALS and not term_watcher.fresh:
+            return None
         text = _attr(el, "AXSelectedText")
         if not isinstance(text, str) or not text.strip():
             return None
@@ -199,17 +201,21 @@ def visible_text() -> str:
 
 
 class _TermWatcher:
-    """Windows reads terminal selections from mouse drags (TUIs draw their own there); macOS terminals report
-    theirs, so there is nothing to watch."""
+    """macOS terminals report their selection, but it stays highlighted after a copy or while typing: like on
+    Windows, it counts only when the left button was released (a drag, a double click) since the last key or
+    click."""
+
+    def __init__(self):
+        self.fresh = False
 
     def forget(self):
-        pass
+        self.fresh = False
 
     def mouse_down(self, x, y):
-        pass
+        self.fresh = False
 
     def mouse_up(self, x, y):
-        pass
+        self.fresh = True
 
     def selection(self):
         return None
