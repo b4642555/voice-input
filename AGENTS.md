@@ -188,14 +188,18 @@ no timestamps, so nothing settled and every pause took 1.2-2.8s (2026-10-15; on 
 the commit 2.92s -> 0.25s). The 一般 tab's 定稿時機
 (`commit_at`) picks when a draft is committed: on a command or the end of listening (default, the user's choice) or
 at every pause; a draft longer than 60s is committed at a pause. Drafts get no sentence-final punctuation while
-speaking (a pause is not a sentence end); a commit by an operation (換行, 送出, 「X改成Y」 …) or by the end of listening
+speaking (a pause is not a sentence end); a commit by an operation (換行, 送出 …) or by the end of listening
 keeps the recognizer's 。？！, or gets 。 when it gave none (. after English only; the user's choice,
 2026-10-14/15), unless the caret had text on both sides; a commit by a
 spoken punctuation mark gets that mark instead, and a mark said right after an added one replaces it (not 。。).
-「X改成Y」 (or 把X改成Y) said alone (`edit.change`, a 一般 checkbox, on by default; the user's request 2026-10-14)
-commits the draft, then changes the last X in what VoiceInput typed before the caret (`Session.buffer`) to Y: the
-same characters, then with punctuation and spaces skipped, then (2+ characters) the same toneless reading
-(`edit.find`). Not found: nothing typed, a tray notice (the user's choice over typing it as text). 復原 takes it back.
+「X改成Y」 said alone changed the last X typed before the caret to Y (same characters, then the same toneless
+reading) for a few hours on 2026-10-14/15; removed at the user's request (git: 8e14854 adds it).
+A piece that is no command alone but, decoded with the sentence before it, is exactly a command once the sentence
+settles before it runs as one (the user's 換行 came out as "Hang Hung," alone and as 換行 in the sentence, and was
+typed as text, 2026-10-15). While listening the indicator moves to the top of the screen when the caret is under it
+(`selection.caret_rect`, UIA, read after each update of the draft; `Overlay.avoid`), and back down when it is under
+the top spot (the user's request, 2026-10-15). An underline under the open sentence like an IME's composition (an
+overlay drawn at its UIA rectangles) was offered and declined.
 用按鍵關閉麥克風時自動送出 (`send_on_stop`, on by default, the user's request 2026-10-14 so 送出 need not be said):
 the key that turns listening off presses Enter once the text is in; not when 送出 / 結束錄音 turned it off, nor
 when nothing was typed or run while listening. A ✕ on the indicator to stop without sending was asked for and
@@ -216,7 +220,7 @@ docs). `dev/headless.py` feed:WAV prints the document as the audio arrives.
 double-tap deletes: rules_version 6 turns them into it) takes back VoiceInput's last change, up to three
 (`session.UNDO_DEPTH`, `Session.history`), one per use, while they are still right before the caret: typed text or a
 draft (dropped, so it is not typed again at the commit), a punctuation mark, a new line (Shift+Enter is recorded as
-"\n"), text spoken over a selection (the selection comes back), a deleted selection, a 「X改成Y」. A double tap on a
+"\n"), text spoken over a selection (the selection comes back), a deleted selection. A double tap on a
 selection still deletes it (rules_version 7 adds that rule back, the user's request). A draft's changes are its pauses'
 updates, one each (the user's request, 2026-10-15: a whole draft at once took back what was said long before); a
 commit belongs to the update before it. After one is taken back the draft stays as it is, not decoded again (the

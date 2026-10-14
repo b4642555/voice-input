@@ -246,9 +246,6 @@ class SettingsDialog(QDialog):
         self.mute.setToolTip("錄音期間把喇叭靜音，文字輸入完成後恢復；原本就靜音的話不會動")
         self.describe = QCheckBox("說「詞＋的＋字」時只輸入那個字，例如「節日的節」")
         self.describe.setToolTip("整句剛好是「某個詞的某個字」才算，輸入的是詞裡讀音相同的那個字")
-        self.change = QCheckBox("說「A改成B」時，把剛輸入的 A 改成 B")
-        self.change.setToolTip("在這次聽寫打出、游標前面的文字裡找 A，先找相同的字，再找讀音相同的；"
-                               "有好幾處時改最後一處。找不到時不會打字，會跳出提示。講「復原」可以退回")
         self.send_on_stop = QCheckBox("用按鍵關閉麥克風時自動送出（按 Enter）")
         self.spin = QCheckBox("錄音中正在辨識時，紅點旋轉")
         self.spin.setToolTip("講完一段、程式還在辨識時，錄音指示的紅點外會有一圈在轉")
@@ -274,7 +271,6 @@ class SettingsDialog(QDialog):
         form.addRow("", self.punct)
         form.addRow("", self.period_comma)
         form.addRow("", self.describe)
-        form.addRow("", self.change)
         form.addRow("", self.send_on_stop)
         form.addRow("", self.spin)
         form.addRow("", self.autostart)
@@ -291,7 +287,7 @@ class SettingsDialog(QDialog):
         self.sound_set.currentIndexChanged.connect(self._sound_set_changed)
         self.stop_at.currentIndexChanged.connect(self._apply)
         self.commit_at.currentIndexChanged.connect(self._apply)
-        for box in (self.punct, self.period_comma, self.describe, self.change, self.send_on_stop, self.spin,
+        for box in (self.punct, self.period_comma, self.describe, self.send_on_stop, self.spin,
                     self.autostart,
                     self.mute, self.keep_audio):
             box.toggled.connect(self._apply)
@@ -305,7 +301,6 @@ class SettingsDialog(QDialog):
         self.autostart.setChecked(self.cfg.autostart)
         self.mute.setChecked(self.cfg.mute_while_recording)
         self.describe.setChecked(self.cfg.describe_char)
-        self.change.setChecked(self.cfg.change_command)
         self.send_on_stop.setChecked(self.cfg.send_on_stop)
         self.spin.setChecked(self.cfg.spin_while_decoding)
         self.keep_audio.setChecked(self.cfg.save_recordings)
@@ -334,7 +329,6 @@ class SettingsDialog(QDialog):
         self.cfg.autostart = self.autostart.isChecked()
         self.cfg.mute_while_recording = self.mute.isChecked()
         self.cfg.describe_char = self.describe.isChecked()
-        self.cfg.change_command = self.change.isChecked()
         self.cfg.send_on_stop = self.send_on_stop.isChecked()
         self.cfg.spin_while_decoding = self.spin.isChecked()
         self.cfg.save_recordings = self.keep_audio.isChecked()

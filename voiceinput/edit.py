@@ -11,15 +11,10 @@ character> types only that character, when the word contains it or a character t
 Chinese is recognized far more reliably than Bopomofo names (spelling with ㄔ ㄤ 昌 was tried and reverted the same
 day: X-ASR heard the names as English letters).
 
-「X改成Y」 said alone (a setting since 2026-10-14, the user's request) changes the last X typed before the caret to
-Y: the same characters first, then the same reading without tones (the recognizer may write X another way each time),
-punctuation and spaces in the text skipped.
-
 An utterance on a selected 。 (setting, 2026-10-07) continues the sentence: the 。 becomes ， and moves to the end
 (今天很好。明天 → 今天很好，我們去公園。明天).
 """
 import re
-from functools import lru_cache
 
 from pypinyin import Style, pinyin
 
@@ -39,12 +34,8 @@ _DESCRIBED = re.compile(r"^([㐀-䶿一-鿿]{2,8})的([㐀-䶿一-鿿])$")   # a
 _WORD = 4   # the word is the end of what comes before 的
 
 
-_CJK = re.compile(r"[㐀-䶿一-鿿]")
-
-
-@lru_cache(maxsize=4096)
-def _sounds(ch: str) -> frozenset[str]:
-    return frozenset(pinyin(ch, style=Style.NORMAL, heteronym=True)[0])
+def _sounds(ch: str) -> set[str]:
+    return set(pinyin(ch, style=Style.NORMAL, heteronym=True)[0])
 
 
 def described(formatted: str) -> str | None:
@@ -61,42 +52,6 @@ def described(formatted: str) -> str | None:
     if len(before) > _WORD:
         return None
     return next((c for c in reversed(word) if _sounds(c) & _sounds(ch)), None)
-
-
-_CHANGE = re.compile(r"^把?(.+?)改成(.+)$")
-_EDGE = " ，。、！？；：,.!?;:…「」"
-
-
-def change(formatted: str) -> tuple[str, str] | None:
-    """(X, Y) when the whole utterance is 「X改成Y」 or 「把X改成Y」, else None."""
-    m = _CHANGE.match(formatted.strip(_EDGE))
-    if not m:
-        return None
-    old, new = m.group(1).strip(_EDGE), m.group(2).strip(_EDGE)
-    return (old, new) if old and new else None
-
-
-def _skip(ch: str) -> bool:
-    return ch.isspace() or ch in _EDGE
-
-
-def find(text: str, old: str) -> tuple[int, int] | None:
-    """The span of the last X in text: the same characters, then the same characters with punctuation and spaces
-    skipped, then (two characters or more) the same reading without tones."""
-    i = text.rfind(old)
-    if i >= 0:
-        return i, i + len(old)
-    want = [c for c in old if not _skip(c)]
-    spots = [i for i, c in enumerate(text) if not _skip(c)]
-    tests = [lambda a, b: a.lower() == b.lower()]
-    if len(want) >= 2:
-        tests.append(lambda a, b: a.lower() == b.lower() or bool(
-            _CJK.match(a) and _CJK.match(b) and _sounds(a) & _sounds(b)))
-    for same in tests:
-        for k in range(len(spots) - len(want), -1, -1):
-            if all(same(text[spots[k + j]], want[j]) for j in range(len(want))):
-                return spots[k], spots[k + len(want) - 1] + 1
-    return None
 
 
 def continue_sentence(formatted: str) -> str:

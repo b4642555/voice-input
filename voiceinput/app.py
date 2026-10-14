@@ -56,7 +56,7 @@ from .overlay import Overlay
 from .picker import Picker
 from .reading import reading_key
 from .rules import DOUBLE, HOLD, TAP
-from .selection import Context, ContextProbe, move_cursor_after, term_watcher
+from .selection import Context, ContextProbe, caret_rect, move_cursor_after, term_watcher
 from .session import Session, foreground
 from .settings import SettingsDialog
 from .textfmt import format_text, to_traditional
@@ -171,6 +171,8 @@ class App(QObject):
         self.icon_rec = make_icon(QColor(255, 69, 58))
 
         self._busy, self._busy_lock = 0, threading.Lock()   # decoding jobs queued or running
+        self._caret_pool = ThreadPoolExecutor(max_workers=1)   # reads where the caret is (the indicator avoids it)
+        self._caret_asked = False
         self.overlay = Overlay(lambda: self.listener.level if self._listening else 0.0,
                                lambda: self.cfg.spin_while_decoding and self._busy > 0)
         self.picker = Picker()
@@ -483,6 +485,7 @@ class App(QObject):
         self._listen_shown = True
         self.tray.setIcon(self.icon_rec)
         self.overlay.show_recording()
+        self._avoid_caret()
         cues.play(self.cfg.start_sound, "start")
         wait = cues.duration(self.cfg.start_sound, "start")
         if wait:
@@ -598,6 +601,7 @@ class App(QObject):
                 paste_text(d.lead + text)
                 self.session.dictated(d.lead + text, None, foreground())
             d.placed, d.typed = True, text
+            self._avoid_caret()
             return
         if text == d.typed:
             return
@@ -612,6 +616,26 @@ class App(QObject):
             paste_text(tail)
         s.retyped(new, step)
         d.typed = text
+        self._avoid_caret()
+
+    def _avoid_caret(self):
+        """Main thread: the indicator moves to the top of the screen when the caret (where the text goes) is under
+        it, and back down when it is under the top one (the user's request, 2026-10-15)."""
+        if self._caret_asked:
+            return
+        self._caret_asked = True
+
+        def read():
+            try:
+                rect = caret_rect()
+            finally:
+                self.main.emit(lambda: self._caret_read(rect))
+        self._caret_pool.submit(read)
+
+    def _caret_read(self, rect):
+        self._caret_asked = False
+        if rect is not None and self._listening:
+            self.overlay.avoid(rect)
 
     def _moved(self) -> bool:
         """Main thread: the user moved the caret away from the draft (clicked, selected, typed)."""
@@ -659,7 +683,7 @@ class App(QObject):
                 d = self._new_draft(ctx)
             if d is not None:
                 d.final = _TRAILING.sub("", _joined(d.settled, text))
-                end = _SENTENCE_END.search(text)
+                end = _SENTENCE_END.search(_joined(d.settled, text))
                 caret = d.ctx.caret
                 if final and d.final and not (caret is not None and all(s.strip() for s in caret)):
                     # none from the recognizer (a short sentence often has none): 。 (the user's choice, 2026-10-15)
@@ -683,11 +707,8 @@ class App(QObject):
 
     def _run_command(self, command, ctx):
         """Main thread: an operation spoken alone runs its steps; a punctuation name or a described character is
-        typed after the text; 「X改成Y」 changes the text."""
-        op, typed, change, entry = command
-        if change is not None:
-            self._change(*change, entry)
-            return
+        typed after the text."""
+        op, typed, entry = command
         self.record.emit(entry)
         if op is not None:
             log.info("spoken operation: %s", op.phrase)
@@ -733,15 +754,11 @@ class App(QObject):
         return len(_WORDS.findall(raw)) <= max(map(len, names)) + _COMMAND_SLACK
 
     def _command(self, formatted: str, ctx, steps: list):
-        """(operation, text to type, (X, Y)) when the utterance is a command said alone: an operation's phrase,
-        「X改成Y」, a punctuation name or a described character; Nones otherwise."""
+        """(operation, text to type) when the utterance is a command said alone: an operation's phrase, a
+        punctuation name or a described character; (None, None) otherwise."""
         op = rules.pick(rules.candidates(self.cfg.rules, rules.SPEECH, formatted), ctx.selection is not None,
                         self.session.deletable() is not None)
-        typed = change = None
-        if op is None and self.cfg.change_command:
-            change = edit.change(formatted)
-            if change is not None:
-                return op, typed, change
+        typed = None
         if op is None and self.cfg.punctuation_names:
             typed = edit.symbol(formatted)
             if typed:
@@ -750,7 +767,7 @@ class App(QObject):
             typed = edit.described(formatted)
             if typed:
                 steps.append(("指定字", formatted, typed))
-        return op, typed, change
+        return op, typed
 
     def _text_of(self, raw: str, ctx, steps: list, keep_end: bool = False) -> str:
         """Dictated text from the recognizer's: formatted without sentence-final punctuation (the user says 句號;
@@ -798,9 +815,9 @@ class App(QObject):
             steps = []
             formatted = format_text(raw, True, steps)
             entry = {"time": time.strftime("%H:%M:%S"), "asr": to_traditional(raw), "asr_s": t_asr, "steps": steps}
-            op, typed, change = self._command(formatted, ctx, steps)
+            op, typed = self._command(formatted, ctx, steps)
             names = self._command_words()
-            if op is None and not typed and change is None and state["alone"] and names and self._short(raw, names) \
+            if op is None and not typed and state["alone"] and names and self._short(raw, names) \
                     and piece.lo > anchor:
                 # decoded with the draft's audio before it (as a commit would), a short piece may turn out to be a
                 # command it missed alone: the user's 換行 came out as Hangan, then as 換行 in the draft, and was
@@ -808,19 +825,19 @@ class App(QObject):
                 whole, _ = self._speech(anchor, piece.hi, self._spans)
                 again = self._decode(whole, ctx, commands=True)
                 more = format_text(again, True)
-                op, typed, change = self._command(more, ctx, steps)
-                if op is not None or typed or change is not None:
+                op, typed = self._command(more, ctx, steps)
+                if op is not None or typed:
                     log.info("piece with the draft before it: %s -> %s", raw, again)
                     raw, formatted, audio = again, more, whole
-            if op is not None or typed or change is not None:
+            if op is not None or typed:
                 spans, self._spans = [p for p in self._spans if p is not piece], []
                 self._keep(audio, asr=raw, fmt=formatted, result=typed or "",
-                           op=op.phrase if op else "改成" if change else None)
+                           op=op.phrase if op else None)
                 entry.update(kind="操作", main=op.phrase) if op else entry.update(kind="輸入", main=typed, copy=typed)
                 # nothing said since the last commit: the audio before the command is not decoded (a breath
                 # between 句號 and 送出 was typed as "Shh", 2026-10-14)
                 end = piece.start if state["drafted"] else anchor
-                self._commit_job(start, anchor, end, piece.hi, ctx, (op, typed, change, entry), final=not typed,
+                self._commit_job(start, anchor, end, piece.hi, ctx, (op, typed, entry), final=not typed,
                                  spans=spans)
             elif self.cfg.commit_at == "pause" or piece.hi - anchor > _DRAFT_MAX * SAMPLE_RATE:
                 spans, self._spans = self._spans, []
@@ -851,6 +868,21 @@ class App(QObject):
                 break
         settled = self._text_of(settled, ctx, [], keep_end=True) if settled else ""
         live = self._text_of(live, ctx, [])
+        if live and after == piece.lo:
+            # the open sentence is this piece alone, and decoded after the sentence before it, it is a command it
+            # was not alone: the user's 換行 came out as "Hang Hung," alone, as 換行 here, and was typed as text
+            # (2026-10-15). The sentence before it is committed and the command runs.
+            steps = []
+            op, typed = self._command(live, ctx, steps)
+            if op is not None or typed:
+                log.info("piece with the sentence before it: %s", live)
+                entry = {"time": time.strftime("%H:%M:%S"), "asr": live, "asr_s": time.monotonic() - t0,
+                         "steps": steps}
+                entry.update(kind="操作", main=op.phrase) if op else entry.update(kind="輸入", main=typed, copy=typed)
+                self._spans = []
+                command = (op, typed, entry)
+                self.main.emit(lambda: self._commit(settled, start, anchor, piece.hi, ctx, command, not typed))
+                return
         log.info("draft %.2fs: %s | %s", time.monotonic() - t0, settled, live)
         self.main.emit(lambda: self._refine(start, anchor, settled, live, after, ctx))
 
@@ -948,28 +980,6 @@ class App(QObject):
                 ev.set()
         self.main.emit(run)
         ev.wait(10)
-
-    def _change(self, old: str, new: str, entry: dict):
-        """Main thread, 「X改成Y」: the last X in what VoiceInput typed before the caret becomes Y (edit.find). Not
-        found: nothing is typed, a notice says so (the user's choice, 2026-10-14)."""
-        s = self.session
-        span = edit.find(s.buffer, old) if s.clean() else None
-        if span is None:
-            log.info("change: %r not found", old)
-            self._notify(f"找不到「{old}」，沒有修改")
-            entry.update(kind="操作", main=f"{old}改成{new}（找不到）")
-            self.record.emit(entry)
-            return
-        a, b = span
-        found, after = s.buffer[a:b], s.buffer[:a] + new + s.buffer[b:]
-        n, tail = s.plan_to(after)
-        log.info("change %r -> %r: %d backspaces + %r", found, new, n, tail)
-        backspace(n)
-        if tail:
-            paste_text(tail)
-        s.changed(after)
-        entry.update(kind="取代", main=f"{found} → {new}", copy=new)
-        self.record.emit(entry)
 
     def _type_text(self, text: str):
         if text:

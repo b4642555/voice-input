@@ -18,7 +18,6 @@ class Config:
     period_to_comma: bool = True   # speaking on a selected 。 turns it into ， + the utterance + 。
     punctuation_names: bool = True  # an utterance of just a punctuation name (逗號, 句號 …) types the mark
     describe_char: bool = True     # 節日的節 types 節 (edit.described)
-    change_command: bool = True    # an utterance 「X改成Y」 changes the X typed before it (edit.change)
     # the key that turns listening off presses Enter once the text is in (the user's request, 2026-10-14, so they
     # need not say 送出); not when listening ends by 送出 / 結束錄音, nor when nothing was typed
     send_on_stop: bool = True

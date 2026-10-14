@@ -97,7 +97,7 @@ class Session:
             self.dirty = False
 
     def changed(self, new: str):
-        """The caller turned the buffer into new (「X改成Y」): a change 復原 can take back."""
+        """The caller turned the buffer into new: a change 復原 can take back."""
         with self._lock:
             self._push(Step(self.buffer, new, list(self.utterances)))
             self.buffer, self.utterances, self.dirty = new, [], False
