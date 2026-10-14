@@ -137,7 +137,10 @@ mute the user set is left alone. Selection edits and on-screen terms are always 
 Later the same night the user switched to design B (what was heard next to the screen's change as a diff, one row
 per event, one group per listening session, the why and details as a row's tooltip; `logbook.py`, `set_log`;
 rows newest first too, no small print under them (the kind of change is in the tooltip), a copy icon at the right
-end of a row that finished a sentence: the user's requests, 2026-10-15);
+end of a row that finished a sentence: the user's requests, 2026-10-15; only settled text has it, not 選字 or a lone
+mark, and such a row shows the settled text as its start … its end in about two lines, a command's 換行 after it in
+the same row; events in the heard column, （游標移到別處）, （關掉麥克風）…, are plain gray text without a word's
+cell);
 design A, described next, is history. On the continuous-mic branch the 辨識紀錄 tab shows one card per sentence instead (`logbook.py`, rendered by
 `SettingsDialog.set_log`; the user's pick of three mockups, 2026-10-15, design A, so the workings can be seen): the
 sentence as it ended on the darker row with its kind, time, counts (pieces, pauses decoded again, 復原) and how it

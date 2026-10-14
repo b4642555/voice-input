@@ -17,6 +17,7 @@ from . import rules
 INS = "background-color:#DCF3E2; color:#17643A"
 DEL = "background-color:#FBE1E1; color:#A23030; text-decoration:line-through"
 _CONTEXT = 8   # characters kept around a change; the rest of a long sentence is "…"
+_BRIEF = 18    # characters kept at each end of settled text: about two lines of the log's column (the user's choice)
 _KEY_WORDS = {"Shift+Enter": "換行", "Enter": "按 Enter", "Backspace": "刪掉前一個字"}
 _COMMAND_WORDS = {rules.STOP: "關掉麥克風", rules.UNDO: "復原", rules.PICK: "選字",
                   rules.DELETE_SELECTION: "刪除選取的文字", rules.DELETE_DICTATION: "刪除剛輸入的文字"}
@@ -54,16 +55,31 @@ def diff_html(before: str, after: str) -> str:
     return "".join(out)
 
 
-def _keep_end(s: str) -> str:
-    """The last _CONTEXT characters, not cutting an English word (…S 你幫我 read as a typo)."""
-    i = len(s) - _CONTEXT
+def settled_html(before: str, after: str) -> str:
+    """Text settled (the only rows with a copy icon, the user's request, 2026-10-15): its start … its end, about two
+    lines, with what the settling changed (an added 。) marked as in diff_html."""
+    ops = difflib.SequenceMatcher(None, before, after, autojunk=False).get_opcodes()
+    n = _BRIEF if sum(op[0] == "equal" for op in ops) <= 1 else _CONTEXT
+    out = []
+    for tag, i1, i2, j1, j2 in ops:
+        if tag == "equal":
+            same = after[j1:j2]
+            out.append(esc(_keep_start(same, n) + "…" + _keep_end(same, n) if len(same) > 2 * n + 1 else same))
+        else:
+            out.append(gone(before[i1:i2]) + ins(after[j1:j2]))
+    return "".join(out)
+
+
+def _keep_end(s: str, n: int = _CONTEXT) -> str:
+    """The last n characters, not cutting an English word (…S 你幫我 read as a typo)."""
+    i = len(s) - n
     while 0 < i < len(s) and s[i - 1].isascii() and s[i - 1].isalnum() and s[i].isascii() and s[i].isalnum():
         i -= 1
     return s[i:]
 
 
-def _keep_start(s: str) -> str:
-    i = _CONTEXT
+def _keep_start(s: str, n: int = _CONTEXT) -> str:
+    i = n
     while i < len(s) and s[i - 1].isascii() and s[i - 1].isalnum() and s[i].isascii() and s[i].isalnum():
         i += 1
     return s[:i]
@@ -188,20 +204,22 @@ class LogBook:
             why.append(f"單獨聽是「{alone}」，接在前面的句子後面聽才認出是「{said}」")
         if op is not None:
             what = describe(op.steps)
-            change = (diff_html(before, after) + " " if drafted and before != after else "") + \
+            # the sentence it settled, then what it did (the user's request: settled text shown like a frozen
+            # draft's, in the same row)
+            change = (settled_html(before, after) + " " if drafted and after else "") + \
                 (f"<span style='color:{_GRAY}'>→ {esc(what)}</span>" if what else "")
             tag = f"指令：{op.phrase}"
             why.append("整句只有這個詞，所以當指令執行" if not drafted else
                        "指令會先把前面的草稿定下來" + ("，句尾沒有標點就補上" if marked else ""))
             copy = after if drafted else ""
         else:
-            change = (diff_html(before, after + typed) if drafted and before != after + typed else ins(typed))
+            change = settled_html(before, after + typed) if drafted else ins(typed)
             if over:
                 change = gone(over) + ins(typed)
             tag = "標點" if typed in "，。？！、；：…" else "指定字"
             why.append("說的是標點名稱或「某個詞的某個字」，只打那個符號或字"
                        + ("，取代你選取的字" if over else ""))
-            copy = after + typed if drafted else typed
+            copy = after + typed if drafted and not over else ""
         g = self._row(heard, change or "（無）", tag, "op", _tip(why, tech_of(entry)), copy)
         g["counts"]["commands"] += 1
 
@@ -210,14 +228,12 @@ class LogBook:
         heard = "（關掉麥克風）" if by_stop else "（停頓）"
         why = ("關麥克風時整句定稿" + ("，句尾沒有標點就補上「。」" if marked else "")) if by_stop else \
             "設定是每次停頓就定稿（或草稿超過 60 秒）"
-        change = diff_html(before, after) if before != after else f"<span style='color:{_GRAY}'>（不變）</span>"
-        self._row(heard, change, "定稿", "end", _tip([why], ""), after)
+        self._row(heard, settled_html(before, after) if after else "", "定稿", "end", _tip([why], ""), after)
 
     def frozen(self, typed: str):
         """The caret moved away from the draft: it stays as typed, shown as its start … its end (the user's
         design, 2026-10-15), copied whole."""
-        short = typed if len(typed) <= 2 * _CONTEXT + 1 else _keep_start(typed) + "…" + _keep_end(typed)
-        self._row("（游標移到別處）", esc(short), "照畫面上的字定下來", "note",
+        self._row("（游標移到別處）", settled_html(typed, typed), "照畫面上的字定下來", "note",
                   _tip(["你點了別的地方、選取或打了字，草稿就照畫面上的樣子定下來；之後講的話從新的游標位置開始"], ""),
                   typed)
 
@@ -233,14 +249,14 @@ class LogBook:
                       draft=self._listening)
         g["counts"]["undo"] += 1
 
-    def single(self, kind: str, title: str, body: str, why: str = "", entry: dict | None = None, copy: str = ""):
-        """Something done on its own: a 選字 pick, a selection deleted …"""
+    def single(self, kind: str, title: str, body: str, why: str = "", entry: dict | None = None):
+        """Something done on its own: a 選字 pick, a selection deleted … (no copy icon: only settled text has one)"""
         if kind == "選字" and " → " in title:
             old, new = title.split(" → ", 1)
             body = gone(old) + ins(new)
         elif kind == "刪除":
             body = gone(title)
-        self._row(f"（{kind}）", body, kind, "op", _tip([why] if why else [], tech_of(entry)), copy, draft=False)
+        self._row(f"（{kind}）", body, kind, "op", _tip([why] if why else [], tech_of(entry)), draft=False)
 
 
 _GRAY = "#6B7280"

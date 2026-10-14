@@ -1408,8 +1408,7 @@ class App(QObject):
     def on_record(self, entry: dict):
         """Something done on its own (a 選字 pick, a selection deleted …): a card of one step."""
         main = entry.get("main") or ""
-        self.book.single(entry.get("kind", "輸入"), main, esc(main) or "（無）", entry=entry,
-                         copy=entry.get("copy", ""))
+        self.book.single(entry.get("kind", "輸入"), main, esc(main) or "（無）", entry=entry)
 
     def _log_changed(self):
         if self.settings.isVisible():

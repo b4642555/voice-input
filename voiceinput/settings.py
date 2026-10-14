@@ -696,11 +696,15 @@ class SettingsDialog(QDialog):
         def row(r):
             tip = f"tip:{r['id']}"
             heard = html.escape(r["heard"]) if r["heard"] else ""
+            # （游標移到別處）, （關掉麥克風）…: what happened, not what was said, so plain gray text without the
+            # cell said words have (the user's request, 2026-10-15)
+            event = r["heard"].startswith("（") and r["heard"].endswith("）")
             copy = (f"<a href='copy:{r['id']}'><img src='{_COPY_ICON}' width=14 height=14></a>" if r["copy"] else "")
             return (f"<tr><td valign=top width=54 style='color:{gray}; font-size:11px; padding:5px 0 5px 0; "
                     f"font-family:Consolas,monospace'><a href='{tip}' style='color:{gray}'>{r['time']}</a></td>"
                     f"<td valign=top width='36%' style='padding:3px 8px 3px 0'>"
-                    + (f"<table cellspacing=0 cellpadding=0><tr><td bgcolor='#EEF1F5' style='padding:2px 7px'>"
+                    + (f"<div style='padding:2px 0'><a href='{tip}' style='color:{gray}'>{heard}</a></div>" if event
+                       else f"<table cellspacing=0 cellpadding=0><tr><td bgcolor='#EEF1F5' style='padding:2px 7px'>"
                        f"<a href='{tip}' style='color:{ink}'>{heard}</a></td></tr></table>" if heard else "")
                     + f"</td><td valign=top style='padding:4px 0'><a href='{tip}' style='color:{ink}'>{r['change']}</a>"
                     + f"</td><td valign=top align=right width=22 style='padding:5px 0 0 4px'>{copy}</td></tr>")
