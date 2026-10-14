@@ -77,6 +77,15 @@ class Session:
             self.step = Step(undo_to, self.buffer, []) if undo_to is not None else None
             self.hwnd, self.dirty = hwnd, False
 
+    def retyped(self, new: str):
+        """The caller turned the buffer into new (Backspace + paste): a draft shown while listening changed. The
+        last change, when it was the draft, now ends with it."""
+        with self._lock:
+            if self.step is not None and self.step.after == self.buffer:
+                self.step.after = new
+            self.buffer = new
+            self.dirty = False
+
     def plan_to(self, after: str) -> tuple[int, str]:
         """Keystrokes to turn the buffer into after: (backspaces, text to paste)."""
         p = 0

@@ -121,24 +121,7 @@ class Recognizer:
         return self._pieces is not None
 
     def hotword_spec(self, words: list[tuple[str, float]]) -> str:
-        """sherpa-onnx per-stream hotwords ("a/b c :3/…") from (word, score) pairs. Words the vocab cannot
-        encode are dropped: a single bad word makes sherpa-onnx skip the whole list."""
-        from .textfmt import to_simplified
-        out, seen = [], set()
-        for word, score in words:
-            word = word.strip()
-            if not word or word.casefold() in seen:
-                continue
-            if _LATIN_TERM.match(word):
-                spec = word
-            else:
-                simp = to_simplified(word)
-                if not all(("▁" + ch) in self._pieces for ch in simp):
-                    continue
-                spec = " ".join(simp)
-            seen.add(word.casefold())
-            out.append(spec if score == _HOTWORD_SCORE else f"{spec} :{score:g}")
-        return "/".join(out)
+        return _hotword_spec(self._pieces, words)
 
     def recognize(self, audio: np.ndarray, hotwords: list[tuple[str, float]] | None = None) -> str:
         """Raw recognizer text; final formatting happens in textfmt. hotwords: (word, score) pairs, X-ASR only."""
@@ -161,6 +144,45 @@ class Recognizer:
         text = _TAGS.sub("", text).strip()
         # X-ASR emits a space after full-width punctuation
         return _PUNCT_SPACE.sub(r"\1", text)
+
+
+class Streamer:
+    """The streaming X-ASR model (480ms chunks) that shows the text while listening (listen.py); biased by the
+    same hotwords. max_active_paths stays at 4: it runs on every chunk while the offline model decodes the pieces."""
+
+    def __init__(self):
+        from .models import STREAM_MODEL
+        d = model_dir(STREAM_MODEL)
+        self.rec = sherpa_onnx.OnlineRecognizer.from_transducer(
+            tokens=str(d / "tokens.txt"), encoder=str(d / "encoder.int8.onnx"), decoder=str(d / "decoder.onnx"),
+            joiner=str(d / "joiner.int8.onnx"), num_threads=_THREADS, decoding_method="modified_beam_search",
+            max_active_paths=4, modeling_unit="bpe", bpe_vocab=_bpe_vocab(d), hotwords_score=_HOTWORD_SCORE)
+        lines = (d / "tokens.txt").read_text(encoding="utf-8").splitlines()
+        self._pieces = {line.rsplit(" ", 1)[0] for line in lines if line}
+
+    def hotword_spec(self, words: list[tuple[str, float]]) -> str:
+        return _hotword_spec(self._pieces, words)
+
+
+def _hotword_spec(pieces: set, words: list[tuple[str, float]]) -> str:
+    """sherpa-onnx per-stream hotwords ("a/b c :3/…") from (word, score) pairs. Words the vocab cannot encode are
+    dropped: a single bad word makes sherpa-onnx skip the whole list."""
+    from .textfmt import to_simplified
+    out, seen = [], set()
+    for word, score in words:
+        word = word.strip()
+        if not word or word.casefold() in seen:
+            continue
+        if _LATIN_TERM.match(word):
+            spec = word
+        else:
+            simp = to_simplified(word)
+            if not all(("▁" + ch) in pieces for ch in simp):
+                continue
+            spec = " ".join(simp)
+        seen.add(word.casefold())
+        out.append(spec if score == _HOTWORD_SCORE else f"{spec} :{score:g}")
+    return "/".join(out)
 
 
 def _pieces(audio: np.ndarray) -> list[np.ndarray]:

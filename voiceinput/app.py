@@ -15,10 +15,13 @@ press records again: delete and say it again. A tap on a selection opens 選字.
 given back to the key.
 
 Recording is continuous listening (listen.py; on the continuous-mic branch since 2026-10-14 the one way, the
-user's choice: no cutting the recording to say a command): while the microphone is on, every pause ends a piece,
-and each piece is handled at once: typed without sentence-final punctuation, run as an operation or typed as a
-punctuation mark when it is exactly one, or put over the text selected when its speech began (the user may select
-with the mouse while listening). Other gestures work while listening.
+user's choice: no cutting the recording to say a command). What is said is typed at once as a draft: the streaming
+model's text, put in place of the text selected when the speech began, if any (the user may select with the mouse
+while listening). Every pause ends a piece: said alone, an operation's phrase or a punctuation name commits the
+draft and runs or types it; otherwise the draft is decoded again by the offline model and its text, punctuation
+included, replaces the streaming text. A commit (by a command, the end of listening, or every pause when
+commit_at says so) decodes the draft as a whole, without sentence-final punctuation (the user says 句號). Moving the
+caret leaves a draft as it is. Other gestures work while listening.
 
 The one popup (picker.py) is the 選字 candidate menu; it came back 2026-10-11 after the lean branch removed every
 popup, and a redesign is planned (the 加入熱詞 notice with 撤銷 lived for a few hours the same day). Its input box
@@ -39,12 +42,12 @@ from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 from . import autostart, candidates, cues, edit, models, packs, paths, recordings, rules, sounds, spelling
-from .asr import SAMPLE_RATE, Recognizer
+from .asr import SAMPLE_RATE, Recognizer, Streamer
 from .config import Config
 from .hotwords import Hotwords
 from .hotkey import Hotkeys
 from .keys import MOUSE_TRIGGERS, combo_vks
-from .listen import Listener
+from .listen import LEAD, Listener
 from .memory import Memory, is_latin, situation
 from .mute import Muter
 from .output import backspace, paste_text, press_chord, press_delete
@@ -52,7 +55,7 @@ from .overlay import Overlay
 from .picker import Picker
 from .reading import reading_key
 from .rules import DOUBLE, HOLD, TAP
-from .selection import ContextProbe, move_cursor_after, term_watcher
+from .selection import Context, ContextProbe, move_cursor_after, term_watcher
 from .session import Session, foreground
 from .settings import SettingsDialog
 from .textfmt import format_text, to_traditional
@@ -76,6 +79,7 @@ _NO_RECORD = "目前沒有任何操作會錄音，無法語音輸入。請到「
 _CUE_LATENCY = 0.25
 _STEP_GAP = 0.03           # seconds between the steps of an operation
 _MENU_ROWS = 8
+_DRAFT_MAX = 60            # seconds: a longer draft is committed at a pause (decoding it again gets slow)
 _TAP_MAX = 0.6             # seconds: a press no hold operation takes, released sooner, is a tap
 _SPACED = re.compile(r"[A-Za-z0-9]")
 
@@ -122,7 +126,7 @@ class App(QObject):
     key_down = Signal(str, float)            # key name, time
     key_up = Signal(str, float)
     main = Signal(object)                    # run a callable on the Qt main thread (keystrokes, clipboard, UI)
-    edited = Signal(object, str, object)     # Selection, replacement, _Press: spoken on a selection
+    partial = Signal(str, int)               # streaming text, the sample it starts at (listen.py)
     candidates_ready = Signal(object, list)  # Selection, rows for the 選字 menu
     record = Signal(dict)         # one transcript log entry for the settings window
     status = Signal(str)
@@ -146,10 +150,14 @@ class App(QObject):
         self.listener: Listener | None = None    # the microphone (listen.py)
         self._listen_owner: _Press | None = None   # the press whose operation turned listening on
         self._listen_shown = False               # it is known to listen: indicator and start sound
-        self._early_pieces: list | None = None   # pieces heard before that, typed once it is known
+        self._early_pieces: list | None = None   # (Piece, probe) heard before that, handled once it is known
         self._early_lock = threading.Lock()
-        self._listen_probe = None                # (ContextProbe, time) started when the current piece's speech began
-        self._listen_out = 0.0                   # when a piece last changed the text
+        self._listen_probe = None                # ContextProbe started when the latest speech began
+        self._speech_sample = 0                  # where the latest speech began (with its lead-in)
+        self.streamer: Streamer | None = None    # the streaming model that shows the text while listening
+        self._draft: _Draft | None = None        # text typed while listening, not committed yet
+        self._draft_start = 0                    # the sample the draft's audio starts at (the last commit)
+        self._since = 0                          # the sample the streaming text starts at
         self._ignored: set[str] = set()          # keys pressed while another was held
         self._could_record = rules.can_record(self.cfg.rules)
         self.hotwords = Hotwords()
@@ -183,7 +191,7 @@ class App(QObject):
         self.key_down.connect(self.on_key_down)
         self.key_up.connect(self.on_key_up)
         self.main.connect(lambda fn: fn())
-        self.edited.connect(self.on_edited)
+        self.partial.connect(self.on_partial)
         self.candidates_ready.connect(self.on_candidates)
         self.status.connect(self.on_status)
         self.record.connect(self.on_record)
@@ -268,10 +276,26 @@ class App(QObject):
             self.status.emit("載入模型中…")
             self.recognizer = Recognizer(key)
             models.vad_path()   # continuous listening's voice activity detection, ~2MB
+            self._load_streamer()
             self.status.emit("就緒")
         except Exception as e:
             log.exception("model load failed")
             self.status.emit(f"模型載入失敗：{e}")
+
+    def _load_streamer(self):
+        """The streaming model (~165MB), downloaded on first use. Without it the text shows at each pause."""
+        key = models.STREAM_MODEL
+        try:
+            if not models.is_installed(key):
+                def progress(done, total):
+                    pct = f"{done * 100 // total}%" if total else f"{done >> 20} MB"
+                    self.status.emit(f"下載即時顯示模型中… {pct}")
+                models.download(key, progress)
+            t0 = time.monotonic()
+            self.streamer = Streamer()
+            log.info("streaming model loaded in %.1fs", time.monotonic() - t0)
+        except Exception:
+            log.exception("streaming model failed to load")
 
     # def _load_second_job(self):
     #     key = models.SECOND_MODEL
@@ -450,14 +474,16 @@ class App(QObject):
         if self.recognizer is None:
             return
         try:
-            if self.listener is None:
-                self.listener = Listener(str(models.vad_path()), self._on_listen_speech, self._on_listen_piece)
-            self.listener.start(self.cfg.mic)
+            if self.listener is None or self.listener._streamer is not self.streamer:
+                self.listener = Listener(str(models.vad_path()), self._on_listen_speech, self._on_listen_piece,
+                                         self.streamer, self._on_listen_partial)
+            self.listener.start(self.cfg.mic, self._stream_spec())
         except Exception as e:
             log.exception("listen start failed")
             self._notify(f"無法開啟麥克風：{e}")
             return
         self._listen_owner, self._listen_shown = press, False
+        self._draft, self._draft_start, self._since, self._listen_probe = None, 0, 0, None
         with self._early_lock:
             self._early_pieces = []
 
@@ -480,8 +506,8 @@ class App(QObject):
             QTimer.singleShot(int(wait * 1000), lambda: self.muter.mute() if self._listening else None)
         with self._early_lock:
             early, self._early_pieces = self._early_pieces, None
-        for audio in early or []:
-            self._submit_piece(audio)
+        for piece, probe in early or []:
+            self._submit_piece(piece, probe)
 
     def _discard_listen(self, press: _Press):
         """The press that started listening unseen does something else: the microphone off, nothing kept."""
@@ -501,8 +527,14 @@ class App(QObject):
             if self.cfg.stop_sound:
                 cues.play(self.cfg.stop_sound, "stop")
         after = self._after_steps(owner) if owner else []
+        end = self.listener.now
 
-        def finished():   # worker thread: the pieces before it are typed (or on their way to the main thread)
+        def finished():   # worker thread, after the last piece: the rest of the draft is committed, then the steps
+            self._on_main(lambda: None)
+            d = self._draft
+            if d is not None:
+                self._commit_job(self._draft_start, end, end, d.ctx)
+
             def run():
                 if done and not self._listening:
                     self.muter.restore()
@@ -512,34 +544,232 @@ class App(QObject):
         self.worker.submit(finished)
 
     def _on_listen_speech(self):
-        """Listener thread: speech began. What is selected now is what the piece replaces."""
-        self._listen_probe = (ContextProbe(), time.monotonic())
+        """Listener thread: speech began. What is selected now is what a new draft replaces."""
+        self._listen_probe = ContextProbe()
+        self._speech_sample = max(0, self.listener.now - int(LEAD * SAMPLE_RATE))
 
-    def _on_listen_piece(self, audio):
-        """Listener thread: a piece of speech ended; it is recognized and handled like a short press-and-talk."""
+    def _on_listen_piece(self, piece):
+        """Listener thread: a piece of speech ended: a command, or more of the draft."""
+        probe = self._listen_probe
         with self._early_lock:
             if self._early_pieces is not None:
-                self._early_pieces.append(audio)   # the press is not known to listen yet
+                self._early_pieces.append((piece, probe))   # the press is not known to listen yet
                 return
-        self._submit_piece(audio)
+        self._submit_piece(piece, probe)
 
-    def _submit_piece(self, audio):
-        (probe, began), self._listen_probe = self._listen_probe or (ContextProbe(), time.monotonic()), None
-        if self.recognizer is None:
+    def _submit_piece(self, piece, probe):
+        if self.recognizer is not None:
+            self.worker.submit(self._piece_job, piece, probe)
+
+    def _on_listen_partial(self, text: str, since: int):
+        """Listener thread: the streaming text changed."""
+        self.partial.emit(text, since)
+
+    # --- the draft: text typed while listening, not committed yet ---
+    def _stream_spec(self) -> str:
+        return self.streamer.hotword_spec(_bias(self.hotwords.bias())) if self.streamer else ""
+
+    def on_partial(self, text: str, since: int):
+        """Main thread: streaming text of the audio since `since` (stale when the draft moved on since)."""
+        if since != self._since or not self._listening or not self._listen_shown:
             return
-        press = _Press("listen", probe, began, self.session.deletable() is not None, listening=True)
-        press.resolved.set()
-        self.worker.submit(self._transcribe_job, self.recognizer, audio, press, foreground())
+        d = self._draft or self._new_draft()
+        if d is not None:
+            d.partial = _display(text)
+            self._show_draft()
 
-    def _spaced(self, text: str) -> str:
-        """A piece typed right after the previous one gets the space format_text puts between English and
-        Chinese or between English words."""
-        if not text or not self.session.clean():
-            return text
-        a, b = self.session.buffer[-1], text[0]
-        if (_SPACED.match(a) and (_SPACED.match(b) or _CJK_CHAR.match(b))) or (_CJK_CHAR.match(a) and _SPACED.match(b)):
-            return " " + text
+    def _new_draft(self, ctx=None):
+        """Main thread: a draft starts where the caret is, over the selection read when its speech began."""
+        if ctx is None:
+            probe = self._listen_probe
+            if probe is None or not probe.ready():
+                return None   # the next partial tries again
+            ctx = probe.result()
+        self._draft = _Draft(self._draft_start, ctx, ctx.selection)
+        return self._draft
+
+    def _show_draft(self):
+        """Main thread: make the document show the draft's text (its committed text and the streaming rest)."""
+        d = self._draft
+        text = _joined(d.final, d.partial)
+        if not d.placed:
+            if not text:
+                return
+            if d.sel is not None:
+                if d.sel.term is not None:
+                    self.overlay.hide_now()
+                pasted = _paste_over(d.sel, text)
+                self._overlay_idle()
+                if not pasted:
+                    self._notify(_SEL_LOST)
+                    d.sel = None
+                    return
+                self.session.replaced_selection(d.sel.before, text, foreground(), d.sel.before)
+            else:
+                d.lead = " " if self.session.clean() and _space_between(self.session.buffer[-1:], text) else ""
+                paste_text(d.lead + text)
+                self.session.dictated(d.lead + text, None, foreground())
+            d.placed, d.typed = True, text
+            return
+        if text == d.typed:
+            return
+        s = self.session
+        if self._moved():
+            self._freeze()   # what is typed stays
+            return
+        new = s.buffer[:len(s.buffer) - len(d.typed)] + text
+        n, tail = s.plan_to(new)
+        backspace(n)
+        if tail:
+            paste_text(tail)
+        s.retyped(new)
+        d.typed = text
+
+    def _moved(self) -> bool:
+        """Main thread: the user moved the caret away from the draft (clicked, selected, typed)."""
+        d, s = self._draft, self.session
+        return d is not None and d.placed and not (s.clean() and s.buffer.endswith(d.typed))
+
+    def _freeze(self, at: int | None = None):
+        """Main thread: the caret moved away from the draft. It stays as typed; speech from `at` (default: the
+        speech under way) starts a new draft."""
+        log.info("draft left as typed: %s", self._draft.typed if self._draft else "")
+        self._draft = None
+        if at is None:
+            at = self._speech_sample if self._speech_sample > self._draft_start else self.listener.now
+        self._draft_start = self._since = at
+        if self._listening:
+            self.listener.restart(at, self._stream_spec())
+
+    def _refine(self, text: str, start: int, covered: int, ctx):
+        """Main thread: the draft's audio up to `covered` decoded again (every pause): its text, punctuation
+        included, replaces what the streaming model showed; streaming goes on after it."""
+        if start != self._draft_start:
+            return
+        d = self._draft or self._new_draft(ctx)
+        d.final, d.partial = text, ""
+        self._since = covered
+        if self._listening:
+            self.listener.restart(covered, self._stream_spec(), keep=start)
+        self._show_draft()
+
+    def _commit(self, text: str, start: int, at: int, ctx, command=None):
+        """Main thread: the draft becomes text (decoded again as a whole), then the command it ended with runs.
+        Listening goes on from `at`."""
+        if start == self._draft_start:
+            d = self._draft or (self._new_draft(ctx) if text else None)
+            if d is not None:
+                d.final, d.partial = text, ""
+                self._show_draft()
+            self._draft = None
+            self._draft_start = self._since = at
+            if self._listening:
+                self.listener.restart(at, self._stream_spec())
+        if command is not None:
+            self._run_command(command, ctx)
+        self._overlay_idle()
+        self._input_done()
+
+    def _run_command(self, command, ctx):
+        """Main thread: an operation spoken alone runs its steps; a punctuation name or a described character is
+        typed after the text."""
+        op, typed, entry = command
+        self.record.emit(entry)
+        if op is not None:
+            log.info("spoken operation: %s", op.phrase)
+            self._run_steps(_Press("listen", _Known(ctx), time.monotonic(), False), op.steps)
+        else:
+            log.info("typed: %s", typed)
+            self._type_text(typed)
+
+    # --- recognition (worker thread) ---
+    def _decode(self, audio, ctx, commands: bool = False) -> str:
+        """The recognizer's text for audio, biased by hotwords and on-screen terms. commands: a short result is
+        decoded again with spoken commands boosted (they are said alone; boosting them in every sentence would
+        turn 還行 into 換行)."""
+        self._load_packs()
+        words = self.hotwords.bias() + [(t, _SCREEN_TERM_SCORE) for t in ctx.terms]
+        raw = self.recognizer.recognize(audio, _bias(words))
+        names = self._command_words() if commands else []
+        if names and len(_TEXT_CHARS.sub("", raw)) <= max(map(len, names)) + _COMMAND_SLACK:
+            again = self.recognizer.recognize(audio, _bias([(w, _COMMAND_SCORE) for w in names] + words))
+            if again != raw:
+                log.info("asr with commands boosted: %s -> %s", raw, again)
+            raw = again
+        return raw
+
+    def _text_of(self, raw: str, ctx, steps: list) -> str:
+        """Dictated text from the recognizer's: formatted without sentence-final punctuation (the user says 句號),
+        English spelled as known terms, smart picks."""
+        formatted = format_text(raw, True, steps)
+        known = spelling.table(self._known_terms(ctx.terms), self.hotwords.aliases())
+        before = formatted
+        formatted, spelled = spelling.fix(formatted, known)
+        if spelled:
+            log.info("spelling: %s", ", ".join(f"{a} -> {b}" for a, b in spelled))
+            steps.append(("英文拼寫", before, formatted))
+        prefix = ctx.selection.before if ctx.selection else (ctx.caret[0] if ctx.caret else "")
+        text = self.memory.apply(formatted, prefix, self.hotwords.levels())
+        if text != formatted:
+            steps.append(("選字記憶", formatted, text))
         return text
+
+    def _piece_job(self, piece, probe):
+        """A piece of speech ended. Said alone, a command commits the draft before it and runs; otherwise the
+        draft is decoded again up to here (committed when the setting says every pause)."""
+        try:
+            # what earlier pieces asked of the main thread is done; a draft the user moved away from stays as it
+            # is, and this piece starts a new one (over the selection made meanwhile)
+            self._on_main(lambda: self._moved() and self._freeze(piece.lo))
+            ctx = probe.result() if probe is not None else Context()
+            start = self._draft_start
+            audio = self.listener.audio(piece.lo, piece.hi)
+            t0 = time.monotonic()
+            raw = self._decode(audio, ctx, commands=True)
+            t_asr = time.monotonic() - t0
+            log.info("piece %.2fs: %s", t_asr, raw)
+            steps = []
+            formatted = format_text(raw, True, steps)
+            entry = {"time": time.strftime("%H:%M:%S"), "asr": to_traditional(raw), "asr_s": t_asr, "steps": steps}
+            op = rules.pick(rules.candidates(self.cfg.rules, rules.SPEECH, formatted), ctx.selection is not None,
+                            self.session.deletable() is not None)
+            typed = None
+            if op is None and self.cfg.punctuation_names:
+                typed = edit.symbol(formatted)
+                if typed:
+                    steps.append(("標點名稱", formatted, typed))
+            if op is None and not typed and self.cfg.describe_char:
+                typed = edit.described(formatted)
+                if typed:
+                    steps.append(("指定字", formatted, typed))
+            if op is not None or typed:
+                self._keep(audio, asr=raw, fmt=formatted, result=typed or "", op=op.phrase if op else None)
+                entry.update(kind="操作", main=op.phrase) if op else entry.update(kind="輸入", main=typed, copy=typed)
+                self._commit_job(start, piece.start, piece.hi, ctx, (op, typed, entry))
+            elif self.cfg.commit_at == "pause" or piece.hi - start > _DRAFT_MAX * SAMPLE_RATE:
+                self._commit_job(start, piece.hi, piece.hi, ctx)
+            else:
+                text = self._text_of(self._decode(self.listener.audio(start, piece.hi), ctx), ctx, [])
+                log.info("draft: %s", text)
+                self.main.emit(lambda: self._refine(text, start, piece.hi, ctx))
+        except Exception:
+            log.exception("piece failed")
+
+    def _commit_job(self, start: int, end: int, at: int, ctx, command=None):
+        """The draft's audio [start, end) decoded as a whole; the main thread puts the text in its place."""
+        audio = self.listener.audio(start, end)
+        steps, text, raw = [], "", ""
+        t0 = time.monotonic()
+        if audio.size >= SAMPLE_RATE * 0.2:
+            raw = self._decode(audio, ctx)
+            text = self._text_of(raw, ctx, steps)
+        if text:
+            t_asr = time.monotonic() - t0
+            log.info("commit %.2fs: %s", t_asr, text)
+            self._keep(audio, asr=raw, fmt=text, result=text, op=None)
+            self.record.emit({"time": time.strftime("%H:%M:%S"), "kind": "輸入", "main": text, "copy": text,
+                              "asr": to_traditional(raw), "asr_s": t_asr, "steps": steps})
+        self.main.emit(lambda: self._commit(text, start, at, ctx, command))
 
     # --- steps ---
     def _run_steps(self, press: _Press, steps: list, done=None):
@@ -639,94 +869,6 @@ class App(QObject):
         i = rule.record_index() if rule else None
         return rule.steps[i + 1:] if i is not None else []
 
-    # --- transcription ---
-    def _transcribe_job(self, rec, audio, press: _Press, hwnd):
-        stamp = time.strftime("%H:%M:%S")
-        try:
-            ctx = press.probe.result()
-            if press.listening:
-                # the previous piece may still be on its way in (the user spoke again within a pause): once it is,
-                # read the selection again, or a selection it replaced would be replaced twice
-                self._on_main(lambda: None)
-                if press.down_at < self._listen_out:
-                    ctx = ContextProbe().result()
-            press.resolved.wait(3.0)
-            t0 = time.monotonic()
-            heard = audio
-            self._load_packs()
-            words = self.hotwords.bias() + [(t, _SCREEN_TERM_SCORE) for t in ctx.terms]
-            raw = rec.recognize(heard, _bias(words))
-            commands = self._command_words()
-            if commands and len(_TEXT_CHARS.sub("", raw)) <= max(map(len, commands)) + _COMMAND_SLACK:
-                again = rec.recognize(heard, _bias([(w, _COMMAND_SCORE) for w in commands] + words))
-                if again != raw:
-                    log.info("asr with commands boosted: %s -> %s", raw, again)
-                raw = again
-            t_asr = time.monotonic() - t0
-            log.info("asr %.2fs: %s%s", t_asr, raw, f" (terms: {len(ctx.terms)})" if ctx.terms else "")
-            # no sentence-final punctuation when the caret has text on both sides: the user is inserting
-            # (continuous listening never adds it: the user says 句號; pieces cut at a pause join up)
-            mid = press.listening or (ctx.caret is not None and all(s.strip() for s in ctx.caret))
-            steps = []   # (name, before, after) of every step that changed the text, for the transcript
-            formatted = format_text(raw, mid, steps)
-            known = spelling.table(self._known_terms(ctx.terms), self.hotwords.aliases())
-            before = formatted
-            formatted, spelled = spelling.fix(formatted, known)
-            if spelled:
-                log.info("spelling: %s", ", ".join(f"{a} -> {b}" for a, b in spelled))
-                steps.append(("英文拼寫", before, formatted))
-            entry = {"time": stamp, "asr": to_traditional(raw), "asr_s": t_asr, "steps": steps}
-            selected = ctx.selection is not None and press.deleted is None and press.first is None
-            op = rules.pick(rules.candidates(self.cfg.rules, rules.SPEECH, formatted), selected, press.dictated)
-            if op is not None:
-                log.info("spoken operation: %s", op.phrase)
-                self._keep(audio, asr=raw, fmt=formatted, result="", op=op.phrase)
-                self.record.emit(dict(entry, kind="操作", main=op.phrase))
-                self.main.emit(lambda: self._spoken_operation(press, op))
-                return
-            sym = edit.symbol(formatted) if self.cfg.punctuation_names else None
-            if sym:
-                steps.append(("標點名稱", formatted, sym))
-            described = None if sym or not self.cfg.describe_char else edit.described(formatted)
-            if described:
-                log.info("described character: %s", described)
-                steps.append(("指定字", formatted, described))
-                sym = described   # typed as it is, like a punctuation mark
-            text = sym or formatted
-            if not sym:   # smart picks (single characters)
-                prefix = ctx.selection.before if selected else (ctx.caret[0] if ctx.caret else "")
-                text = self.memory.apply(text, prefix, self.hotwords.levels())
-                if text != formatted:
-                    steps.append(("選字記憶", formatted, text))
-            if selected and not sym:
-                spelt = edit.spelled(ctx.selection.text, raw)
-                if spelt:   # letters over an English word: that word, spelled, in the selection's case
-                    steps.append(("拼字", text, spelt[0]))
-                    text, sym = spelt[0], True
-                    self.main.emit(lambda: self._learn_spelled(spelt[1], spelt[2]))
-            if selected:
-                self._keep(audio, asr=raw, fmt=formatted, result=text, op=None, selection=ctx.selection.text)
-                self._edit_job(ctx.selection, text, bool(sym), entry, press)
-                return
-            replaced = press.deleted
-            entry.update(kind="輸入", main=text, copy=text)
-            if replaced is not None:
-                if not sym:
-                    trimmed = edit.replacement(replaced.text, text)
-                    if trimmed != text:
-                        steps.append(("取代標點", text, trimmed))
-                    text = trimmed
-                entry.update(kind="取代", main=f"{replaced.text} → {text}", copy=text)
-                steps.append(("刪除後重講", replaced.text, None))
-            self._keep(audio, asr=raw, fmt=formatted, result=text, op=None,
-                       replaced=replaced.text if replaced is not None else None)
-            self.record.emit(entry)
-            self.main.emit(lambda: self._dictate(text, audio, hwnd, press))
-        except Exception:
-            log.exception("transcribe failed")
-            self.main.emit(self._overlay_idle)
-            self.main.emit(self._input_done)
-
     def _learn_spelled(self, old: str, new: str):
         """A word spelled over a selection counts like a 選字 pick: priority, and old as a misheard spelling."""
         log.info("spelled: %s -> %s", old, new)
@@ -772,32 +914,7 @@ class App(QObject):
             words += list(edit.SYMBOLS)
         return [w for w in words if w and len(set(w)) > 1]
 
-    def _spoken_operation(self, press: _Press, op):
-        if press.listening:
-            self._listen_out = time.monotonic()
-        self._overlay_idle()
-        self._input_done()
-        self._run_steps(press, op.steps)
-
     # --- dictation ---
-    def _dictate(self, text: str, audio, hwnd: int, press: _Press):
-        """Main thread: paste a dictation, then run the operation's steps after 錄音."""
-        self._overlay_idle()
-        if press.listening:
-            text = self._spaced(text)
-            self._listen_out = time.monotonic()
-        log.info("result: %s", text)
-        if not text:
-            self._input_done()
-            return
-        paste_text(text)
-        self._input_done()
-        self.session.dictated(text, audio, foreground() or hwnd)
-        # u = self.session.dictated(text, audio, foreground() or hwnd)
-        # if audio is not None:
-        #     self.bg.submit(self._suspect_job, u)
-        self._run_steps(press, self._after_steps(press))
-
     # Second opinion, off for now: SenseVoice re-decodes each dictation and suspects.find() lists words it heard
     # as a likelier word. The menu that offered them was removed with the other popups. To turn it back on, also
     # restore `from . import suspects`, `from .textfmt import ends_with_punct`, self.second / self.bg in __init__ and
@@ -935,42 +1052,6 @@ class App(QObject):
         self.record.emit({"time": time.strftime("%H:%M:%S"), "kind": "選字", "main": f"{text} → {word}", "copy": word,
                           "steps": [("選單輸入", word, None)] if typed else []})
 
-    # --- utterances on a selection ---
-    def _edit_job(self, sel, text: str, sym: bool, entry: dict, press: _Press):
-        """Worker thread: an utterance spoken on a selection replaces it."""
-        if sym:
-            rep = text
-        elif self.cfg.period_to_comma and sel.text.strip() == "。":
-            rep = edit.continue_sentence(text)
-            entry["steps"].append(("選取句號", text, rep))
-        else:
-            rep = edit.replacement(sel.text, text)
-            if rep != text:
-                entry["steps"].append(("取代標點", text, rep))
-        entry.update(kind="取代", main=f"{sel.text} → {rep}", copy=rep)
-        log.info("edit on %s: %s", sel.app, entry["main"])
-        self.record.emit(entry)
-        self.edited.emit(sel, rep, press)
-
-    def on_edited(self, sel, rep: str, press: _Press):
-        if sel.term is not None:
-            self.overlay.hide_now()
-        self._overlay_idle()
-        if press.listening:
-            self._listen_out = time.monotonic()
-        if not rep:
-            self._input_done()
-            return
-        pasted = _paste_over(sel, rep)
-        self._input_done()
-        if not pasted:
-            self._notify(_SEL_LOST)
-            return
-        # 刪除 removes the spoken text; over a 。 turned into ，…。 it puts the 。 back
-        undo_to = sel.before + ("。" if rep.startswith("，") and sel.text.strip() == "。" else "")
-        self.session.replaced_selection(sel.before, rep, foreground(), undo_to)
-        self._run_steps(press, self._after_steps(press))
-
     # --- settings / status ---
     def on_status(self, text: str):
         self._status_text = text
@@ -1017,6 +1098,50 @@ class App(QObject):
 
 
 _CJK_CHAR = re.compile(r"[㐀-䶿一-鿿]")
+_TRAILING = re.compile(r"[\s，。、！？；：,.!?;:…]+$")
+
+
+@dataclass
+class _Draft:
+    """Text typed while listening, not committed yet (main thread)."""
+    start: int                 # the sample its audio starts at
+    ctx: object                # Context read when its speech began
+    sel: object = None         # the Selection its text replaces
+    final: str = ""            # the offline model's text of its audio up to the last pause
+    partial: str = ""          # the streaming model's text of the audio after that
+    typed: str = ""            # what the document shows now (after lead)
+    lead: str = ""             # a space typed before it
+    placed: bool = False
+
+
+class _Known:
+    """A ContextProbe whose result is known."""
+
+    def __init__(self, ctx):
+        self._ctx = ctx
+
+    def result(self, timeout: float = 2.0):
+        return self._ctx
+
+    def ready(self) -> bool:
+        return True
+
+
+def _display(text: str) -> str:
+    """Streaming text as shown: Traditional, without sentence-final punctuation."""
+    return _TRAILING.sub("", to_traditional(Recognizer._clean(text)))
+
+
+def _space_between(a: str, b: str) -> bool:
+    """format_text's space between English and Chinese, or between English words."""
+    if not a or not b:
+        return False
+    x, y = a[-1], b[0]
+    return bool((_SPACED.match(x) and (_SPACED.match(y) or _CJK_CHAR.match(y))) or (_CJK_CHAR.match(x) and _SPACED.match(y)))
+
+
+def _joined(a: str, b: str) -> str:
+    return a + (" " if _space_between(a, b) else "") + b
 
 
 def _bias(words: list[tuple[str, float]]) -> list[tuple[str, float]]:

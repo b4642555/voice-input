@@ -29,6 +29,9 @@ class Config:
     # seconds: a press this long is a hold, a press this soon after a tap's release makes a double tap (on the
     # 自訂操作 tab since 2026-10-13; 0.3 / 0.35 constants before, made the same at the user's request)
     gesture_time: float = 0.15
+    # while listening, when the text typed so far is decoded again and fixed: "command" (a spoken command or the
+    # end of listening) or "pause" (every pause); the user's choice of default, 2026-10-14
+    commit_at: str = "command"
     stop_sound_at: str = "stop"   # when the end sound plays: "stop" (recording stops) or "done" (text is in)
     save_recordings: bool = False   # development only, to be removed before release (recordings.py)
     rules: list = field(default_factory=rules.defaults)   # custom operations (rules.Rule)

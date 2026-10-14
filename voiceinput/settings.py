@@ -239,6 +239,9 @@ class SettingsDialog(QDialog):
         stop_at_row.addWidget(self.stop_at)
         stop_at_row.addWidget(QLabel("播放"))
         stop_at_row.addStretch()
+        self.commit_at = QComboBox(toolTip="講話時字會先打出來、停頓時修正；定稿後才固定下來（整段重新辨識）")
+        self.commit_at.addItem("講指令或關錄音時", "command")
+        self.commit_at.addItem("每次停頓時", "pause")
         self.mute = QCheckBox("錄音時暫時靜音電腦音效")
         self.mute.setToolTip("錄音期間把喇叭靜音，文字輸入完成後恢復；原本就靜音的話不會動")
         self.describe = QCheckBox("說「詞＋的＋字」時只輸入那個字，例如「節日的節」")
@@ -257,6 +260,7 @@ class SettingsDialog(QDialog):
 
         form = QFormLayout()
         form.addRow("麥克風", self.mic)
+        form.addRow("定稿時機", self.commit_at)
         form.addRow("提示音", sound_row)
         form.addRow("", stop_at_row)
         form.addRow("", self.mute)
@@ -276,6 +280,7 @@ class SettingsDialog(QDialog):
         self.stop_sound.currentIndexChanged.connect(lambda: self._sound_changed(self.stop_sound, "stop"))
         self.sound_set.currentIndexChanged.connect(self._sound_set_changed)
         self.stop_at.currentIndexChanged.connect(self._apply)
+        self.commit_at.currentIndexChanged.connect(self._apply)
         for box in (self.punct, self.period_comma, self.describe, self.autostart, self.mute, self.keep_audio):
             box.toggled.connect(self._apply)
         return page
@@ -292,6 +297,7 @@ class SettingsDialog(QDialog):
         self.start_sound.setCurrentIndex(max(0, self.start_sound.findData(self.cfg.start_sound)))
         self.stop_sound.setCurrentIndex(max(0, self.stop_sound.findData(self.cfg.stop_sound)))
         self.stop_at.setCurrentIndex(max(0, self.stop_at.findData(self.cfg.stop_sound_at)))
+        self.commit_at.setCurrentIndex(max(0, self.commit_at.findData(self.cfg.commit_at)))
         self.gesture_time.setValue(self.cfg.gesture_time)
         same = self.cfg.start_sound == self.cfg.stop_sound
         self.sound_set.setCurrentIndex(self.sound_set.findData(self.cfg.start_sound) if same
@@ -317,6 +323,7 @@ class SettingsDialog(QDialog):
         self.cfg.start_sound = self.start_sound.currentData()
         self.cfg.stop_sound = self.stop_sound.currentData()
         self.cfg.stop_sound_at = self.stop_at.currentData()
+        self.cfg.commit_at = self.commit_at.currentData()
         self._save()
 
     def _sound_changed(self, box, kind: str):

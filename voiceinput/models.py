@@ -12,12 +12,18 @@ BASE_URL = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/"
 # the model to count as installed.
 MAIN_MODEL = "xasr"            # recognition
 SECOND_MODEL = "sensevoice"    # second opinion for suspects (not loaded for now)
+STREAM_MODEL = "xasr-stream"   # the text shown while listening (listen.py), 480ms chunks
 MODELS = {
     MAIN_MODEL: {
         "short": "X-ASR",
         "dir": "sherpa-onnx-x-asr-zipformer-transducer-zh-en-punct-int8-2026-06-03",
         "files": ["encoder-epoch-99-avg-1.int8.onnx", "decoder-epoch-99-avg-1.onnx",
                   "joiner-epoch-99-avg-1.int8.onnx", "tokens.txt", "bpe.model"],
+    },
+    STREAM_MODEL: {
+        "short": "X-ASR streaming",
+        "dir": "sherpa-onnx-x-asr-480ms-streaming-zipformer-transducer-zh-en-punct-int8-2026-06-05",
+        "files": ["encoder.int8.onnx", "decoder.onnx", "joiner.int8.onnx", "tokens.txt", "bpe.model"],
     },
     SECOND_MODEL: {
         "short": "SenseVoice",

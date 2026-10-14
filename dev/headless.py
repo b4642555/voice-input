@@ -97,17 +97,15 @@ appmod.App._watch_mouse = lambda self: None       # the user's real clicks must 
 class Listener(appmod.Listener):
     """Continuous listening without the microphone: feed:WAV puts audio where the microphone would."""
 
-    def start(self, device_name=""):
-        self._discard = False
+    def start(self, device_name="", hotwords=""):
         import sherpa_onnx
+        import threading
         cfg = sherpa_onnx.VadModelConfig()
         cfg.silero_vad.model = self._vad_model
         cfg.silero_vad.min_silence_duration = listen.SILENCE
         cfg.silero_vad.max_speech_duration = listen.MAX_PIECE
         cfg.sample_rate = 16000
-        import queue
-        import threading
-        self._queue = queue.Queue()
+        self._begin(hotwords)
         self._thread = threading.Thread(target=self._run, daemon=True, args=(
             lambda: sherpa_onnx.VoiceActivityDetector(cfg, buffer_size_in_seconds=40), cfg.silero_vad.window_size))
         self._thread.start()
@@ -129,6 +127,9 @@ class Probe:
 
     def result(self, timeout=2.0):
         return self._ctx
+
+    def ready(self):
+        return True
 
 
 appmod.ContextProbe = Probe
@@ -175,10 +176,14 @@ def pump(sec):
 def feed(audio):
     """What the microphone hears while listening: audio and 1s of silence."""
     audio = np.concatenate([audio, np.zeros(16000, np.float32)])
+    seen = box.text
     for i in range(0, len(audio), 480):
         A.listener._queue.put(audio[i:i + 480])
         if i % 4800 == 0:
-            pump(0.02)
+            pump(0.1)   # real time: 0.3s of audio every 0.1s
+            if box.text != seen:
+                seen = box.text
+                print(f"      [{i / 16000:4.1f}s] {seen!r}")
 
 
 def load(name):
@@ -219,7 +224,7 @@ def up():
 
 
 t0 = time.monotonic()
-while time.monotonic() - t0 < 120 and not A.recognizer:
+while time.monotonic() - t0 < 120 and not (A.recognizer and A.streamer):
     pump(0.3)
 pump(2)
 try:

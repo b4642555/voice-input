@@ -564,3 +564,6 @@ class ContextProbe:
     def result(self, timeout: float = 2.0) -> Context:
         self._thread.join(timeout)
         return self._result
+
+    def ready(self) -> bool:
+        return not self._thread.is_alive()
