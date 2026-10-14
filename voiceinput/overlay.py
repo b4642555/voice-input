@@ -4,7 +4,7 @@ import time
 
 from PySide6.QtCore import QPropertyAnimation, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPainterPath
-from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QWidget
 
 W, H = 132, 40
 BARS = 9
@@ -130,44 +130,3 @@ class Overlay(QWidget):
                 p.drawEllipse(QRectF(cx - r, cy - r, 2 * r, 2 * r))
         p.end()
 
-
-class Preview(QWidget):
-    """The text heard so far while listening, above the pill, when it is not typed in the document until a commit
-    (the 一般 tab's 顯示方式, 2026-10-14). Click-through, never takes focus."""
-    WIDTH, CHARS = 560, 160   # px; the last CHARS characters are shown
-
-    def __init__(self):
-        super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
-                         | Qt.WindowDoesNotAcceptFocus | Qt.WindowTransparentForInput)
-        self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setAttribute(Qt.WA_ShowWithoutActivating)
-        self.label = QLabel(self, wordWrap=True)
-        self.label.setStyleSheet("color: white; font-size: 15px; background: transparent")
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(16, 10, 16, 10)
-        lay.addWidget(self.label)
-        self.setFixedWidth(self.WIDTH)
-
-    def show_text(self, text: str):
-        if not text:
-            self.hide()
-            return
-        self.label.setText(text if len(text) <= self.CHARS else "…" + text[-self.CHARS:])
-        self.adjustSize()
-        screen = QGuiApplication.screenAt(self.cursor().pos()) or QGuiApplication.primaryScreen()
-        g = screen.availableGeometry()
-        self.move(g.center().x() - self.WIDTH // 2, g.bottom() - H - 48 - 10 - self.height())
-        if not self.isVisible():
-            self.show()
-            _click_through(self)
-        self.update()
-
-    def paintEvent(self, _):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
-        path = QPainterPath()
-        path.addRoundedRect(QRectF(0.5, 0.5, self.width() - 1, self.height() - 1), 12, 12)
-        p.fillPath(path, QColor(20, 20, 22, 235))
-        p.setPen(QColor(255, 255, 255, 30))
-        p.drawPath(path)
-        p.end()

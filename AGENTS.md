@@ -170,24 +170,25 @@ A rule's steps after 錄音 run when listening stops. Removed with the old path:
 start sound out of the audio (`cues.remove`, now unused), any press stopping a tap's recording, and the held second
 press of a double tap recording again. Sections below that describe press-and-talk (start sound cut out, hold check,
 recording from key-down) are main's history.
-What is said shows at once (the user found text typed at each pause came too fast, and asked to see it as it is
-said and to have commas and periods put in while speaking, 2026-10-14): a draft (`_Draft`) holds the text since the
-last commit. The streaming X-ASR model (`asr.Streamer`, 480ms chunks, the user's pick; `models.STREAM_MODEL`,
-~165MB, downloaded at the first launch; biased by the same hotwords: Cloud Code -> Claude Code) runs on the
-listener thread and its text is typed in place (Backspace to the change + paste, `Session.retyped`). silero VAD
-(`models.vad_path()`) ends a piece at 0.3s of silence; each piece (0.5s of lead-in, 0.25s after) is decoded by the
-offline model, with commands boosted when short (counting a Chinese character or an English word as one: by letters the user's 換行 heard as "Hangan" was too long, stayed in the draft as 換行 and was typed as text at the next command); a short piece that starts a draft and is no command alone is decoded again with the draft's audio before it. Said alone, an operation's phrase, a punctuation name or a described
-character commits the draft (its audio before the command decoded again as a whole) and then runs or is typed;
-otherwise the draft's audio so far is decoded again and its text, punctuation included, replaces the streaming text
-(`_refine`; streaming goes on after it). The 一般 tab's 辨識方式 (`live_model`) picks what shows the text: the streaming model as it is said (default) or the offline model at each pause (the streaming model is then not loaded, ~0.3GB less); 顯示方式 (`live_view`) where: typed in the document and updated in place (default) or in a box above the indicator (`overlay.Preview`), typed at the commit. The user wants to compare them. Its 定稿時機 (`commit_at`) picks when a draft is committed: on a
-command or the end of listening (default, the user's choice) or at every pause; a draft longer than 60s is committed
-at a pause. Drafts never get sentence-final punctuation (the user says 句號). A draft placed where text was selected
-when its speech began replaces it; moving the caret (click, selection, typing) leaves a draft as typed, and the next
-speech starts a new one (`_moved`, `_freeze`). Not carried over from press-and-talk yet: 選取句號 -> ，…。 (the
-setting is still on the tab), letters spelled over a selected English word, punctuation trimmed when replacing a
-selection. Why VAD + the offline model decide and streaming only shows: `listen.py` and the experiment in
-`dev/streaming` (not committed; report "連續麥克風實驗報告" in the user's Claude docs). `dev/headless.py` feed:WAV
-prints the document as the audio arrives.
+A draft (`_Draft`) holds the text since the last commit, typed in the document (Backspace to the change + paste,
+`Session.retyped`). silero VAD (`models.vad_path()`) ends a piece at 0.3s of silence; each piece (0.5s of lead-in,
+0.25s after) is decoded by the offline model, with commands boosted when short (counting a Chinese character or an
+English word as one: by letters the user's 換行 heard as "Hangan" was too long, stayed in the draft as 換行 and was
+typed as text at the next command); a short piece that starts a draft and is no command alone is decoded again with
+the draft's audio before it. Said alone, an operation's phrase, a punctuation name or a described character commits
+the draft (its audio before the command decoded again as a whole; nothing is decoded when nothing was said since the
+last commit: a breath between 句號 and 送出 was typed as "Shh") and then runs or is typed; otherwise the draft's audio
+so far is decoded again and its text, punctuation included, typed in place (`_refine`). The 一般 tab's 定稿時機
+(`commit_at`) picks when a draft is committed: on a command or the end of listening (default, the user's choice) or
+at every pause; a draft longer than 60s is committed at a pause. Drafts never get sentence-final punctuation (the
+user says 句號). A draft placed where text was selected when its speech began replaces it; moving the caret (click,
+selection, typing) leaves a draft as typed, and the next speech starts a new one (`_moved`, `_freeze`). Tried and
+dropped the same day (the user's verdict after comparing them with settings): the streaming X-ASR model (480ms) typing
+the text as it was said, corrected at each pause, and a preview box above the indicator holding the draft until the
+commit. Not carried over from press-and-talk yet: 選取句號 -> ，…。 (the setting is still on the tab), letters
+spelled over a selected English word, punctuation trimmed when replacing a selection. Why VAD + the offline model:
+`listen.py` and the experiment in `dev/streaming` (not committed; report "連續麥克風實驗報告" in the user's Claude
+docs). `dev/headless.py` feed:WAV prints the document as the audio arrives.
 
 Defaults are the user's own setup (their request, 2026-10-14): the rules in `rules.defaults` (tap middle = 錄音,
 double middle on a selection / after a dictation = delete, hold middle on a selection = 選字, spoken 換行 / 送出 /

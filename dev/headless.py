@@ -97,7 +97,7 @@ appmod.App._watch_mouse = lambda self: None       # the user's real clicks must 
 class Listener(appmod.Listener):
     """Continuous listening without the microphone: feed:WAV puts audio where the microphone would."""
 
-    def start(self, device_name="", hotwords=""):
+    def start(self, device_name=""):
         import sherpa_onnx
         import threading
         cfg = sherpa_onnx.VadModelConfig()
@@ -105,7 +105,7 @@ class Listener(appmod.Listener):
         cfg.silero_vad.min_silence_duration = listen.SILENCE
         cfg.silero_vad.max_speech_duration = listen.MAX_PIECE
         cfg.sample_rate = 16000
-        self._begin(hotwords)
+        self._begin()
         self._thread = threading.Thread(target=self._run, daemon=True, args=(
             lambda: sherpa_onnx.VoiceActivityDetector(cfg, buffer_size_in_seconds=40), cfg.silero_vad.window_size))
         self._thread.start()
@@ -181,9 +181,8 @@ def feed(audio):
         A.listener._queue.put(audio[i:i + 480])
         if i % 4800 == 0:
             pump(0.1)   # real time: 0.3s of audio every 0.1s
-            now = box.text + (f"   預覽框：{A.preview.label.text()!r}" if A.preview.isVisible() else "")
-            if now != seen:
-                seen = now
+            if box.text != seen:
+                seen = box.text
                 print(f"      [{i / 16000:4.1f}s] {seen!r}")
 
 
@@ -225,7 +224,7 @@ def up():
 
 
 t0 = time.monotonic()
-while time.monotonic() - t0 < 120 and not (A.recognizer and (A.streamer or A.cfg.live_model != "stream")):
+while time.monotonic() - t0 < 120 and not A.recognizer:
     pump(0.3)
 pump(2)
 try:
@@ -276,7 +275,7 @@ try:
         if step == "apply":   # what the settings window does after a change
             A.apply_settings()
             pump(8.0)
-            print(f"[套用設定] 串流模型：{'已載入' if A.streamer else '未載入'}")
+            print("[套用設定]")
             continue
         if step.startswith("packs:"):
             ids = [i for i in step[6:].split("+") if i]

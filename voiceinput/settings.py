@@ -239,13 +239,7 @@ class SettingsDialog(QDialog):
         stop_at_row.addWidget(self.stop_at)
         stop_at_row.addWidget(QLabel("播放"))
         stop_at_row.addStretch()
-        self.live_model = QComboBox(toolTip="下次開始錄音時生效")
-        self.live_model.addItem("串流 X-ASR：邊講邊出字，停頓時修正", "stream")
-        self.live_model.addItem("原本的 X-ASR：停頓後才出字", "offline")
-        self.live_view = QComboBox(toolTip="預覽框：字先顯示在錄音指示條上方，定稿時才打進文件")
-        self.live_view.addItem("直接打進文件，邊講邊更新", "inline")
-        self.live_view.addItem("預覽框，定稿時才打進文件", "preview")
-        self.commit_at = QComboBox(toolTip="講話時字會先打出來、停頓時修正；定稿後才固定下來（整段重新辨識）")
+        self.commit_at = QComboBox(toolTip="停頓時字會先打出來並修正；定稿後才固定下來")
         self.commit_at.addItem("講指令或關錄音時", "command")
         self.commit_at.addItem("每次停頓時", "pause")
         self.mute = QCheckBox("錄音時暫時靜音電腦音效")
@@ -266,8 +260,6 @@ class SettingsDialog(QDialog):
 
         form = QFormLayout()
         form.addRow("麥克風", self.mic)
-        form.addRow("辨識方式", self.live_model)
-        form.addRow("顯示方式", self.live_view)
         form.addRow("定稿時機", self.commit_at)
         form.addRow("提示音", sound_row)
         form.addRow("", stop_at_row)
@@ -289,8 +281,6 @@ class SettingsDialog(QDialog):
         self.sound_set.currentIndexChanged.connect(self._sound_set_changed)
         self.stop_at.currentIndexChanged.connect(self._apply)
         self.commit_at.currentIndexChanged.connect(self._apply)
-        self.live_model.currentIndexChanged.connect(self._apply)
-        self.live_view.currentIndexChanged.connect(self._apply)
         for box in (self.punct, self.period_comma, self.describe, self.autostart, self.mute, self.keep_audio):
             box.toggled.connect(self._apply)
         return page
@@ -308,8 +298,6 @@ class SettingsDialog(QDialog):
         self.stop_sound.setCurrentIndex(max(0, self.stop_sound.findData(self.cfg.stop_sound)))
         self.stop_at.setCurrentIndex(max(0, self.stop_at.findData(self.cfg.stop_sound_at)))
         self.commit_at.setCurrentIndex(max(0, self.commit_at.findData(self.cfg.commit_at)))
-        self.live_model.setCurrentIndex(max(0, self.live_model.findData(self.cfg.live_model)))
-        self.live_view.setCurrentIndex(max(0, self.live_view.findData(self.cfg.live_view)))
         self.gesture_time.setValue(self.cfg.gesture_time)
         same = self.cfg.start_sound == self.cfg.stop_sound
         self.sound_set.setCurrentIndex(self.sound_set.findData(self.cfg.start_sound) if same
@@ -336,8 +324,6 @@ class SettingsDialog(QDialog):
         self.cfg.stop_sound = self.stop_sound.currentData()
         self.cfg.stop_sound_at = self.stop_at.currentData()
         self.cfg.commit_at = self.commit_at.currentData()
-        self.cfg.live_model = self.live_model.currentData()
-        self.cfg.live_view = self.live_view.currentData()
         self._save()
 
     def _sound_changed(self, box, kind: str):

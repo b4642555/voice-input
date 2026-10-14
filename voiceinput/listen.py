@@ -1,16 +1,14 @@
-"""Continuous listening (2026-10-14, continuous-mic branch): the microphone stays on; silero VAD cuts the speech at
-pauses into pieces (each checked for a spoken command), and the streaming X-ASR model turns the speech into text as
-it is said (shown in the document at once). The app keeps a draft: the streaming text since the last commit, typed
-where the caret is; a commit decodes that stretch of audio again with the offline model and puts the result in its
-place (App._commit).
+"""Continuous listening (2026-10-14, continuous-mic branch): the microphone stays on and silero VAD cuts the speech
+at pauses into pieces; the app checks each for a spoken command and otherwise adds it to its draft, decoded again
+and typed in place (App._piece_job). The audio since the app's last commit is kept for that.
 
 Why these numbers (dev/streaming, the user's continuous recording of a script mixing text and commands): a 0.3s
 pause ends a piece. The user paused 0.37-0.50s before a command said right after text and 0.34-0.69s inside a
 sentence while thinking, so no length tells them apart; at 0.3s all 11 commands came out alone, at 0.5s 9 (句號 /
 逗號 after a short pause joined the text), at 0.8s 8. Each piece is decoded with 0.5s of audio before it (not
 reaching into the previous piece): with 0.25s 換行 / 送出 said alone came out as Huanghang / Song chu 5 times in 8,
-with 0.5s none. The streaming model (480ms chunks, the user's pick) differed from the offline one in 6.6% of
-characters and settled 0.8s after the speech, so it only shows the text; what stays is the offline model's.
+with 0.5s none. The streaming X-ASR model (shown as it was said, then corrected) was tried the same day and dropped
+by the user, with a preview box for the draft.
 """
 import logging
 import queue
@@ -43,15 +41,12 @@ class Piece:
 
 
 class Listener:
-    """on_speech(): speech started. on_piece(Piece): a piece ended. on_partial(text, since): the streaming text of
-    the audio since sample `since`. All three are called on the listener thread."""
+    """on_speech(): speech started. on_piece(Piece): a piece ended. Both are called on the listener thread."""
 
-    def __init__(self, vad_model: str, on_speech, on_piece, streamer=None, on_partial=None):
+    def __init__(self, vad_model: str, on_speech, on_piece):
         self._vad_model = vad_model
         self._on_speech = on_speech
         self._on_piece = on_piece
-        self._streamer = streamer
-        self._on_partial = on_partial
         self._queue: queue.Queue = queue.Queue()
         self._stream = None
         self._thread = None
@@ -61,7 +56,6 @@ class Listener:
         self._buf = np.zeros(0, np.float32)
         self._base = 0          # sample number of _buf[0]
         self._keep = 0          # audio from here on is kept (the app's draft)
-        self._restart = None    # (sample, hotwords): the streaming text starts over from there
         self.level = 0.0
 
     @property
@@ -73,13 +67,13 @@ class Listener:
         with self._lock:
             return self._base + len(self._buf)
 
-    def start(self, device_name: str = "", hotwords: str = ""):
+    def start(self, device_name: str = ""):
         cfg = sherpa_onnx.VadModelConfig()
         cfg.silero_vad.model = self._vad_model
         cfg.silero_vad.min_silence_duration = SILENCE
         cfg.silero_vad.max_speech_duration = MAX_PIECE
         cfg.sample_rate = SAMPLE_RATE
-        self._begin(hotwords)
+        self._begin()
         self._thread = threading.Thread(
             target=self._run, daemon=True,
             args=(lambda: sherpa_onnx.VoiceActivityDetector(cfg, buffer_size_in_seconds=MAX_PIECE + 10),
@@ -90,12 +84,11 @@ class Listener:
                                       blocksize=int(SAMPLE_RATE * 0.03))
         self._stream.start()
 
-    def _begin(self, hotwords: str):
+    def _begin(self):
         self._queue = queue.Queue()
         self._discard = False
         with self._lock:
             self._buf, self._base, self._keep = np.zeros(0, np.float32), 0, 0
-        self._restart = (0, hotwords)
 
     def stop(self, discard: bool = False):
         """Stop the microphone; speech still going on is cut there and handed over as a last piece (unless
@@ -123,11 +116,10 @@ class Listener:
             b = min(hi, self._base + len(self._buf)) - self._base
             return self._buf[a:b].copy() if b > a else np.zeros(0, np.float32)
 
-    def restart(self, at: int, hotwords: str = "", keep: int | None = None):
-        """The streaming text starts over from sample `at`; audio before `keep` (default `at`: a commit) may go."""
+    def keep(self, at: int):
+        """A commit: audio before sample `at` is not needed any more."""
         with self._lock:
-            self._keep = at if keep is None else keep
-        self._restart = (at, hotwords)
+            self._keep = at
 
     def _callback(self, indata, frames, time_info, status):
         mono = indata[:, 0].copy()
@@ -143,8 +135,6 @@ class Listener:
         rest = np.zeros(0, np.float32)
         prev_end = 0
         speaking = False
-        srec = self._streamer.rec if self._streamer else None
-        stream, since, shown = None, 0, ""
 
         def emit():
             nonlocal prev_end
@@ -160,19 +150,6 @@ class Listener:
                 except Exception:
                     log.exception("listen: piece handler failed")
 
-        def stream_feed(chunk):
-            nonlocal shown
-            stream.accept_waveform(SAMPLE_RATE, chunk)
-            while srec.is_ready(stream):
-                srec.decode_stream(stream)
-            text = srec.get_result(stream)
-            if text != shown:
-                shown = text
-                try:
-                    self._on_partial(text, since)
-                except Exception:
-                    log.exception("listen: partial handler failed")
-
         while True:
             chunk = self._queue.get()
             if chunk is None:
@@ -180,16 +157,6 @@ class Listener:
             with self._lock:
                 self._buf = np.concatenate([self._buf, chunk])
                 total = self._base + len(self._buf)
-            if srec is not None:
-                restart, self._restart = self._restart, None
-                if restart is not None:   # a new stream, fed what was heard since the commit point
-                    since, spec = restart
-                    stream = srec.create_stream(spec) if spec else srec.create_stream()
-                    shown = ""
-                    behind = self.audio(since, total - len(chunk))
-                    if behind.size:
-                        stream_feed(behind)
-                stream_feed(chunk)
             rest = np.concatenate([rest, chunk])
             while len(rest) >= win:
                 vad.accept_waveform(rest[:win])

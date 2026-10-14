@@ -146,24 +146,6 @@ class Recognizer:
         return _PUNCT_SPACE.sub(r"\1", text)
 
 
-class Streamer:
-    """The streaming X-ASR model (480ms chunks) that shows the text while listening (listen.py); biased by the
-    same hotwords. max_active_paths stays at 4: it runs on every chunk while the offline model decodes the pieces."""
-
-    def __init__(self):
-        from .models import STREAM_MODEL
-        d = model_dir(STREAM_MODEL)
-        self.rec = sherpa_onnx.OnlineRecognizer.from_transducer(
-            tokens=str(d / "tokens.txt"), encoder=str(d / "encoder.int8.onnx"), decoder=str(d / "decoder.onnx"),
-            joiner=str(d / "joiner.int8.onnx"), num_threads=_THREADS, decoding_method="modified_beam_search",
-            max_active_paths=4, modeling_unit="bpe", bpe_vocab=_bpe_vocab(d), hotwords_score=_HOTWORD_SCORE)
-        lines = (d / "tokens.txt").read_text(encoding="utf-8").splitlines()
-        self._pieces = {line.rsplit(" ", 1)[0] for line in lines if line}
-
-    def hotword_spec(self, words: list[tuple[str, float]]) -> str:
-        return _hotword_spec(self._pieces, words)
-
-
 def _hotword_spec(pieces: set, words: list[tuple[str, float]]) -> str:
     """sherpa-onnx per-stream hotwords ("a/b c :3/…") from (word, score) pairs. Words the vocab cannot encode are
     dropped: a single bad word makes sherpa-onnx skip the whole list."""

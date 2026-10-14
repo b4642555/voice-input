@@ -15,11 +15,10 @@ press records again: delete and say it again. A tap on a selection opens 選字.
 given back to the key.
 
 Recording is continuous listening (listen.py; on the continuous-mic branch since 2026-10-14 the one way, the
-user's choice: no cutting the recording to say a command). What is said is typed at once as a draft: the streaming
-model's text, put in place of the text selected when the speech began, if any (the user may select with the mouse
-while listening). Every pause ends a piece: said alone, an operation's phrase or a punctuation name commits the
-draft and runs or types it; otherwise the draft is decoded again by the offline model and its text, punctuation
-included, replaces the streaming text. A commit (by a command, the end of listening, or every pause when
+user's choice: no cutting the recording to say a command). Every pause ends a piece: said alone, an operation's
+phrase or a punctuation name commits the draft and runs or types it; otherwise the piece joins the draft, which is
+decoded again and typed in place (in place of the text selected when its speech began, if any: the user may select
+with the mouse while listening), punctuation included. A commit (by a command, the end of listening, or every pause when
 commit_at says so) decodes the draft as a whole, without sentence-final punctuation (the user says 句號). Moving the
 caret leaves a draft as it is. Other gestures work while listening.
 
@@ -42,7 +41,7 @@ from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 from . import autostart, candidates, cues, edit, models, packs, paths, recordings, rules, sounds, spelling
-from .asr import SAMPLE_RATE, Recognizer, Streamer
+from .asr import SAMPLE_RATE, Recognizer
 from .config import Config
 from .hotwords import Hotwords
 from .hotkey import Hotkeys
@@ -51,7 +50,7 @@ from .listen import LEAD, Listener
 from .memory import Memory, is_latin, situation
 from .mute import Muter
 from .output import backspace, paste_text, press_chord, press_delete
-from .overlay import Overlay, Preview
+from .overlay import Overlay
 from .picker import Picker
 from .reading import reading_key
 from .rules import DOUBLE, HOLD, TAP
@@ -126,7 +125,6 @@ class App(QObject):
     key_down = Signal(str, float)            # key name, time
     key_up = Signal(str, float)
     main = Signal(object)                    # run a callable on the Qt main thread (keystrokes, clipboard, UI)
-    partial = Signal(str, int)               # streaming text, the sample it starts at (listen.py)
     candidates_ready = Signal(object, list)  # Selection, rows for the 選字 menu
     record = Signal(dict)         # one transcript log entry for the settings window
     status = Signal(str)
@@ -154,10 +152,8 @@ class App(QObject):
         self._early_lock = threading.Lock()
         self._listen_probe = None                # ContextProbe started when the latest speech began
         self._speech_sample = 0                  # where the latest speech began (with its lead-in)
-        self.streamer: Streamer | None = None    # the streaming model that shows the text while listening
         self._draft: _Draft | None = None        # text typed while listening, not committed yet
         self._draft_start = 0                    # the sample the draft's audio starts at (the last commit)
-        self._since = 0                          # the sample the streaming text starts at
         self._ignored: set[str] = set()          # keys pressed while another was held
         self._could_record = rules.can_record(self.cfg.rules)
         self.hotwords = Hotwords()
@@ -170,7 +166,6 @@ class App(QObject):
         self.icon_rec = make_icon(QColor(255, 69, 58))
 
         self.overlay = Overlay(lambda: self.listener.level if self._listening else 0.0)
-        self.preview = Preview()                 # the draft's text when it is not typed until a commit
         self.picker = Picker()
         self.picker.picked.connect(self.on_menu_pick)
         self.picker.typed.connect(self.on_menu_typed)
@@ -192,7 +187,6 @@ class App(QObject):
         self.key_down.connect(self.on_key_down)
         self.key_up.connect(self.on_key_up)
         self.main.connect(lambda fn: fn())
-        self.partial.connect(self.on_partial)
         self.candidates_ready.connect(self.on_candidates)
         self.status.connect(self.on_status)
         self.record.connect(self.on_record)
@@ -277,29 +271,10 @@ class App(QObject):
             self.status.emit("載入模型中…")
             self.recognizer = Recognizer(key)
             models.vad_path()   # continuous listening's voice activity detection, ~2MB
-            if self.cfg.live_model == "stream":
-                self._load_streamer()
             self.status.emit("就緒")
         except Exception as e:
             log.exception("model load failed")
             self.status.emit(f"模型載入失敗：{e}")
-
-    def _load_streamer(self):
-        """The streaming model (~165MB), downloaded on first use. Without it the text shows at each pause."""
-        if self.streamer is not None:
-            return
-        key = models.STREAM_MODEL
-        try:
-            if not models.is_installed(key):
-                def progress(done, total):
-                    pct = f"{done * 100 // total}%" if total else f"{done >> 20} MB"
-                    self.status.emit(f"下載即時顯示模型中… {pct}")
-                models.download(key, progress)
-            t0 = time.monotonic()
-            self.streamer = Streamer()
-            log.info("streaming model loaded in %.1fs", time.monotonic() - t0)
-        except Exception:
-            log.exception("streaming model failed to load")
 
     # def _load_second_job(self):
     #     key = models.SECOND_MODEL
@@ -478,18 +453,15 @@ class App(QObject):
         if self.recognizer is None:
             return
         try:
-            streamer = self.streamer if self.cfg.live_model == "stream" else None
-            if self.listener is None or self.listener._streamer is not streamer:
-                self.listener = Listener(str(models.vad_path()), self._on_listen_speech, self._on_listen_piece,
-                                         streamer, self._on_listen_partial)
-            self.listener.start(self.cfg.mic, self._stream_spec())
+            if self.listener is None:
+                self.listener = Listener(str(models.vad_path()), self._on_listen_speech, self._on_listen_piece)
+            self.listener.start(self.cfg.mic)
         except Exception as e:
             log.exception("listen start failed")
             self._notify(f"無法開啟麥克風：{e}")
             return
         self._listen_owner, self._listen_shown = press, False
-        self._draft, self._draft_start, self._since, self._listen_probe = None, 0, 0, None
-        self.preview.hide()
+        self._draft, self._draft_start, self._listen_probe = None, 0, None
         with self._early_lock:
             self._early_pieces = []
 
@@ -567,44 +539,16 @@ class App(QObject):
         if self.recognizer is not None:
             self.worker.submit(self._piece_job, piece, probe)
 
-    def _on_listen_partial(self, text: str, since: int):
-        """Listener thread: the streaming text changed."""
-        self.partial.emit(text, since)
-
     # --- the draft: text typed while listening, not committed yet ---
-    def _stream_spec(self) -> str:
-        if self.streamer is None or self.cfg.live_model != "stream":
-            return ""
-        return self.streamer.hotword_spec(_bias(self.hotwords.bias()))
-
-    def on_partial(self, text: str, since: int):
-        """Main thread: streaming text of the audio since `since` (stale when the draft moved on since)."""
-        if since != self._since or not self._listening or not self._listen_shown:
-            return
-        d = self._draft or self._new_draft()
-        if d is not None:
-            d.partial = _display(text)
-            self._show_draft()
-
-    def _new_draft(self, ctx=None):
+    def _new_draft(self, ctx):
         """Main thread: a draft starts where the caret is, over the selection read when its speech began."""
-        if ctx is None:
-            probe = self._listen_probe
-            if probe is None or not probe.ready():
-                return None   # the next partial tries again
-            ctx = probe.result()
         self._draft = _Draft(self._draft_start, ctx, ctx.selection)
         return self._draft
 
-    def _show_draft(self, commit: bool = False):
-        """Main thread: make the document show the draft's text (its committed text and the streaming rest); in
-        the preview box instead until it is committed when 顯示方式 says so."""
+    def _show_draft(self):
+        """Main thread: make the document show the draft's text."""
         d = self._draft
-        text = _joined(d.final, d.partial)
-        if self.cfg.live_view == "preview":
-            self.preview.show_text("" if commit else text)
-            if not commit:
-                return
+        text = d.final
         if not d.placed:
             if not text:
                 return
@@ -617,7 +561,7 @@ class App(QObject):
                     self._notify(_SEL_LOST)
                     d.sel = None
                     return
-                self.session.replaced_selection(d.sel.before, text, foreground(), d.sel.before)
+                self.session.replaced_selection(d.sel.before, text, foreground(), d.sel.before + d.sel.text)
             else:
                 d.lead = " " if self.session.clean() and _space_between(self.session.buffer[-1:], text) else ""
                 paste_text(d.lead + text)
@@ -650,20 +594,16 @@ class App(QObject):
         self._draft = None
         if at is None:
             at = self._speech_sample if self._speech_sample > self._draft_start else self.listener.now
-        self._draft_start = self._since = at
-        if self._listening:
-            self.listener.restart(at, self._stream_spec())
+        self._draft_start = at
+        self.listener.keep(at)
 
     def _refine(self, text: str, start: int, covered: int, ctx):
         """Main thread: the draft's audio up to `covered` decoded again (every pause): its text, punctuation
-        included, replaces what the streaming model showed; streaming goes on after it."""
+        included, is typed in place of what was there."""
         if start != self._draft_start:
             return
         d = self._draft or self._new_draft(ctx)
-        d.final, d.partial = text, ""
-        self._since = covered
-        if self._listening:
-            self.listener.restart(covered, self._stream_spec(), keep=start)
+        d.final = text
         self._show_draft()
 
     def _commit(self, text: str, start: int, at: int, ctx, command=None):
@@ -672,12 +612,11 @@ class App(QObject):
         if start == self._draft_start:
             d = self._draft or (self._new_draft(ctx) if text else None)
             if d is not None:
-                d.final, d.partial = text, ""
-                self._show_draft(commit=True)
+                d.final = text
+                self._show_draft()
             self._draft = None
-            self._draft_start = self._since = at
-            if self._listening:
-                self.listener.restart(at, self._stream_spec())
+            self._draft_start = at
+            self.listener.keep(at)
         if command is not None:
             self._run_command(command, ctx)
         self._overlay_idle()
@@ -756,12 +695,13 @@ class App(QObject):
         try:
             # what earlier pieces asked of the main thread is done; a draft the user moved away from stays as it
             # is, and this piece starts a new one (over the selection made meanwhile)
-            alone = []
+            alone, drafted = [], []
 
             def check():
                 if self._moved():
                     self._freeze(piece.lo)
                 alone.append(self._draft is None or not self._draft.final)   # nothing before it in the draft
+                drafted.append(self._draft is not None)
             self._on_main(check)
             ctx = probe.result() if probe is not None else Context()
             start = self._draft_start
@@ -790,7 +730,10 @@ class App(QObject):
             if op is not None or typed:
                 self._keep(audio, asr=raw, fmt=formatted, result=typed or "", op=op.phrase if op else None)
                 entry.update(kind="操作", main=op.phrase) if op else entry.update(kind="輸入", main=typed, copy=typed)
-                self._commit_job(start, piece.start, piece.hi, ctx, (op, typed, entry))
+                # nothing said since the last commit: the audio before the command is not decoded (a breath
+                # between 句號 and 送出 was typed as "Shh", 2026-10-14)
+                end = piece.start if drafted and drafted[0] else start
+                self._commit_job(start, end, piece.hi, ctx, (op, typed, entry))
             elif self.cfg.commit_at == "pause" or piece.hi - start > _DRAFT_MAX * SAMPLE_RATE:
                 self._commit_job(start, piece.hi, piece.hi, ctx)
             else:
@@ -1119,11 +1062,6 @@ class App(QObject):
         self.settings.activateWindow()
 
     def apply_settings(self):
-        if self.cfg.live_model == "stream" and self.streamer is None and self.recognizer is not None:
-            self.worker.submit(self._load_streamer)   # used from the next time listening starts
-        elif self.cfg.live_model != "stream" and self.streamer is not None and not self._listening:
-            self.streamer = None   # frees ~0.3GB
-            log.info("streaming model unloaded")
         self.hotkeys.set_keys(rules.bound_keys(self.cfg.rules))
         can = rules.can_record(self.cfg.rules)
         if self._could_record and not can:
@@ -1150,7 +1088,6 @@ class App(QObject):
 
 
 _CJK_CHAR = re.compile(r"[㐀-䶿一-鿿]")
-_TRAILING = re.compile(r"[\s，。、！？；：,.!?;:…]+$")
 
 
 @dataclass
@@ -1160,7 +1097,6 @@ class _Draft:
     ctx: object                # Context read when its speech began
     sel: object = None         # the Selection its text replaces
     final: str = ""            # the offline model's text of its audio up to the last pause
-    partial: str = ""          # the streaming model's text of the audio after that
     typed: str = ""            # what the document shows now (after lead)
     lead: str = ""             # a space typed before it
     placed: bool = False
@@ -1177,11 +1113,6 @@ class _Known:
 
     def ready(self) -> bool:
         return True
-
-
-def _display(text: str) -> str:
-    """Streaming text as shown: Traditional, without sentence-final punctuation."""
-    return _TRAILING.sub("", to_traditional(Recognizer._clean(text)))
 
 
 def _space_between(a: str, b: str) -> bool:
