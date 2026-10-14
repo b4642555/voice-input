@@ -69,8 +69,6 @@ def _keep_start(s: str) -> str:
     return s[:i]
 
 
-def quote(s: str) -> str:
-    return f"「{esc(s)}」"
 
 
 def describe(steps: list) -> str:
@@ -248,8 +246,6 @@ def _tip(why: list, tech: str) -> str:
     return "\n".join([w for w in why if w] + ([tech] if tech else []))
 
 
-def _bare(s: str) -> str:
-    return s.rstrip("，。？！、；：,.?!;: ")
 
 
 def _now() -> str:
