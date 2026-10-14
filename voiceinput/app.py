@@ -60,7 +60,7 @@ from .picker import Picker
 from .reading import reading_key
 from .rules import DOUBLE, HOLD, TAP
 from .selection import Context, ContextProbe, move_cursor_after, term_watcher
-from .session import Session, foreground
+from .session import UNDO_DEPTH, Session, foreground
 from .settings import SettingsDialog
 from .textfmt import format_text, to_traditional
 
@@ -1168,6 +1168,10 @@ class App(QObject):
         step = s.deletable()
         if step is None:
             log.info("undo: nothing to take back")
+            # a tray notice, so 復原 doing nothing is not a mystery (the user's request, 2026-10-15)
+            moved = s.dirty or s.hwnd != foreground()
+            self._notify("無法復原：游標移動、點擊或打字之後就不能再復原了" if moved and s.history else
+                         f"沒有可以復原的了（最多復原 {UNDO_DEPTH} 步）")
             return
         d = self._draft
         if d is not None and d.placed and step.after.endswith(d.typed):

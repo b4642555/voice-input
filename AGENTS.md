@@ -298,7 +298,8 @@ brought an old sentence back). Until something is said after it, the next piece 
 the silence since 復原 is not decoded (it came out as "So," before a 換行).
 While listening, the indicator's red dot gets a spinning arc while speech is being decoded (`App._decoding` counts
 the worker's jobs; `spin_while_decoding`, a 一般 checkbox, on by default; the user's request, 2026-10-15). Typing or clicking ends the
-history: what the user changed is unknown. Logged as 復原 on the 辨識紀錄 tab.
+history: what the user changed is unknown. When nothing can be taken back, a tray notice says so, and why: the caret moved, or nothing
+is left (the user's request, 2026-10-15). Logged as 復原 on the 辨識紀錄 tab.
 
 Defaults are the user's own setup (their request, 2026-10-14): the rules in `rules.defaults` (tap middle = 錄音,
 double middle = 復原 (on a selection 刪除選取的文字), hold middle on a selection = 選字, spoken 撤銷 = 復原 and
