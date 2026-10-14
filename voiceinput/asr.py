@@ -13,6 +13,9 @@ SAMPLE_RATE = 16000
 _THREADS = max(1, min(4, (os.cpu_count() or 2) // 2))
 _PUNCT_SPACE = re.compile(r"([，。？！、；：])\s+")
 _TAGS = re.compile(r"<\|[^|]*\|>")
+# X-ASR fails on more than 40.05s of audio (onnxruntime Reshape error in the encoder; a 43s dictation was lost,
+# 2026-10-14): longer audio is decoded in pieces of at most _PIECE seconds, cut at the quietest 0.2s after _MIN_PIECE
+_PIECE, _MIN_PIECE, _QUIET = 30.0, 15.0, 0.2
 
 # Hotword biasing (X-ASR only). Modified beam search with per-utterance hotwords costs about the same as greedy
 # search (tested 2026-09-29: 0.11-0.22s either way on 3s clips). Latin terms work well (L M -> LLM,
@@ -142,10 +145,15 @@ class Recognizer:
         if audio.size < SAMPLE_RATE * 0.2:
             return ""
         spec = self.hotword_spec(hotwords) if hotwords and self.supports_hotwords else ""
-        stream = self._rec.create_stream(spec) if spec else self._rec.create_stream()
-        stream.accept_waveform(SAMPLE_RATE, audio.astype(np.float32))
-        self._rec.decode_stream(stream)
-        return self._clean(stream.result.text)
+        text = ""
+        for piece in _pieces(audio.astype(np.float32)):
+            stream = self._rec.create_stream(spec) if spec else self._rec.create_stream()
+            stream.accept_waveform(SAMPLE_RATE, piece)
+            self._rec.decode_stream(stream)
+            part = self._clean(stream.result.text)
+            gap = " " if text[-1:].isascii() and text[-1:].isalnum() and part[:1].isascii() and part[:1].isalnum() else ""
+            text += gap + part if text and part else part
+        return text
 
     @staticmethod
     def _clean(text: str) -> str:
@@ -153,3 +161,18 @@ class Recognizer:
         text = _TAGS.sub("", text).strip()
         # X-ASR emits a space after full-width punctuation
         return _PUNCT_SPACE.sub(r"\1", text)
+
+
+def _pieces(audio: np.ndarray) -> list[np.ndarray]:
+    """audio as pieces X-ASR can decode, each cut where it is quietest between _MIN_PIECE and _PIECE seconds."""
+    out, start, n = [], 0, len(audio)
+    limit, least, win = int(_PIECE * SAMPLE_RATE), int(_MIN_PIECE * SAMPLE_RATE), int(_QUIET * SAMPLE_RATE)
+    while n - start > limit:
+        span = audio[start + least:start + limit]
+        windows = len(span) // win
+        energy = (span[:windows * win].reshape(windows, win) ** 2).mean(axis=1)
+        cut = start + least + int(np.argmin(energy)) * win + win // 2
+        out.append(audio[start:cut])
+        start = cut
+    out.append(audio[start:])
+    return out

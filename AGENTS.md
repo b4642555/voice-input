@@ -304,6 +304,10 @@ removed the same day they were built: the user corrects by selecting with the mo
   selected text stays gone (a selected 。 turned into ，…。 gets its 。 back). Recording starts at key-down, but the
   indicator (overlay, tray icon) only once the press is known to record, with the start sound (see Sounds). It was
   0.3s, then 0.2s and 0.1s (felt slow); on 2026-10-13 the user chose to show it with the sound at the decision.
+- **Long dictations** (`asr._pieces`, 2026-10-14): X-ASR fails on more than 40.05s of audio (onnxruntime Reshape
+  error in the encoder; a 43s dictation was lost). Longer audio is decoded in pieces of at most 30s, each cut at the
+  quietest 0.2s after 15s, and the texts joined (a space between English words). A piece may end in 。 where the
+  user only paused (TTS-free check on the user's recordings: 最常用的。術語); 150s took 8s.
 - **X-ASR biasing** (`asr.py`, used for on-screen terms): modified beam search + per-stream hotwords, same speed as greedy (0.11-0.22s
   on 3s clips). The model's vocab is pure BPE with CJK as "▁X" pieces: `modeling_unit="bpe"`, CJK hotwords
   space-separated and converted to Simplified, and a `bpe.vocab` exported from `bpe.model` by a tiny protobuf reader
