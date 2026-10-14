@@ -146,8 +146,8 @@ When a key's double tap is a non-recording rule and its hold records, a held sec
 tap's steps (delete and say it again; the user's choice). 復原 is not a command: the user adds Ctrl+Z if wanted.
 Defaults: hold middle = 錄音; double middle on a selection = 刪除選取的文字, right after a dictation = 刪除剛輸入的文字
 (in neither situation the double click goes back to the button); tap middle on a selection = 選字 (added
-2026-10-11; `rules.upgrade` appends it to configs saved before, rules_version 2); tap middle = 連續聽寫 (2026-10-14,
-rules_version 3); 說出 換行 = Shift+Enter, 說出 送出 = Enter.
+2026-10-11; `rules.upgrade` appends it to configs saved before, rules_version 2); 說出 換行 = Shift+Enter, 說出
+送出 = Enter. On the continuous-mic branch the defaults are the user's setup (see Continuous listening).
 Gestures (`app.py`, `hotkey.Hotkeys`; `gesture_time`, 0.3s by default, is both how long a press makes a hold and
 how soon after a tap a press makes a double tap: one setting on the 自訂操作 tab, 0.15-0.8s, the user's request
 2026-10-13; constants of 0.3 / 0.35s before): bound keys are suppressed by the hooks; the microphone starts at key-down when
@@ -157,23 +157,33 @@ still works, `gesture_time` late when a double tap is bound; a hold is given bac
 錄音 in a speech rule, empty combination, a duplicate of an earlier rule) are flagged in red and skipped. When no
 rule records any more, a tray notice warns that dictation is impossible (the user's request).
 
-## Continuous listening (連續聽寫, `continuous-mic` branch, 2026-10-14)
+## Continuous listening (`continuous-mic` branch, 2026-10-14)
 
 The user's goal: open the microphone once for a whole line of input, mixing text and spoken commands, while still
-selecting and fixing text with the mouse. On this branch it is the core feature; the press-and-talk paths may go if
-they get in the way (the user's words). 連續聽寫 is a command (default: tap middle) that turns `listen.Listener` on
-and off: silero VAD (`models.vad_path()`, DATA_DIR/models/silero_vad.onnx, fetched with the model) ends a piece at
-0.3s of silence; each piece (0.5s of lead-in, 0.25s after) goes through `_transcribe_job` like a press and is typed
-at once (the user's choice, after first picking a preview that waited for a command: "it has to be typed to be
-edited"). Pieces never get sentence-final punctuation (the user says 句號), so a sentence cut while thinking joins
-up; `_spaced` puts the space format_text would between pieces (English / Chinese, English / English). A piece that
-is exactly an operation's phrase or a punctuation name runs or types it; a piece whose speech began with text
-selected replaces it at once (the user's choice). The selection is read when the speech begins
-(`_on_listen_speech`) and read again if the previous piece changed the text after that. While listening the
-indicator, tray icon and muting stay; a held key's recording pauses the listener and it resumes afterwards; other
-gestures (選字 on a selection, double-tap deletes) work as before. Why these numbers and VAD + the offline model
-rather than streaming X-ASR: `listen.py` and the experiment in `dev/streaming` (not committed; report "連續麥克風實驗報告"
-in the user's Claude docs). Not yet tried with the user's real voice in the app; `dev/headless.py` feed:WAV tests it.
+selecting and fixing text with the mouse. On this branch it is the only way to record (the user's choice: "the same
+recording, but no cutting it to say a command"): the 錄音 command turns `listen.Listener` on. Tap / double tap +
+錄音 listens until the next tap or double tap that records; hold + 錄音 listens while held. Other gestures work
+while listening (選字, double-tap deletes; unbound ones are given back). The microphone opens at key-down whenever
+the press may turn listening on, unseen (`_start_listen`); once the gesture is known `_show_listen` plays the start
+sound (its length is silenced for the VAD) and pieces heard before are handled, or `_discard_listen` drops it all.
+A rule's steps after 錄音 run when listening stops. Removed with the old path: one-shot recordings, cutting the
+start sound out of the audio (`cues.remove`, now unused), any press stopping a tap's recording, and the held second
+press of a double tap recording again. Sections below that describe press-and-talk (start sound cut out, hold check,
+recording from key-down) are main's history.
+silero VAD (`models.vad_path()`, DATA_DIR/models/silero_vad.onnx, fetched with the model) ends a piece at 0.3s of
+silence; each piece (0.5s of lead-in, 0.25s after) goes through `_transcribe_job` and is typed at once (the user's
+choice, after first picking a preview that waited for a command: "it has to be typed to be edited"). Pieces never
+get sentence-final punctuation (the user says 句號), so a sentence cut while thinking joins up; `_spaced` puts the
+space format_text would between pieces (English / Chinese, English / English). A piece that is exactly an
+operation's phrase or a punctuation name runs or types it; a piece whose speech began with text selected replaces
+it at once (the user's choice). The selection is read when the speech begins (`_on_listen_speech`) and read again
+if the previous piece changed the text after that. Why these numbers and VAD + the offline model rather than
+streaming X-ASR: `listen.py` and the experiment in `dev/streaming` (not committed; report "連續麥克風實驗報告" in the
+user's Claude docs). `dev/headless.py` feed:WAV / toggle:WAV test it.
+
+Defaults are the user's own setup (their request, 2026-10-14): the rules in `rules.defaults` (tap middle = 錄音,
+double middle on a selection / after a dictation = delete, hold middle on a selection = 選字, spoken 換行 / 送出 /
+標點 / 括號 / 貼上 / 空白), `gesture_time` 0.15s, mute while listening, the AI pack ticked, word list by date.
 
 ## 選字, smart picks and hotwords (2026-10-11, reworked the same day)
 

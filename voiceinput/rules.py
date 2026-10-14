@@ -2,13 +2,13 @@
 
 A rule is a trigger (a mouse button or keyboard key with a gesture: tap, double tap or hold; or an utterance that is
 exactly a phrase), a situation (any, right after a dictation, text selected) and a list of steps run in order:
-a command (錄音 record, 連續聽寫 continuous listening on / off, 刪除選取的文字, 刪除剛輸入的文字, 選字), a key
-combination, text to type, or a wait. A rule's steps before 錄音 run when it starts, the ones after it once the
-dictated text is pasted. Hold + 錄音 records while held; tap or double tap + 錄音 starts on that gesture and stops at
-the next press. 刪除選取的文字 works in terminals too; 刪除剛輸入的文字 deletes the last dictation while the caret is
-still after it (split from one 刪除 command 2026-10-11, the user's choice). 選字 opens the candidate menu for the
-selection. 連續聽寫 (2026-10-14) turns the microphone on until the next 連續聽寫: every pause ends a piece that is
-typed at once or run as a command (listen.py).
+a command (錄音 record, 刪除選取的文字, 刪除剛輸入的文字, 選字), a key combination, text to type, or a wait.
+錄音 is continuous listening (listen.py; on the continuous-mic branch since 2026-10-14): every pause ends a piece
+that is typed at once or run as a command. Hold + 錄音 listens while held; tap or double tap + 錄音 turns it on and
+the next tap or double tap that records turns it off (other gestures work meanwhile). A rule's steps before 錄音 run
+when listening starts, the ones after it when it stops. 刪除選取的文字 works in terminals too; 刪除剛輸入的文字
+deletes the last dictation while the caret is still after it (split from one 刪除 command 2026-10-11, the user's
+choice). 選字 opens the candidate menu for the selection.
 
 For one trigger and gesture the most specific situation wins: selected text, then right after a dictation, then
 any. Unbound gestures are given back to the key (a keyboard key is replayed, a mouse button clicked).
@@ -22,9 +22,9 @@ ANY, DICTATED, SELECTION = "any", "dictated", "selection"
 COMMAND, KEYS, TEXT, WAIT = "command", "keys", "text", "wait"
 RECORD, DELETE_SELECTION, DELETE_DICTATION = "record", "delete_selection", "delete_dictation"
 PICK = "pick"
-LISTEN = "listen"
+_LISTEN = "listen"   # 連續聽寫, a command for a few hours on 2026-10-14 until 錄音 itself became continuous
 _ADD_HOTWORD = "add_hotword"   # 加入熱詞, removed 2026-10-11: hotwords are typed in the 選字 menu instead
-VERSION = 3   # config rules_version: 2 added the tap on a selection that opens 選字, 3 the tap for 連續聽寫
+VERSION = 4   # config rules_version: 2 added the tap on a selection that opens 選字, 3 a tap that listens, 4 drops 連續聽寫
 
 _PUNCT = re.compile(r"[\s，。、！？；：,.!?;:…]+")
 
@@ -58,18 +58,22 @@ class Rule:
 
 
 def defaults(key: str = "mouse_middle", newline: bool = True, send: bool = True) -> list[Rule]:
-    """Hold to record; tap to turn continuous listening on or off; double tap to delete the selection, or what was
-    just dictated; tap on a selection for 選字; 換行 / 送出 spoken alone press Shift+Enter / Enter."""
+    """The user's own setup (2026-10-14, their request): tap to listen until the next tap; double tap to delete the
+    selection, or what was just dictated; hold on a selection for 選字; spoken 換行 / 送出 press Shift+Enter / Enter,
+    標點 types "- ", 括號 types （） with the caret inside, 貼上 presses Alt+V, 空白 presses Space."""
     source = MOUSE if key.startswith("mouse") else KEY
-    out = [Rule(source, key, gesture=HOLD, steps=[Step(COMMAND, RECORD)]),
+    out = [Rule(source, key, gesture=TAP, steps=[Step(COMMAND, RECORD)]),
            Rule(source, key, gesture=DOUBLE, when=SELECTION, steps=[Step(COMMAND, DELETE_SELECTION)]),
            Rule(source, key, gesture=DOUBLE, when=DICTATED, steps=[Step(COMMAND, DELETE_DICTATION)]),
-           Rule(source, key, gesture=TAP, when=SELECTION, steps=[Step(COMMAND, PICK)]),
-           Rule(source, key, gesture=TAP, steps=[Step(COMMAND, LISTEN)])]
+           Rule(source, key, gesture=HOLD, when=SELECTION, steps=[Step(COMMAND, PICK)])]
     if newline:
         out.append(Rule(SPEECH, phrase="換行", steps=[Step(KEYS, "Shift+Enter")]))
     if send:
         out.append(Rule(SPEECH, phrase="送出", steps=[Step(KEYS, "Enter")]))
+    out += [Rule(SPEECH, phrase="標點", steps=[Step(TEXT, "- ")]),
+            Rule(SPEECH, phrase="括號", steps=[Step(TEXT, "（）"), Step(KEYS, "Left")]),
+            Rule(SPEECH, phrase="貼上", steps=[Step(KEYS, "Alt+V")]),
+            Rule(SPEECH, phrase="空白", steps=[Step(KEYS, "Space")])]
     return out
 
 
@@ -95,20 +99,18 @@ def migrate(rules: list[Rule]) -> list[Rule]:
 
 def upgrade(rules: list[Rule], version: int) -> list[Rule]:
     """Defaults added after a config was saved, on the key that records by holding unless that tap is taken:
-    version 2 adds tap on a selection = 選字, version 3 tap = 連續聽寫 (a tap that only recorded turns into it)."""
+    version 2 adds tap on a selection = 選字, version 3 tap = 錄音 (listening until the next tap). Version 4: the
+    連續聽寫 command became 錄音."""
     hold = next((r for r in rules if r.source != SPEECH and r.gesture == HOLD and r.record_index() is not None), None)
     if hold and version < 2:
         if not any(r.key == hold.key and r.gesture == TAP and r.when in (SELECTION, ANY) for r in rules):
             rules.append(Rule(hold.source, hold.key, gesture=TAP, when=SELECTION, steps=[Step(COMMAND, PICK)]))
-    if version < 3:
-        # a tap that only records (starts, the next press stops) becomes 連續聽寫: the user's own setup
-        # (2026-10-14), where the new tap was not added and the tap kept recording the old way
-        toggles = [r for r in rules if r.source != SPEECH and r.gesture == TAP and r.when == ANY
-                   and [(s.type, s.value) for s in r.steps] == [(COMMAND, RECORD)]]
-        for r in toggles:
-            r.steps = [Step(COMMAND, LISTEN)]
-        if hold and not toggles and not any(r.key == hold.key and r.gesture == TAP and r.when == ANY for r in rules):
-            rules.append(Rule(hold.source, hold.key, gesture=TAP, steps=[Step(COMMAND, LISTEN)]))
+    if hold and version < 3:
+        if not any(r.key == hold.key and r.gesture == TAP and r.when == ANY for r in rules):
+            rules.append(Rule(hold.source, hold.key, gesture=TAP, steps=[Step(COMMAND, RECORD)]))
+    if version < 4:
+        for r in rules:
+            r.steps = [Step(COMMAND, RECORD) if st.type == COMMAND and st.value == _LISTEN else st for st in r.steps]
     return rules
 
 
@@ -150,8 +152,6 @@ def problems(rule: Rule, rules: list[Rule]) -> list[str]:
         out.append("「說出」的操作不能錄音")
     elif records > 1:
         out.append("一個操作最多一個「錄音」")
-    if records and any(s.type == COMMAND and s.value == LISTEN for s in rule.steps):
-        out.append("「連續聽寫」不能和「錄音」放在同一個操作")
     if any(s.type == KEYS and not s.value for s in rule.steps):
         out.append("按鍵步驟還沒設定組合鍵")
     if not rule.steps:
@@ -172,5 +172,5 @@ def bound_keys(rules: list[Rule]) -> set[str]:
 
 
 def can_record(rules: list[Rule]) -> bool:
-    return any(r.enabled and r.source != SPEECH and not problems(r, rules)
-               and any(s.type == COMMAND and s.value in (RECORD, LISTEN) for s in r.steps) for r in rules)
+    return any(r.enabled and r.source != SPEECH and r.record_index() is not None and not problems(r, rules)
+               for r in rules)

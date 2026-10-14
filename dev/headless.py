@@ -5,7 +5,7 @@ place of the focused app, so nothing is typed into real windows. Audio comes fro
 
 Each step is a wav name in <dir>/wav (the hotkey held while it is spoken), sel:WORD (select the last WORD in the
 box), click (the user clicks: ends what the app knows about the text), tap (one tap of the hotkey), undo / tap2
-(double tap), tap2:WAV (double tap, the second press held while WAV is spoken), toggle:WAV (tap, speak, tap),
+(double tap), toggle:WAV (tap, speak, tap),
 hotkey:NAME (the key or button the next steps press, default mouse_middle), rules:default (the default operations),
 rule:JSON (add an operation, rules.Rule.from_dict), at:WORD (put the caret right after the last WORD; at: puts it at
 the end), say:TEXT (dictate TEXT as if recognized), set:NAME=VALUE (change a setting in memory only), packs:ID+ID (tick term packs, in memory only) or key:BACK (the
@@ -98,6 +98,7 @@ class Listener(appmod.Listener):
     """Continuous listening without the microphone: feed:WAV puts audio where the microphone would."""
 
     def start(self, device_name=""):
+        self._discard = False
         import sherpa_onnx
         cfg = sherpa_onnx.VadModelConfig()
         cfg.silero_vad.model = self._vad_model
@@ -112,7 +113,8 @@ class Listener(appmod.Listener):
         self._thread.start()
         self._stream = True
 
-    def stop(self):
+    def stop(self, discard=False):
+        self._discard = discard
         self._stream = None
         self._queue.put(None)
         self._thread.join(5)
@@ -143,22 +145,6 @@ A = appmod.App(qapp)
 A.tray.showMessage = lambda title, text, *a: print(f"      [通知] {title}: {text}")
 
 
-class Recorder:
-    """Stands in for the microphone: stop() returns the wav queued for the current press."""
-    level = 0.0
-    audio = None
-
-    def start(self, mic):
-        pass
-
-    def stop(self):
-        return self.audio
-
-    def still(self, seconds):
-        pass
-
-
-A.recorder = Recorder()
 class Muter:
     """Stands in for the speaker mute (never mutes the real speakers): prints what it would do."""
     active = False
@@ -184,6 +170,15 @@ def pump(sec):
     while time.monotonic() < end:
         qapp.processEvents()
         time.sleep(0.01)
+
+
+def feed(audio):
+    """What the microphone hears while listening: audio and 1s of silence."""
+    audio = np.concatenate([audio, np.zeros(16000, np.float32)])
+    for i in range(0, len(audio), 480):
+        A.listener._queue.put(audio[i:i + 480])
+        if i % 4800 == 0:
+            pump(0.02)
 
 
 def load(name):
@@ -236,21 +231,19 @@ try:
             A.session.on_input()
             print(f"[選取 {w}]")
             continue
-        if step in ("tap", "undo", "tap2") or step.startswith(("tap2:", "toggle:")):
+        if step in ("tap", "undo", "tap2") or step.startswith("toggle:"):
             replayed.clear()
-            wav = step.split(":", 1)[1] if ":" in step else ""
-            A.recorder.audio = load(wav) if step.startswith("toggle:") else None
             down(), pump(0.05), up()
             if step.startswith("toggle:"):
-                pump(1.0)       # speaking
+                pump(A.cfg.gesture_time + 0.2)
+                if A._listening:
+                    feed(load(step[7:]))
+                    pump(2.0)
                 down(), pump(0.05), up()
             elif step != "tap":
                 pump(0.05)
-                A.recorder.audio = load(wav) if wav else None
-                down()
-                pump(0.6 if wav else 0.05)
-                up()
-            pump(2.5 if wav else 1.0)
+                down(), pump(0.05), up()
+            pump(2.5 if step.startswith("toggle:") else 1.0)
             given = f"  (還給按鍵：{replayed})" if replayed else ""
             given += menu()
             print(f"[{step}] → 文字框：{box.text[:box.caret] + '|' + box.text[box.caret:]!r}{given}")
@@ -318,11 +311,7 @@ try:
             parts = []
             for name in step[5:].split("+"):
                 parts += [load(name), np.zeros(int(0.6 * 16000), np.float32)]
-            audio = np.concatenate(parts[:-1] + [np.zeros(16000, np.float32)])
-            for i in range(0, len(audio), 480):
-                A.listener._queue.put(audio[i:i + 480])
-                if i % 4800 == 0:
-                    pump(0.02)
+            feed(np.concatenate(parts[:-1]))
             pump(3.0)
             print(f"[{step}] → 文字框：{box.text[:box.caret] + '|' + box.text[box.caret:]!r}")
             continue
@@ -359,9 +348,10 @@ try:
                 A.session.on_input()
             print(f"[按 Backspace ×{n}]")
             continue
-        A.recorder.audio = load(step)
         down()
-        pump(0.6)
+        pump(A.cfg.gesture_time + 0.2)
+        if A._listening:
+            feed(load(step))
         up()
         pump(2.5)
         shown = box.text[:box.caret] + "|" + box.text[box.caret:]

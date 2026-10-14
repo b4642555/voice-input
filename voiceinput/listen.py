@@ -41,7 +41,7 @@ class Listener:
         self._queue: queue.Queue = queue.Queue()
         self._stream = None
         self._thread = None
-        self._paused = False
+        self._discard = False
         self._still_until = 0.0
         self.level = 0.0
 
@@ -56,6 +56,7 @@ class Listener:
         cfg.silero_vad.max_speech_duration = MAX_PIECE
         cfg.sample_rate = SAMPLE_RATE
         self._queue = queue.Queue()
+        self._discard = False
         self._thread = threading.Thread(
             target=self._run, daemon=True,
             args=(lambda: sherpa_onnx.VoiceActivityDetector(cfg, buffer_size_in_seconds=MAX_PIECE + 10),
@@ -66,8 +67,10 @@ class Listener:
                                       blocksize=int(SAMPLE_RATE * 0.03))
         self._stream.start()
 
-    def stop(self):
-        """Stop the microphone; speech still going on is cut there and handed over as a last piece."""
+    def stop(self, discard: bool = False):
+        """Stop the microphone; speech still going on is cut there and handed over as a last piece (unless
+        discard: the press that turned it on did something else)."""
+        self._discard = discard
         if self._stream is not None:
             self._stream.stop()
             self._stream.close()
@@ -78,11 +81,6 @@ class Listener:
             self._thread = None
         self.level = 0.0
 
-    def pause(self, paused: bool):
-        """While another recording has the microphone (a held key): the audio is dropped."""
-        self._paused = paused
-        self.level = 0.0
-
     def still(self, seconds: float):
         """Silence for the next seconds while the start sound plays: it is not heard as speech."""
         self._still_until = time.monotonic() + seconds
@@ -90,9 +88,6 @@ class Listener:
 
     def _callback(self, indata, frames, time_info, status):
         mono = indata[:, 0].copy()
-        if self._paused:
-            self._queue.put(False)   # tells the loop to forget what it heard
-            return
         if time.monotonic() < self._still_until:
             mono[:] = 0
             self.level = 0.0
@@ -103,7 +98,7 @@ class Listener:
     def _run(self, make_vad, win):
         vad = make_vad()
         buf = np.zeros(0, np.float32)   # recent audio; buf[0] is sample number base of what the VAD was fed
-        base = fed = prev_end = 0
+        base = prev_end = 0
         rest = np.zeros(0, np.float32)
         speaking = False
 
@@ -128,19 +123,11 @@ class Listener:
             chunk = self._queue.get()
             if chunk is None:
                 break
-            if chunk is False:   # paused: start over afterwards
-                if fed or len(buf):
-                    vad = make_vad()
-                buf, rest = np.zeros(0, np.float32), np.zeros(0, np.float32)
-                base = fed = prev_end = 0
-                speaking = False
-                continue
             buf = np.concatenate([buf, chunk])
             rest = np.concatenate([rest, chunk])
             while len(rest) >= win:
                 vad.accept_waveform(rest[:win])
                 rest = rest[win:]
-                fed += win
                 now = vad.is_speech_detected()
                 if now and not speaking:
                     try:
@@ -152,5 +139,6 @@ class Listener:
             if not speaking and len(buf) > 2 * _KEEP_IDLE * SAMPLE_RATE:
                 cut = len(buf) - int(_KEEP_IDLE * SAMPLE_RATE)
                 buf, base = buf[cut:], base + cut
-        vad.flush()
-        emit()
+        if not self._discard:
+            vad.flush()
+            emit()
