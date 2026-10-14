@@ -14,9 +14,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build the launcher
         run: |
+          # build/: a file named VoiceInput next to the voiceinput folder collides on macOS's case-insensitive disk
+          mkdir -p build
           clang -O2 -mmacosx-version-min=11.0 -arch x86_64 -arch arm64 \
-            -o VoiceInput packaging/mac/launcher.c
-          lipo -info VoiceInput
+            -o build/VoiceInput packaging/mac/launcher.c
+          lipo -info build/VoiceInput
           if [ -f packaging/mac/VoiceInput ]; then lipo -info packaging/mac/VoiceInput; fi
       - uses: actions/upload-artifact@v4
         with:
