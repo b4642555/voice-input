@@ -683,14 +683,14 @@ class App(QObject):
                 self._edit_job(ctx.selection, text, bool(sym), entry, press)
                 return
             replaced = press.deleted
-            entry.update(kind="輸入", main=text)
+            entry.update(kind="輸入", main=text, copy=text)
             if replaced is not None:
                 if not sym:
                     trimmed = edit.replacement(replaced.text, text)
                     if trimmed != text:
                         steps.append(("取代標點", text, trimmed))
                     text = trimmed
-                entry.update(kind="取代", main=f"{replaced.text} → {text}")
+                entry.update(kind="取代", main=f"{replaced.text} → {text}", copy=text)
                 steps.append(("刪除後重講", replaced.text, None))
             self._keep(audio, asr=raw, fmt=formatted, result=text, op=None,
                        replaced=replaced.text if replaced is not None else None)
@@ -898,7 +898,7 @@ class App(QObject):
         self._suggest_pack(word)
         self.settings.refresh_hotwords()
         self.session.replaced_selection(sel.before, word, foreground())
-        self.record.emit({"time": time.strftime("%H:%M:%S"), "kind": "選字", "main": f"{text} → {word}",
+        self.record.emit({"time": time.strftime("%H:%M:%S"), "kind": "選字", "main": f"{text} → {word}", "copy": word,
                           "steps": [("選單輸入", word, None)] if typed else []})
 
     # --- utterances on a selection ---
@@ -913,7 +913,7 @@ class App(QObject):
             rep = edit.replacement(sel.text, text)
             if rep != text:
                 entry["steps"].append(("取代標點", text, rep))
-        entry.update(kind="取代", main=f"{sel.text} → {rep}")
+        entry.update(kind="取代", main=f"{sel.text} → {rep}", copy=rep)
         log.info("edit on %s: %s", sel.app, entry["main"])
         self.record.emit(entry)
         self.edited.emit(sel, rep, press)

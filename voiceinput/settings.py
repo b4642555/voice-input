@@ -8,10 +8,11 @@ import os
 
 from pypinyin import lazy_pinyin
 from PySide6.QtCore import QEvent, Qt, QTimer, Signal
+from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
                                QFormLayout, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
                                QPushButton, QScrollArea, QSizePolicy, QSpinBox, QTabWidget, QTextBrowser, QToolButton,
-                               QVBoxLayout, QWidget)
+                               QToolTip, QVBoxLayout, QWidget)
 
 from . import audio, cues, hotwords, packs, recordings, rules
 from .config import GESTURE_TIME_RANGE
@@ -573,9 +574,17 @@ class SettingsDialog(QDialog):
 
     # --- 辨識紀錄 ---
     def _log_page(self) -> QWidget:
-        self.log = QTextBrowser()
+        self.log = QTextBrowser(openLinks=False)
         self.log.setPlaceholderText("每次說話的辨識結果、格式化結果與操作會顯示在這裡（只保留這次執行期間）")
+        self.log.anchorClicked.connect(self._log_link)
+        self._log_entries = []
         return self.log
+
+    def _log_link(self, url):
+        """複製 on an entry: its typed text to the clipboard."""
+        if url.scheme() == "copy":
+            QApplication.clipboard().setText(self._log_entries[int(url.path())]["copy"])
+            QToolTip.showText(QCursor.pos(), "已複製", self.log)
 
     def set_log(self, entries):
         """Render entries newest first (2026-10-14, the user's design): what happened first, in normal size (【輸入】
@@ -583,8 +592,9 @@ class SettingsDialog(QDialog):
         the recognizer's text and time, and each step that changed the text as its changed fragments. Each entry:
         time, kind, main, and optionally asr, asr_s, steps [(name, before, after or None for a note)]. Each entry is
         a framed block whose first row, on a darker ground, holds the kind, the main text and the time (the user's
-        pick among three designs, 2026-10-14)."""
+        pick among three designs, 2026-10-14). An entry with copy (the text it typed) has a 複製 link."""
         gray = "#5F6670"
+        self._log_entries = list(entries)
 
         def row(label, text):
             return (f"<tr><td style='color:{gray}; padding-right:8px; white-space:nowrap' width=80>{label}</td>"
@@ -598,7 +608,9 @@ class SettingsDialog(QDialog):
             return row(html.escape(name),
                        "；".join(html.escape(a or "（空）") + arrow + html.escape(b or "（空）") for a, b in frags))
 
-        def block(e):
+        def block(i, e):
+            copy = (f"<a href='copy:{i}' style='color:#1F5FAF; text-decoration:none'>複製</a>&nbsp;&nbsp;"
+                    if e.get("copy") else "")
             main = html.escape(e.get("main") or "") or f"<span style='color:{gray}'>（沒有辨識到文字）</span>"
             kind = e.get("kind", "輸入")
             rows = ""
@@ -615,10 +627,10 @@ class SettingsDialog(QDialog):
                     f"<table width='100%' cellspacing=0 cellpadding=0 border=0 style='font-size:14px'><tr>"
                     f"<td valign=top width=38 style='white-space:nowrap'>"
                     f"<b style='color:{_KIND_COLORS.get(kind, '#1F2328')}'>{html.escape(kind)}</b></td><td>{main}</td>"
-                    f"<td align=right valign=top width=60 style='padding-top:2px; font-size:12px; color:{gray}'>"
-                    f"{e['time']}</td></tr></table></td></tr>{details}</table>")
+                    f"<td align=right valign=top width=96 style='padding-top:2px; font-size:12px; color:{gray}; "
+                    f"white-space:nowrap'>{copy}{e['time']}</td></tr></table></td></tr>{details}</table>")
 
-        self.log.setHtml("".join(block(e) for e in reversed(entries)))
+        self.log.setHtml("".join(block(i, e) for i, e in reversed(list(enumerate(entries)))))
         self.log.verticalScrollBar().setValue(0)
 
     # --- 自訂操作: one card per rule ---
