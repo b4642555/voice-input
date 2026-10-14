@@ -187,8 +187,9 @@ times mapped back): with the user's real thinking pauses (15s) a draft passed 30
 no timestamps, so nothing settled and every pause took 1.2-2.8s (2026-10-15; on that recording now 0.2-0.8s per pause,
 the commit 2.92s -> 0.25s). The 一般 tab's 定稿時機
 (`commit_at`) picks when a draft is committed: on a command or the end of listening (default, the user's choice) or
-at every pause; a draft longer than 60s is committed at a pause. Drafts get no sentence-final punctuation while
-speaking (a pause is not a sentence end); a commit by an operation (換行, 送出 …) or by the end of listening
+at every pause; a draft longer than 60s is committed at a pause. A draft shows the recognizer's 。？！ at its end while
+speaking, and the next pause turns it into ， when the sentence goes on (the user's request, 2026-10-15; before, drafts
+had none while speaking, as a pause is not a sentence end); a commit by an operation (換行, 送出 …) or by the end of listening
 keeps the recognizer's 。？！, or gets 。 when it gave none (. after English only; the user's choice,
 2026-10-14/15), unless the caret had text on both sides; a commit by a
 spoken punctuation mark gets that mark instead, and a mark said right after an added one replaces it (not 。。).
@@ -196,9 +197,9 @@ spoken punctuation mark gets that mark instead, and a mark said right after an a
 reading) for a few hours on 2026-10-14/15; removed at the user's request (git: 8e14854 adds it).
 A piece that is no command alone but, decoded with the sentence before it, is exactly a command once the sentence
 settles before it runs as one (the user's 換行 came out as "Hang Hung," alone and as 換行 in the sentence, and was
-typed as text, 2026-10-15). While listening the indicator moves to the top of the screen when the caret is under it
-(`selection.caret_rect`, UIA, read after each update of the draft; `Overlay.avoid`), and back down when it is under
-the top spot (the user's request, 2026-10-15). An underline under the open sentence like an IME's composition (an
+typed as text, 2026-10-15). While listening, the pointer over the indicator sends it to the other end of the screen
+(`Overlay._tick`; the user's request, 2026-10-15). Following the caret through UIA (read after each update of the
+draft) was tried the same evening and missed: the user typed under it and it stayed. An underline under the open sentence like an IME's composition (an
 overlay drawn at its UIA rectangles) was offered and declined.
 用按鍵關閉麥克風時自動送出 (`send_on_stop`, on by default, the user's request 2026-10-14 so 送出 need not be said):
 the key that turns listening off presses Enter once the text is in; not when 送出 / 結束錄音 turned it off, nor
@@ -230,7 +231,8 @@ the worker's jobs; `spin_while_decoding`, a 一般 checkbox, on by default; the 
 history: what the user changed is unknown. Logged as 復原 on the 辨識紀錄 tab.
 
 Defaults are the user's own setup (their request, 2026-10-14): the rules in `rules.defaults` (tap middle = 錄音,
-double middle = 復原 (on a selection 刪除選取的文字), hold middle on a selection = 選字, spoken 換行 / 送出 / 復原 / 標點 / 括號 / 貼上 / 空白;
+double middle = 復原 (on a selection 刪除選取的文字), hold middle on a selection = 選字, spoken 撤銷 = 復原 and
+刪除 = Backspace (rules_version 8; a Backspace step is a change 復原 takes back), spoken 換行 / 送出 / 復原 / 標點 / 括號 / 貼上 / 空白;
 送出 presses Enter, then the 結束錄音 command turns listening off: the user's request, rules_version 5 adds it to
 saved configs), `gesture_time` 0.15s, mute while listening, the AI pack ticked, word list by date.
 

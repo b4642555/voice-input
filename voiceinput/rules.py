@@ -29,8 +29,8 @@ _LISTEN = "listen"   # 連續聽寫, a command for a few hours on 2026-10-14 unt
 _ADD_HOTWORD = "add_hotword"   # 加入熱詞, removed 2026-10-11: hotwords are typed in the 選字 menu instead
 # config rules_version: 2 added the tap on a selection that opens 選字, 3 a tap that listens, 4 dropped 連續聽寫,
 # 5 makes 送出 stop listening, 6 turns the double-tap deletes into 復原 and adds the spoken 復原, 7 brings back the
-# double tap on a selection that deletes it
-VERSION = 7
+# double tap on a selection that deletes it, 8 adds the spoken 撤銷 (復原) and 刪除 (Backspace)
+VERSION = 8
 
 _PUNCT = re.compile(r"[\s，。、！？；：,.!?;:…]+")
 
@@ -66,7 +66,8 @@ class Rule:
 def defaults(key: str = "mouse_middle", newline: bool = True, send: bool = True) -> list[Rule]:
     """The user's own setup (2026-10-14, their request): tap to listen until the next tap; double tap (or say 復原)
     to take back the last change, on a selection to delete it; hold on a selection for 選字; spoken 換行 / 送出 press Shift+Enter / Enter (送出 then
-    stops listening), 標點 types "- ", 括號 types （） with the caret inside, 貼上 presses Alt+V, 空白 presses Space."""
+    stops listening), 標點 types "- ", 括號 types （） with the caret inside, 貼上 presses Alt+V, 空白 presses Space;
+    撤銷 is 復原 too, 刪除 presses Backspace (2026-10-15)."""
     source = MOUSE if key.startswith("mouse") else KEY
     out = [Rule(source, key, gesture=TAP, steps=[Step(COMMAND, RECORD)]),
            Rule(source, key, gesture=DOUBLE, when=SELECTION, steps=[Step(COMMAND, DELETE_SELECTION)]),
@@ -77,6 +78,8 @@ def defaults(key: str = "mouse_middle", newline: bool = True, send: bool = True)
     if send:
         out.append(Rule(SPEECH, phrase="送出", steps=[Step(KEYS, "Enter"), Step(COMMAND, STOP)]))
     out += [Rule(SPEECH, phrase="復原", steps=[Step(COMMAND, UNDO)]),
+            Rule(SPEECH, phrase="撤銷", steps=[Step(COMMAND, UNDO)]),
+            Rule(SPEECH, phrase="刪除", steps=[Step(KEYS, "Backspace")]),
             Rule(SPEECH, phrase="標點", steps=[Step(TEXT, "- ")]),
             Rule(SPEECH, phrase="括號", steps=[Step(TEXT, "（）"), Step(KEYS, "Left")]),
             Rule(SPEECH, phrase="貼上", steps=[Step(KEYS, "Alt+V")]),
@@ -143,6 +146,10 @@ def upgrade(rules: list[Rule], version: int) -> list[Rule]:
                     and not any(o.key == r.key and o.gesture == DOUBLE and o.when == SELECTION for o in rules):
                 rules.insert(i, Rule(r.source, r.key, gesture=DOUBLE, when=SELECTION,
                                      steps=[Step(COMMAND, DELETE_SELECTION)]))
+    if version < 8:
+        for phrase, step in (("撤銷", Step(COMMAND, UNDO)), ("刪除", Step(KEYS, "Backspace"))):
+            if not any(r.source == SPEECH and normalize(r.phrase) == phrase for r in rules):
+                rules.append(Rule(SPEECH, phrase=phrase, steps=[step]))
     return rules
 
 

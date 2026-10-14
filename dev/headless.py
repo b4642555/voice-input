@@ -73,6 +73,8 @@ class Box:
         """Shift+Enter types a newline; Enter sends the text (the box is emptied); others are printed."""
         if vks == (0x10, 0x0D):
             self.paste("\n")
+        elif vks == (0x08,):
+            self.back(1)
         elif vks == (0x0D,):
             print(f"      [送出] {self.text!r}")
             self.text, self.caret = "", 0
@@ -143,7 +145,6 @@ appmod.recordings.INDEX = appmod.recordings.DIR / "index.jsonl"
 qapp = QApplication(sys.argv)
 qapp.setQuitOnLastWindowClosed(False)
 appmod.Overlay.show = lambda self: None   # no indicator on the user's screen next to their own app's
-appmod.caret_rect = lambda: None                  # the user's own caret is not ours to read
 A = appmod.App(qapp)
 A.tray.hide()
 A.tray.showMessage = lambda title, text, *a: print(f"      [通知] {title}: {text}")

@@ -56,7 +56,7 @@ from .overlay import Overlay
 from .picker import Picker
 from .reading import reading_key
 from .rules import DOUBLE, HOLD, TAP
-from .selection import Context, ContextProbe, caret_rect, move_cursor_after, term_watcher
+from .selection import Context, ContextProbe, move_cursor_after, term_watcher
 from .session import Session, foreground
 from .settings import SettingsDialog
 from .textfmt import format_text, to_traditional
@@ -171,8 +171,6 @@ class App(QObject):
         self.icon_rec = make_icon(QColor(255, 69, 58))
 
         self._busy, self._busy_lock = 0, threading.Lock()   # decoding jobs queued or running
-        self._caret_pool = ThreadPoolExecutor(max_workers=1)   # reads where the caret is (the indicator avoids it)
-        self._caret_asked = False
         self.overlay = Overlay(lambda: self.listener.level if self._listening else 0.0,
                                lambda: self.cfg.spin_while_decoding and self._busy > 0)
         self.picker = Picker()
@@ -485,7 +483,6 @@ class App(QObject):
         self._listen_shown = True
         self.tray.setIcon(self.icon_rec)
         self.overlay.show_recording()
-        self._avoid_caret()
         cues.play(self.cfg.start_sound, "start")
         wait = cues.duration(self.cfg.start_sound, "start")
         if wait:
@@ -601,7 +598,6 @@ class App(QObject):
                 paste_text(d.lead + text)
                 self.session.dictated(d.lead + text, None, foreground())
             d.placed, d.typed = True, text
-            self._avoid_caret()
             return
         if text == d.typed:
             return
@@ -616,26 +612,6 @@ class App(QObject):
             paste_text(tail)
         s.retyped(new, step)
         d.typed = text
-        self._avoid_caret()
-
-    def _avoid_caret(self):
-        """Main thread: the indicator moves to the top of the screen when the caret (where the text goes) is under
-        it, and back down when it is under the top one (the user's request, 2026-10-15)."""
-        if self._caret_asked:
-            return
-        self._caret_asked = True
-
-        def read():
-            try:
-                rect = caret_rect()
-            finally:
-                self.main.emit(lambda: self._caret_read(rect))
-        self._caret_pool.submit(read)
-
-    def _caret_read(self, rect):
-        self._caret_asked = False
-        if rect is not None and self._listening:
-            self.overlay.avoid(rect)
 
     def _moved(self) -> bool:
         """Main thread: the user moved the caret away from the draft (clicked, selected, typed)."""
@@ -667,6 +643,12 @@ class App(QObject):
         d.settled = _joined(d.settled, settled)
         d.anchor = after
         d.final = _TRAILING.sub("", _joined(d.settled, live))
+        # the recognizer's 。？！ at the end is shown; the next pause turns it into ， when the sentence goes on (the
+        # user's request, 2026-10-15; until then drafts had none while speaking)
+        end = _SENTENCE_END.search(_joined(d.settled, live))
+        caret = d.ctx.caret
+        if end and d.final and not (caret is not None and all(s.strip() for s in caret)):
+            d.final += end.group()
         self.listener.keep(after)
         self._show_draft(step=True)
 
@@ -869,7 +851,7 @@ class App(QObject):
                 self._spans = [p for p in self._spans if p.start >= after]
                 break
         settled = self._text_of(settled, ctx, [], keep_end=True) if settled else ""
-        live = self._text_of(live, ctx, [])
+        live = self._text_of(live, ctx, [], keep_end=True)
         if live and after == piece.lo:
             # the open sentence is this piece alone, and decoded after the sentence before it, it is a command it
             # was not alone: the user's 換行 came out as "Hang Hung," alone, as 換行 here, and was typed as text
@@ -950,6 +932,8 @@ class App(QObject):
                         press_chord(*vks)
                         if step.value == "Shift+Enter":   # a new line, which 復原 can take back
                             self._on_main(lambda: self.session.dictated("\n", None, foreground()))
+                        elif step.value == "Backspace":   # one character less, which 復原 can type again
+                            self._on_main(self._backspaced)
                         else:
                             self.session.on_input()     # the caret may have moved
                 elif step.type == rules.TEXT:
@@ -982,6 +966,14 @@ class App(QObject):
                 ev.set()
         self.main.emit(run)
         ev.wait(10)
+
+    def _backspaced(self):
+        """Main thread: a Backspace step deleted the character before the caret."""
+        s = self.session
+        if s.clean():
+            s.changed(s.buffer[:-1])
+        else:
+            s.on_input()
 
     def _type_text(self, text: str):
         if text:

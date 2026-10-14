@@ -2,8 +2,8 @@
 import math
 import time
 
-from PySide6.QtCore import QPoint, QPropertyAnimation, QRect, QRectF, Qt, QTimer
-from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPainterPath, QPen
+from PySide6.QtCore import QPropertyAnimation, QRectF, Qt, QTimer
+from PySide6.QtGui import QColor, QCursor, QGuiApplication, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QWidget
 
 W, H = 132, 40
@@ -19,15 +19,6 @@ def _click_through(widget):
     user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT | WS_EX_TOPMOST)
 
 
-def _to_logical(p: QPoint) -> QPoint:
-    # Qt keeps each screen's origin in device pixels and scales only within the screen (as picker.py does)
-    for s in QGuiApplication.screens():
-        g, r = s.geometry(), s.devicePixelRatio()
-        if g.x() <= p.x() < g.x() + g.width() * r and g.y() <= p.y() < g.y() + g.height() * r:
-            return QPoint(g.x() + int((p.x() - g.x()) / r), g.y() + int((p.y() - g.y()) / r))
-    return p
-
-
 class Overlay(QWidget):
     IDLE, RECORDING, THINKING = range(3)
 
@@ -40,7 +31,7 @@ class Overlay(QWidget):
         self._level_source = level_source   # callable -> float 0..1
         self._busy_source = busy_source     # callable -> bool: speech is being decoded (the dot spins)
         self._state = self.IDLE
-        self._top = False                   # at the top of the screen (the caret was under the bottom spot)
+        self._top = False                   # at the top of the screen (the pointer came over the bottom spot)
         self._levels = [0.0] * BARS
         self._t0 = time.monotonic()
         self._timer = QTimer(self, interval=16, timeout=self._tick)
@@ -96,17 +87,6 @@ class Overlay(QWidget):
             self._timer.stop()
             self.hide()
 
-    def avoid(self, caret: tuple):
-        """caret: screen rect (device pixels) where the text goes. Shown over it, the indicator moves to the other
-        end of the screen."""
-        if self._state == self.IDLE or not self.isVisible():
-            return
-        x, y, w, h = caret
-        tl, br = _to_logical(QPoint(x, y)), _to_logical(QPoint(x + w, y + h))
-        if QRect(tl, br).adjusted(-12, -12, 12, 12).intersects(self.geometry()):
-            self._top = not self._top
-            self._reposition()
-
     def _reposition(self):
         screen = QGuiApplication.screenAt(self.cursor().pos()) or QGuiApplication.primaryScreen()
         g = screen.availableGeometry()
@@ -116,6 +96,11 @@ class Overlay(QWidget):
         _click_through(self)
 
     def _tick(self):
+        # the pointer over the indicator sends it to the other end of the screen (the user's request, 2026-10-15:
+        # it covered what they were looking at; following the caret through UI Automation missed)
+        if self._state != self.IDLE and self.geometry().adjusted(-6, -6, 6, 6).contains(QCursor.pos()):
+            self._top = not self._top
+            self._reposition()
         if self._state == self.RECORDING:
             lvl = self._level_source()
             self._levels = self._levels[1:] + [lvl]
