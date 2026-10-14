@@ -134,7 +134,9 @@ drop-down, remembered (`hotword_sort`: 優先度, name A→Z / Z→A by pinyin, 
 comtypes; muted when the recording indicator shows, unmuted once the text is pasted or the press ends in nothing; a
 mute the user set is left alone. Selection edits and on-screen terms are always on.
 
-On the continuous-mic branch the 辨識紀錄 tab shows one card per sentence instead (`logbook.py`, rendered by
+Later the same night the user switched to design B (what was heard next to the screen's change as a diff, one row
+per event, one group per listening session, the why and details as a row's tooltip; `logbook.py`, `set_log`);
+design A, described next, is history. On the continuous-mic branch the 辨識紀錄 tab shows one card per sentence instead (`logbook.py`, rendered by
 `SettingsDialog.set_log`; the user's pick of three mockups, 2026-10-15, design A, so the workings can be seen): the
 sentence as it ended on the darker row with its kind, time, counts (pieces, pauses decoded again, 復原) and how it
 ended; below, a timeline of what happened, in plain words: what was heard and typed, each pause's new reading

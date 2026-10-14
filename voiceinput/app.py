@@ -547,6 +547,7 @@ class App(QObject):
         and something was typed while listening."""
         owner, self._listen_owner, self._listen_shown = self._listen_owner, None, False
         self.listener.stop()   # speech still going on is handed over as a last piece
+        self.book.end_session()
         log.info("listen: off")
         self.tray.setIcon(self.icon_idle)
         self.overlay.hide_overlay()
@@ -1395,11 +1396,11 @@ class App(QObject):
 
     def _log_changed(self):
         if self.settings.isVisible():
-            self.settings.set_log(self.book.cards)
+            self.settings.set_log(self.book.sessions)
 
     def open_settings(self):
         self.settings.load_values()
-        self.settings.set_log(self.book.cards)
+        self.settings.set_log(self.book.sessions)
         self.settings.set_status(self._status_text)
         self.settings.show()
         self.settings.raise_()

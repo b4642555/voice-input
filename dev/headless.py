@@ -219,6 +219,11 @@ def menu() -> str:
     return f"   氣泡：{A.picker.candidates}"
 
 
+def _last_row() -> str:
+    rows = [r for g in A.book.sessions for r in g["rows"]]
+    return rows[-1]["heard"] if rows else ""
+
+
 def down():
     A.hotkeys._held.add(KEY)       # what the hook would record
     A.on_key_down(KEY, time.monotonic())
@@ -381,14 +386,12 @@ try:
             down(), pump(ms), up(), pump(0.05), down(), pump(ms), up(), pump(1.0)
             print(f"[{step}] → 文字框：{box.text[:box.caret] + '|' + box.text[box.caret:]!r}")
             continue
-        if step.startswith("logshot:"):   # logshot:NAME, or logshot:NAME:all (every card open, details shown)
+        if step.startswith("logshot:"):   # logshot:NAME, or logshot:NAME:all (a tall window)
             name, _, every = step[8:].partition(":")
             if every:
-                A.settings._log_open = {c["id"]: True for c in A.book.cards}
-                A.settings.log_tech.setChecked(True)
                 A.settings.resize(A.settings.width(), 1500)   # tall enough to see them
             step = "logshot:" + name
-            A.settings.set_log(A.book.cards)
+            A.settings.set_log(A.book.sessions)
             A.settings.tabs.setCurrentIndex(1)
             A.settings.show()
             pump(0.3)
@@ -409,7 +412,7 @@ try:
         up()
         pump(2.5)
         shown = box.text[:box.caret] + "|" + box.text[box.caret:]
-        print(f"[{step}] {A.book.cards[-1]['title'] if A.book.cards else ''!r:32} → 文字框：{shown!r}{menu()}")
+        print(f"[{step}] {_last_row()!r:32} → 文字框：{shown!r}{menu()}")
 finally:
     A.quit()
     shutil.rmtree(Path(S) / "__pycache__", ignore_errors=True)

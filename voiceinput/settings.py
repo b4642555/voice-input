@@ -625,108 +625,77 @@ class SettingsDialog(QDialog):
     # --- 辨識紀錄 ---
     def _log_page(self) -> QWidget:
         self.log = QTextBrowser(openLinks=False)
-        self.log.setPlaceholderText("每句話怎麼被聽到、重聽、定下來，以及指令和復原，會顯示在這裡（只保留這次執行期間）")
+        self.log.setPlaceholderText("開麥克風後，每段話聽到什麼、畫面上變成什麼會顯示在這裡（只保留這次執行期間）")
+        self.log.document().setDefaultStyleSheet("a { color: #1F2328; text-decoration: none; }")
         self.log.anchorClicked.connect(self._log_link)
-        self.log_tech = QCheckBox("顯示技術細節")
-        self.log_tech.setToolTip("每一步的辨識秒數、模型原本的文字和格式化步驟")
-        self.log_tech.toggled.connect(lambda: self.set_log(self._log_cards))
-        self._log_cards = []
-        self._log_open: dict[int, bool] = {}   # card id -> expanded (default: only the newest)
-        page = QWidget()
-        v = QVBoxLayout(page)
-        v.setContentsMargins(0, 0, 0, 0)
-        top = QHBoxLayout()
-        top.addStretch()
-        top.addWidget(self.log_tech)
-        v.addLayout(top)
-        v.addWidget(self.log, 1)
-        return page
+        self.log.highlighted.connect(self._log_hover)
+        self._log_sessions = []
+        self._log_rows: dict[int, dict] = {}
+        return self.log
 
     def _log_link(self, url):
-        """複製 copies a card's text; 展開 / 收起 a card's steps."""
-        card = next((c for c in self._log_cards if str(c["id"]) == url.path()), None)
-        if card is None:
-            return
-        if url.scheme() == "copy":
-            QApplication.clipboard().setText(card["copy"])
+        """複製 copies the sentence a row finished; a click elsewhere on a row does nothing."""
+        row = self._log_rows.get(int(url.path() or -1))
+        if row is not None and url.scheme() == "copy":
+            QApplication.clipboard().setText(row["copy"])
             QToolTip.showText(QCursor.pos(), "已複製", self.log)
-        elif url.scheme() == "open":
-            newest = self._log_cards and self._log_cards[-1] is card
-            self._log_open[card["id"]] = not self._log_open.get(card["id"], newest)
-            pos = self.log.verticalScrollBar().value()
-            self.set_log(self._log_cards, keep_scroll=True)
-            self.log.verticalScrollBar().setValue(pos)
 
-    def set_log(self, cards, keep_scroll: bool = False):
-        """One card per sentence, newest first (the user's pick, 2026-10-15, design A; logbook.py builds them): the
-        sentence as it ended on a darker row with its kind, time, counts and 複製; below, what happened to it as a
-        timeline: what was heard and typed, each pause's new reading of the sentence (new text marked, removed text
-        struck through), the part that settled, the command or the end of listening, 復原. Each step has a plain
-        sentence of why in gray; the recognizer's seconds, its own text and the formatting steps only with 顯示技術細節.
-        Only the newest card is expanded; 展開 opens another."""
+    def _log_hover(self, url):
+        """The pointer over a row: its why and details as a tooltip."""
+        row = self._log_rows.get(int(url.path() or -1)) if url.scheme() == "tip" else None
+        if row is not None and row["tip"]:
+            QToolTip.showText(QCursor.pos(), row["tip"], self.log)
+        else:
+            QToolTip.hideText()
+
+    def set_log(self, sessions):
+        """What was heard next to what the screen became, as a diff (the user's pick, 2026-10-15, design B; logbook.py
+        builds it): one group per listening session, newest first, its time and counts on top; inside, one row per
+        event, oldest first: time, what was heard (a gray cell), the change (new text green, removed struck through)
+        with a few colored words on what kind of change it was. The why and the recognizer's details are the row's
+        tooltip (the user's request: details only when the pointer goes there)."""
         gray, ink = "#5F6670", "#1F2328"
-        self._log_cards = list(cards)
-        tech = self.log_tech.isChecked()
-        dots = {"input": "#1F5FAF", "fix": "#6B3FA0", "lock": "#5F6670", "op": "#B35A00", "end": "#B35A00",
-                "undo": "#5B6573", "note": "#5F6670"}
+        colors = {"fix": "#6B3FA0", "lock": "#5F6670", "op": "#B35A00", "end": "#B35A00", "undo": "#5B6573",
+                  "note": "#5F6670"}
+        self._log_sessions = list(sessions)
+        self._log_rows = {r["id"]: r for g in self._log_sessions for r in g["rows"]}
 
-        def step(st):
-            dot = f"<span style='color:{dots.get(st['kind'], gray)}; font-size:13px'>●</span>"
-            body = f"<div style='color:{ink}'>{st['html']}</div>"
-            if st["why"]:
-                body += f"<div style='color:{gray}; font-size:12px'>{html.escape(st['why'])}</div>"
-            if tech and st["tech"]:
-                body += (f"<div style='color:{gray}; font-size:11px; font-family:Consolas,monospace'>"
-                         f"{html.escape(st['tech'])}</div>")
-            return (f"<tr><td valign=top width=58 style='color:{gray}; font-size:11px; padding-top:2px; "
-                    f"font-family:Consolas,monospace'>{st['time']}</td>"
-                    f"<td valign=top width=16>{dot}</td><td style='padding-bottom:6px'>{body}</td></tr>")
+        def row(r):
+            tip = f"tip:{r['id']}"
+            heard = html.escape(r["heard"]) if r["heard"] else ""
+            tag = (f"<span style='color:{colors.get(r['kind'], gray)}; font-size:11.5px'>{html.escape(r['tag'])}</span>"
+                   if r["tag"] else "")
+            copy = (f"<a href='copy:{r['id']}' style='color:#1F5FAF; font-size:11.5px'>複製</a>" if r["copy"] else "")
+            extra = "　".join(x for x in (tag, copy) if x)
+            return (f"<tr><td valign=top width=54 style='color:{gray}; font-size:11px; padding:5px 0 5px 0; "
+                    f"font-family:Consolas,monospace'><a href='{tip}' style='color:{gray}'>{r['time']}</a></td>"
+                    f"<td valign=top width='36%' style='padding:3px 8px 3px 0'>"
+                    + (f"<table cellspacing=0 cellpadding=0><tr><td bgcolor='#EEF1F5' style='padding:2px 7px'>"
+                       f"<a href='{tip}' style='color:{ink}'>{heard}</a></td></tr></table>" if heard else "")
+                    + f"</td><td valign=top style='padding:4px 0'><a href='{tip}' style='color:{ink}'>{r['change']}</a>"
+                    + (f"<br>{extra}" if extra else "") + "</td></tr>")
 
-        def card(c, newest):
-            kind = c["kind"]
-            n = c["counts"]
-            meta = []
-            if n["pieces"] > 1:
-                meta.append(f"講了 {n['pieces']} 段")
-            if n["redo"]:
-                meta.append(f"整句重聽 {n['redo']} 次")
-            if n["undo"]:
-                meta.append(f"復原 {n['undo']} 次")
-            if c["end"]:
-                meta.append(f"以「{html.escape(c['end'])}」結束")
-            elif kind == "輸入" and c is self._log_cards[-1] and len(c["steps"]) and c["steps"][-1]["kind"] != "op":
-                meta.append("還在草稿")
-            opened = self._log_open.get(c["id"], newest)
-            links = []
-            steps = len(c["steps"])
-            if steps > 1 or steps and not opened:
-                label = "收起" if opened else f"展開經過（{steps} 步）"
-                links.append(f"<a href='open:{c['id']}' style='color:#1F5FAF; text-decoration:none'>{label}</a>")
-            if c["copy"]:
-                links.append(f"<a href='copy:{c['id']}' style='color:#1F5FAF; text-decoration:none'>複製</a>")
-            title = html.escape(c["title"]).replace("\n", "⏎") or f"<span style='color:{gray}'>（沒有文字）</span>"
-            head = (f"<tr><td bgcolor='#E6EAF0' style='padding:5px 8px'>"
-                    f"<table width='100%' cellspacing=0 cellpadding=0 border=0><tr>"
-                    f"<td valign=top width=38 style='white-space:nowrap; font-size:14px'>"
-                    f"<b style='color:{_KIND_COLORS.get(kind, ink)}'>{html.escape(kind)}</b></td>"
-                    f"<td style='font-size:14px'>{title}</td>"
-                    f"<td align=right valign=top width=64 style='font-size:12px; color:{gray}; padding-top:2px'>"
-                    f"{c['time']}</td></tr>"
-                    + (f"<tr><td></td><td colspan=2 style='font-size:12px; color:{gray}; padding-top:2px'>"
-                       f"{'　·　'.join(meta)}{'　' if meta and links else ''}{'　'.join(links)}</td></tr>"
-                       if meta or links else "")
-                    + "</table></td></tr>")
-            body = ""
-            if opened and c["steps"]:
-                body = (f"<tr><td style='padding:8px 8px 2px 8px'><table width='100%' cellspacing=0 cellpadding=0 "
-                        f"style='font-size:13px'>{''.join(step(st) for st in c['steps'])}</table></td></tr>")
+        def group(g):
+            n = g["counts"]
+            chips = [f"{n['pieces']} 段話"] if n["pieces"] else []
+            chips += [f"{n['commands']} 個指令"] if n["commands"] else []
+            chips += [f"復原 {n['undo']} 次"] if n["undo"] else []
+            span = g["start"] if g["start"] == g["end"] else f"{g['start']}–{g['end']}"
+            head = ("麥克風開著" if g["listening"] else "沒開麥克風時")
+            title = (f"<b>{span}</b>　<span style='color:{gray}'>{head}" + ("　·　" if chips else "")
+                     + "　·　".join(chips) + "</span>")
+            cols = (f"<tr><td style='color:{gray}; font-size:11px'>時間</td><td style='color:{gray}; font-size:11px'>"
+                    f"聽到</td><td style='color:{gray}; font-size:11px'>畫面上</td></tr>")
+            rows = "".join(row(r) for r in g["rows"]) or (f"<tr><td colspan=3 style='color:{gray}; padding:4px 0'>"
+                                                         "（還沒有聽到講話）</td></tr>")
             return (f"<table width='100%' cellspacing=0 cellpadding=0 border=1 style='border-collapse:collapse; "
-                    f"border-color:#D5DAE1; border-style:solid; margin-bottom:8px'>{head}{body}</table>")
+                    f"border-color:#D5DAE1; border-style:solid; margin-bottom:8px'>"
+                    f"<tr><td bgcolor='#E6EAF0' style='padding:5px 8px; font-size:13px'>{title}</td></tr>"
+                    f"<tr><td style='padding:4px 8px 4px 8px'><table width='100%' cellspacing=0 cellpadding=0 "
+                    f"style='font-size:13px'>{cols}{rows}</table></td></tr></table>")
 
-        last = len(self._log_cards) - 1
-        self.log.setHtml("".join(card(c, i == last) for i, c in reversed(list(enumerate(self._log_cards)))))
-        if not keep_scroll:
-            self.log.verticalScrollBar().setValue(0)
+        self.log.setHtml("".join(group(g) for g in reversed(self._log_sessions)))
+        self.log.verticalScrollBar().setValue(0)
 
     # --- 自訂操作: one card per rule ---
     def _gesture_time_changed(self, value: float):
