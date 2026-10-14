@@ -155,6 +155,8 @@ class App(QObject):
         self._speech_sample = 0                  # where the latest speech began (with its lead-in)
         self._draft: _Draft | None = None        # text typed while listening, not committed yet
         self._draft_start = 0                    # the sample the draft's audio starts at (the last commit)
+        self._listen_typed = False               # something was typed or run while listening (send_on_stop)
+        self._marked = None                      # the buffer when the last commit added its sentence-final mark
         self._spans: list = []                   # worker thread: the pieces of the draft's open sentence
         self._ignored: set[str] = set()          # keys pressed while another was held
         self._could_record = rules.can_record(self.cfg.rules)
@@ -464,6 +466,7 @@ class App(QObject):
             return
         self._listen_owner, self._listen_shown = press, False
         self._draft, self._draft_start, self._listen_probe = None, 0, None
+        self._listen_typed = False   # something was typed or run while listening (send_on_stop)
         with self._early_lock:
             self._early_pieces = []
 
@@ -495,7 +498,9 @@ class App(QObject):
             self.listener.stop(discard=True)
             self._listen_owner = None
 
-    def _stop_listen(self):
+    def _stop_listen(self, send: bool = True):
+        """Listening off. send: by the key (not 送出 / 結束錄音): Enter once the text is in when the setting says so
+        and something was typed while listening."""
         owner, self._listen_owner, self._listen_shown = self._listen_owner, None, False
         self.listener.stop()   # speech still going on is handed over as a last piece
         log.info("listen: off")
@@ -513,13 +518,18 @@ class App(QObject):
             self._on_main(lambda: None)
             d = self._draft
             if d is not None:
-                self._commit_job(self._draft_start, d.anchor, end, end, d.ctx)
+                self._commit_job(self._draft_start, d.anchor, end, end, d.ctx, final=True)
 
             def run():
                 if done and not self._listening:
                     self.muter.restore()
                     cues.play(self.cfg.stop_sound, "stop")
-                self._run_steps(owner, after)
+                steps = list(after)
+                if send and self.cfg.send_on_stop and self._listen_typed:
+                    log.info("listen: sent on stop")
+                    steps.append(rules.Step(rules.KEYS, "Enter"))
+                if owner:
+                    self._run_steps(owner, steps)
             self.main.emit(run)
         self.worker.submit(finished)
 
@@ -613,15 +623,23 @@ class App(QObject):
         self.listener.keep(after)
         self._show_draft()
 
-    def _commit(self, text: str, start: int, anchor: int, at: int, ctx, command=None):
+    def _commit(self, text: str, start: int, anchor: int, at: int, ctx, command=None, final: bool = False):
         """Main thread: the draft's open sentence decoded again joins its settled text and the draft is done; then
-        the command it ended with runs. Listening goes on from `at`."""
+        the command it ended with runs. Listening goes on from `at`. final (an operation or the end of listening):
+        the recognizer's 。？！ at the end is kept (the user's choice, 2026-10-14: not while speaking, where a pause
+        is not a sentence end, nor before a spoken punctuation mark), unless the caret had text on both sides."""
         d = self._draft
+        marked = False
         if start == self._draft_start and (d is None or d.anchor == anchor):
             if d is None and text:
                 d = self._new_draft(ctx)
             if d is not None:
                 d.final = _TRAILING.sub("", _joined(d.settled, text))
+                end = _SENTENCE_END.search(text)
+                caret = d.ctx.caret
+                if final and end and d.final and not (caret is not None and all(s.strip() for s in caret)):
+                    d.final += end.group()
+                    marked = True
                 self._show_draft()
                 if d.final:
                     self.record.emit({"time": time.strftime("%H:%M:%S"), "kind": "輸入", "main": d.final,
@@ -629,6 +647,10 @@ class App(QObject):
             self._draft = None
             self._draft_start = at
             self.listener.keep(at)
+            if d is not None:
+                self._marked = self.session.buffer if marked else None
+        if command is not None or d is not None and d.final:
+            self._listen_typed = True
         if command is not None:
             self._run_command(command, ctx)
         self._overlay_idle()
@@ -636,15 +658,27 @@ class App(QObject):
 
     def _run_command(self, command, ctx):
         """Main thread: an operation spoken alone runs its steps; a punctuation name or a described character is
-        typed after the text."""
-        op, typed, entry = command
+        typed after the text; 「X改成Y」 changes the text."""
+        op, typed, change, entry = command
+        if change is not None:
+            self._change(*change, entry)
+            return
         self.record.emit(entry)
         if op is not None:
             log.info("spoken operation: %s", op.phrase)
             self._run_steps(_Press("listen", _Known(ctx), time.monotonic(), False), op.steps)
         else:
             log.info("typed: %s", typed)
-            self._type_text(typed)
+            s = self.session
+            if typed in edit.SYMBOLS.values() and self._marked is not None and s.clean() \
+                    and s.buffer == self._marked:
+                # the mark a commit added (after 換行 or the like) gives way to the one said now: not 。。
+                s.changed(s.buffer[:-1] + typed)
+                backspace(1)
+                paste_text(typed)
+            else:
+                self._type_text(typed)
+            self._marked = None
 
     # --- recognition (worker thread) ---
     def _decode(self, audio, ctx, commands: bool = False) -> str:
@@ -674,11 +708,15 @@ class App(QObject):
         return len(_WORDS.findall(raw)) <= max(map(len, names)) + _COMMAND_SLACK
 
     def _command(self, formatted: str, ctx, steps: list):
-        """(operation, text to type) when the utterance is a command said alone: an operation's phrase, a
-        punctuation name or a described character; (None, None) otherwise."""
+        """(operation, text to type, (X, Y)) when the utterance is a command said alone: an operation's phrase,
+        「X改成Y」, a punctuation name or a described character; Nones otherwise."""
         op = rules.pick(rules.candidates(self.cfg.rules, rules.SPEECH, formatted), ctx.selection is not None,
                         self.session.deletable() is not None)
-        typed = None
+        typed = change = None
+        if op is None and self.cfg.change_command:
+            change = edit.change(formatted)
+            if change is not None:
+                return op, typed, change
         if op is None and self.cfg.punctuation_names:
             typed = edit.symbol(formatted)
             if typed:
@@ -687,7 +725,7 @@ class App(QObject):
             typed = edit.described(formatted)
             if typed:
                 steps.append(("指定字", formatted, typed))
-        return op, typed
+        return op, typed, change
 
     def _text_of(self, raw: str, ctx, steps: list, keep_end: bool = False) -> str:
         """Dictated text from the recognizer's: formatted without sentence-final punctuation (the user says 句號;
@@ -732,9 +770,9 @@ class App(QObject):
             steps = []
             formatted = format_text(raw, True, steps)
             entry = {"time": time.strftime("%H:%M:%S"), "asr": to_traditional(raw), "asr_s": t_asr, "steps": steps}
-            op, typed = self._command(formatted, ctx, steps)
+            op, typed, change = self._command(formatted, ctx, steps)
             names = self._command_words()
-            if op is None and not typed and state["alone"] and names and self._short(raw, names) \
+            if op is None and not typed and change is None and state["alone"] and names and self._short(raw, names) \
                     and piece.lo > anchor:
                 # decoded with the draft's audio before it (as a commit would), a short piece may turn out to be a
                 # command it missed alone: the user's 換行 came out as Hangan, then as 換行 in the draft, and was
@@ -742,18 +780,19 @@ class App(QObject):
                 whole = self.listener.audio(anchor, piece.hi)
                 again = self._decode(whole, ctx, commands=True)
                 more = format_text(again, True)
-                op, typed = self._command(more, ctx, steps)
-                if op is not None or typed:
+                op, typed, change = self._command(more, ctx, steps)
+                if op is not None or typed or change is not None:
                     log.info("piece with the draft before it: %s -> %s", raw, again)
                     raw, formatted, audio = again, more, whole
-            if op is not None or typed:
+            if op is not None or typed or change is not None:
                 self._spans = []
-                self._keep(audio, asr=raw, fmt=formatted, result=typed or "", op=op.phrase if op else None)
+                self._keep(audio, asr=raw, fmt=formatted, result=typed or "",
+                           op=op.phrase if op else "改成" if change else None)
                 entry.update(kind="操作", main=op.phrase) if op else entry.update(kind="輸入", main=typed, copy=typed)
                 # nothing said since the last commit: the audio before the command is not decoded (a breath
                 # between 句號 and 送出 was typed as "Shh", 2026-10-14)
                 end = piece.start if state["drafted"] else anchor
-                self._commit_job(start, anchor, end, piece.hi, ctx, (op, typed, entry))
+                self._commit_job(start, anchor, end, piece.hi, ctx, (op, typed, change, entry), final=not typed)
             elif self.cfg.commit_at == "pause" or piece.hi - anchor > _DRAFT_MAX * SAMPLE_RATE:
                 self._spans = []
                 self._commit_job(start, anchor, piece.hi, piece.hi, ctx)
@@ -786,19 +825,19 @@ class App(QObject):
         log.info("draft %.2fs: %s | %s", time.monotonic() - t0, settled, live)
         self.main.emit(lambda: self._refine(start, anchor, settled, live, after, ctx))
 
-    def _commit_job(self, start: int, anchor: int, end: int, at: int, ctx, command=None):
+    def _commit_job(self, start: int, anchor: int, end: int, at: int, ctx, command=None, final: bool = False):
         """The draft's open sentence, audio [anchor, end), decoded again; the main thread puts the draft's text in
-        its place."""
+        its place (final: with its sentence-final mark)."""
         audio = self.listener.audio(anchor, end)
         steps, text, raw = [], "", ""
         t0 = time.monotonic()
         if audio.size >= SAMPLE_RATE * 0.2:
             raw = self._decode(audio, ctx)
-            text = self._text_of(raw, ctx, steps)
+            text = self._text_of(raw, ctx, steps, keep_end=final)
         if text:
             log.info("commit %.2fs: %s", time.monotonic() - t0, text)
             self._keep(audio, asr=raw, fmt=text, result=text, op=None)
-        self.main.emit(lambda: self._commit(text, start, anchor, at, ctx, command))
+        self.main.emit(lambda: self._commit(text, start, anchor, at, ctx, command, final))
 
     # --- steps ---
     def _run_steps(self, press: _Press, steps: list, done=None):
@@ -833,7 +872,7 @@ class App(QObject):
                 elif step.type == rules.COMMAND and step.value in (rules.UNDO, rules.DELETE_DICTATION):
                     self._on_main(self.undo)
                 elif step.type == rules.COMMAND and step.value == rules.STOP:
-                    self._on_main(lambda: self._stop_listen() if self._listening else None)
+                    self._on_main(lambda: self._stop_listen(send=False) if self._listening else None)
                 elif step.type == rules.COMMAND and step.value == rules.PICK:
                     ctx = press.probe.result()
                     sel = ctx.selection if press.deleted is None else None
@@ -855,6 +894,28 @@ class App(QObject):
                 ev.set()
         self.main.emit(run)
         ev.wait(10)
+
+    def _change(self, old: str, new: str, entry: dict):
+        """Main thread, 「X改成Y」: the last X in what VoiceInput typed before the caret becomes Y (edit.find). Not
+        found: nothing is typed, a notice says so (the user's choice, 2026-10-14)."""
+        s = self.session
+        span = edit.find(s.buffer, old) if s.clean() else None
+        if span is None:
+            log.info("change: %r not found", old)
+            self._notify(f"找不到「{old}」，沒有修改")
+            entry.update(kind="操作", main=f"{old}改成{new}（找不到）")
+            self.record.emit(entry)
+            return
+        a, b = span
+        found, after = s.buffer[a:b], s.buffer[:a] + new + s.buffer[b:]
+        n, tail = s.plan_to(after)
+        log.info("change %r -> %r: %d backspaces + %r", found, new, n, tail)
+        backspace(n)
+        if tail:
+            paste_text(tail)
+        s.changed(after)
+        entry.update(kind="取代", main=f"{found} → {new}", copy=new)
+        self.record.emit(entry)
 
     def _type_text(self, text: str):
         if text:
@@ -1145,6 +1206,7 @@ class App(QObject):
 
 _CJK_CHAR = re.compile(r"[㐀-䶿一-鿿]")
 _TRAILING = re.compile(r"[\s，。、！？；：,.!?;:…]+$")
+_SENTENCE_END = re.compile(r"[。？！.?!]$")
 _MARKS = "，。？！；"          # punctuation that may close a settled part of a draft
 _MARK_SLACK = int(0.2 * SAMPLE_RATE)   # samples a mark may lie outside the pause it closes
 

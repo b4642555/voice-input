@@ -28,8 +28,9 @@ UNDO = "undo"        # 復原: double tap and the spoken 復原 by default (the 
 _LISTEN = "listen"   # 連續聽寫, a command for a few hours on 2026-10-14 until 錄音 itself became continuous
 _ADD_HOTWORD = "add_hotword"   # 加入熱詞, removed 2026-10-11: hotwords are typed in the 選字 menu instead
 # config rules_version: 2 added the tap on a selection that opens 選字, 3 a tap that listens, 4 dropped 連續聽寫,
-# 5 makes 送出 stop listening, 6 turns the double-tap deletes into 復原 and adds the spoken 復原
-VERSION = 6
+# 5 makes 送出 stop listening, 6 turns the double-tap deletes into 復原 and adds the spoken 復原, 7 brings back the
+# double tap on a selection that deletes it
+VERSION = 7
 
 _PUNCT = re.compile(r"[\s，。、！？；：,.!?;:…]+")
 
@@ -64,10 +65,11 @@ class Rule:
 
 def defaults(key: str = "mouse_middle", newline: bool = True, send: bool = True) -> list[Rule]:
     """The user's own setup (2026-10-14, their request): tap to listen until the next tap; double tap (or say 復原)
-    to take back the last change; hold on a selection for 選字; spoken 換行 / 送出 press Shift+Enter / Enter (送出 then
+    to take back the last change, on a selection to delete it; hold on a selection for 選字; spoken 換行 / 送出 press Shift+Enter / Enter (送出 then
     stops listening), 標點 types "- ", 括號 types （） with the caret inside, 貼上 presses Alt+V, 空白 presses Space."""
     source = MOUSE if key.startswith("mouse") else KEY
     out = [Rule(source, key, gesture=TAP, steps=[Step(COMMAND, RECORD)]),
+           Rule(source, key, gesture=DOUBLE, when=SELECTION, steps=[Step(COMMAND, DELETE_SELECTION)]),
            Rule(source, key, gesture=DOUBLE, steps=[Step(COMMAND, UNDO)]),
            Rule(source, key, gesture=HOLD, when=SELECTION, steps=[Step(COMMAND, PICK)])]
     if newline:
@@ -134,6 +136,13 @@ def upgrade(rules: list[Rule], version: int) -> list[Rule]:
                 rules.remove(r)
         if not any(r.source == SPEECH and normalize(r.phrase) == "復原" for r in rules):
             rules.append(Rule(SPEECH, phrase="復原", steps=[Step(COMMAND, UNDO)]))
+    if version < 7:
+        for i, r in reversed(list(enumerate(rules))):
+            if r.source != SPEECH and r.gesture == DOUBLE and r.when == ANY \
+                    and [(st.type, st.value) for st in r.steps] == [(COMMAND, UNDO)] \
+                    and not any(o.key == r.key and o.gesture == DOUBLE and o.when == SELECTION for o in rules):
+                rules.insert(i, Rule(r.source, r.key, gesture=DOUBLE, when=SELECTION,
+                                     steps=[Step(COMMAND, DELETE_SELECTION)]))
     return rules
 
 

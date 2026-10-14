@@ -183,8 +183,22 @@ sentence: text up to the last ， or 。 that the recognizer put in a pause betw
 `Recognizer.recognize_timed`) is settled and not decoded again, so a pause or a commit costs one sentence (the
 user's request after a commit of a long draft took 3.25s; ~0.2-0.35s per pause on TTS). The 一般 tab's 定稿時機
 (`commit_at`) picks when a draft is committed: on a command or the end of listening (default, the user's choice) or
-at every pause; a draft longer than 60s is committed at a pause. Drafts never get sentence-final punctuation (the
-user says 句號). A draft placed where text was selected when its speech began replaces it; moving the caret (click,
+at every pause; a draft longer than 60s is committed at a pause. Drafts get no sentence-final punctuation while
+speaking (a pause is not a sentence end); a commit by an operation (換行, 送出, 「X改成Y」 …) or by the end of listening
+keeps the recognizer's 。？！ (the user's choice, 2026-10-14), unless the caret had text on both sides; a commit by a
+spoken punctuation mark gets that mark instead, and a mark said right after an added one replaces it (not 。。).
+「X改成Y」 (or 把X改成Y) said alone (`edit.change`, a 一般 checkbox, on by default; the user's request 2026-10-14)
+commits the draft, then changes the last X in what VoiceInput typed before the caret (`Session.buffer`) to Y: the
+same characters, then with punctuation and spaces skipped, then (2+ characters) the same toneless reading
+(`edit.find`). Not found: nothing typed, a tray notice (the user's choice over typing it as text). 復原 takes it back.
+用按鍵關閉麥克風時自動送出 (`send_on_stop`, on by default, the user's request 2026-10-14 so 送出 need not be said):
+the key that turns listening off presses Enter once the text is in; not when 送出 / 結束錄音 turned it off, nor
+when nothing was typed or run while listening. A ✕ on the indicator to stop without sending was asked for and
+dropped the same minute in favour of this checkbox.
+Pastes (`output.paste_text`, 2026-10-14): the text is put on the clipboard with Win32 (owned by a hidden window),
+and a paste or key waits 0.15s after the last Ctrl+V. Qt's clipboard hands data over lazily through our main
+thread, so a commit's paste followed 84ms later by the spoken 句號's replaced it before Windows Terminal read it:
+the whole draft was typed as 。. The clipboard is put back 0.4s after the last paste of a run. A draft placed where text was selected when its speech began replaces it; moving the caret (click,
 selection, typing) leaves a draft as typed, and the next speech starts a new one (`_moved`, `_freeze`). Tried and
 dropped the same day (the user's verdict after comparing them with settings): the streaming X-ASR model (480ms) typing
 the text as it was said, corrected at each pause, and a preview box above the indicator holding the draft until the
@@ -197,12 +211,12 @@ docs). `dev/headless.py` feed:WAV prints the document as the audio arrives.
 double-tap deletes: rules_version 6 turns them into it) takes back VoiceInput's last change, up to three
 (`session.UNDO_DEPTH`, `Session.history`), one per use, while they are still right before the caret: typed text or a
 draft (dropped, so it is not typed again at the commit), a punctuation mark, a new line (Shift+Enter is recorded as
-"
-"), text spoken over a selection (the selection comes back), a deleted selection. Typing or clicking ends the
+"\n"), text spoken over a selection (the selection comes back), a deleted selection, a 「X改成Y」. A double tap on a
+selection still deletes it (rules_version 7 adds that rule back, the user's request). Typing or clicking ends the
 history: what the user changed is unknown. Logged as 復原 on the 辨識紀錄 tab.
 
 Defaults are the user's own setup (their request, 2026-10-14): the rules in `rules.defaults` (tap middle = 錄音,
-double middle = 復原, hold middle on a selection = 選字, spoken 換行 / 送出 / 復原 / 標點 / 括號 / 貼上 / 空白;
+double middle = 復原 (on a selection 刪除選取的文字), hold middle on a selection = 選字, spoken 換行 / 送出 / 復原 / 標點 / 括號 / 貼上 / 空白;
 送出 presses Enter, then the 結束錄音 command turns listening off: the user's request, rules_version 5 adds it to
 saved configs), `gesture_time` 0.15s, mute while listening, the AI pack ticked, word list by date.
 

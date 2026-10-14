@@ -246,6 +246,11 @@ class SettingsDialog(QDialog):
         self.mute.setToolTip("錄音期間把喇叭靜音，文字輸入完成後恢復；原本就靜音的話不會動")
         self.describe = QCheckBox("說「詞＋的＋字」時只輸入那個字，例如「節日的節」")
         self.describe.setToolTip("整句剛好是「某個詞的某個字」才算，輸入的是詞裡讀音相同的那個字")
+        self.change = QCheckBox("說「A改成B」時，把剛輸入的 A 改成 B")
+        self.change.setToolTip("在這次聽寫打出、游標前面的文字裡找 A，先找相同的字，再找讀音相同的；"
+                               "有好幾處時改最後一處。找不到時不會打字，會跳出提示。講「復原」可以退回")
+        self.send_on_stop = QCheckBox("用按鍵關閉麥克風時自動送出（按 Enter）")
+        self.send_on_stop.setToolTip("定稿後按 Enter；說「送出」關閉時不會再按一次，這次沒有打出任何字時也不會按")
         # development only, to be removed before release (the user's plan): recordings.py
         self.keep_audio = QCheckBox("保存錄音（測試用）")
         self.keep_audio.setToolTip("每句話存成 wav，並記下辨識結果與之後的選字、刪除，用來以真實聲音檢查辨識；不會自動刪除")
@@ -267,6 +272,8 @@ class SettingsDialog(QDialog):
         form.addRow("", self.punct)
         form.addRow("", self.period_comma)
         form.addRow("", self.describe)
+        form.addRow("", self.change)
+        form.addRow("", self.send_on_stop)
         form.addRow("", self.autostart)
         form.addRow("開發測試", audio_row)
         page = QWidget()
@@ -281,7 +288,8 @@ class SettingsDialog(QDialog):
         self.sound_set.currentIndexChanged.connect(self._sound_set_changed)
         self.stop_at.currentIndexChanged.connect(self._apply)
         self.commit_at.currentIndexChanged.connect(self._apply)
-        for box in (self.punct, self.period_comma, self.describe, self.autostart, self.mute, self.keep_audio):
+        for box in (self.punct, self.period_comma, self.describe, self.change, self.send_on_stop, self.autostart,
+                    self.mute, self.keep_audio):
             box.toggled.connect(self._apply)
         return page
 
@@ -293,6 +301,8 @@ class SettingsDialog(QDialog):
         self.autostart.setChecked(self.cfg.autostart)
         self.mute.setChecked(self.cfg.mute_while_recording)
         self.describe.setChecked(self.cfg.describe_char)
+        self.change.setChecked(self.cfg.change_command)
+        self.send_on_stop.setChecked(self.cfg.send_on_stop)
         self.keep_audio.setChecked(self.cfg.save_recordings)
         self.start_sound.setCurrentIndex(max(0, self.start_sound.findData(self.cfg.start_sound)))
         self.stop_sound.setCurrentIndex(max(0, self.stop_sound.findData(self.cfg.stop_sound)))
@@ -319,6 +329,8 @@ class SettingsDialog(QDialog):
         self.cfg.autostart = self.autostart.isChecked()
         self.cfg.mute_while_recording = self.mute.isChecked()
         self.cfg.describe_char = self.describe.isChecked()
+        self.cfg.change_command = self.change.isChecked()
+        self.cfg.send_on_stop = self.send_on_stop.isChecked()
         self.cfg.save_recordings = self.keep_audio.isChecked()
         self.cfg.start_sound = self.start_sound.currentData()
         self.cfg.stop_sound = self.stop_sound.currentData()
