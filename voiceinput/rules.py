@@ -95,13 +95,19 @@ def migrate(rules: list[Rule]) -> list[Rule]:
 
 def upgrade(rules: list[Rule], version: int) -> list[Rule]:
     """Defaults added after a config was saved, on the key that records by holding unless that tap is taken:
-    version 2 adds tap on a selection = 選字, version 3 tap = 連續聽寫."""
+    version 2 adds tap on a selection = 選字, version 3 tap = 連續聽寫 (a tap that only recorded turns into it)."""
     hold = next((r for r in rules if r.source != SPEECH and r.gesture == HOLD and r.record_index() is not None), None)
     if hold and version < 2:
         if not any(r.key == hold.key and r.gesture == TAP and r.when in (SELECTION, ANY) for r in rules):
             rules.append(Rule(hold.source, hold.key, gesture=TAP, when=SELECTION, steps=[Step(COMMAND, PICK)]))
-    if hold and version < 3:
-        if not any(r.key == hold.key and r.gesture == TAP and r.when == ANY for r in rules):
+    if version < 3:
+        # a tap that only records (starts, the next press stops) becomes 連續聽寫: the user's own setup
+        # (2026-10-14), where the new tap was not added and the tap kept recording the old way
+        toggles = [r for r in rules if r.source != SPEECH and r.gesture == TAP and r.when == ANY
+                   and [(s.type, s.value) for s in r.steps] == [(COMMAND, RECORD)]]
+        for r in toggles:
+            r.steps = [Step(COMMAND, LISTEN)]
+        if hold and not toggles and not any(r.key == hold.key and r.gesture == TAP and r.when == ANY for r in rules):
             rules.append(Rule(hold.source, hold.key, gesture=TAP, steps=[Step(COMMAND, LISTEN)]))
     return rules
 
