@@ -99,3 +99,20 @@ jobs:
             ~/Library/Application Support/VoiceInput/voiceinput.log
             ${{ runner.temp }}/hl/*.png
             ${{ runner.temp }}/hl/out.txt
+
+  one-command:
+    # the user's way in: the one-line install from GitHub (the branch as pushed), on Intel like their iMac
+    needs: test
+    runs-on: macos-15-intel
+    timeout-minutes: 30
+    steps:
+      - name: curl | bash
+        run: |
+          curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/install.sh" \
+            | VOICEINPUT_BRANCH="${{ github.ref_name }}" VOICEINPUT_NO_OPEN=1 VOICEINPUT_APPS_DIR="$HOME/Applications" bash
+          codesign --verify --verbose "$HOME/Applications/VoiceInput.app"
+      - name: Uninstall
+        run: |
+          curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/install.sh" \
+            | bash -s -- --uninstall
+          [ ! -d "$HOME/Applications/VoiceInput.app" ]

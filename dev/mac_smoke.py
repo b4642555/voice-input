@@ -17,6 +17,7 @@ sys.path.insert(0, str(ROOT))
 from voiceinput import keys, models, rules, selection, system  # noqa: E402
 from voiceinput.asr import Recognizer  # noqa: E402
 from voiceinput.mac import autostart, hotkey, keyboard, mute  # noqa: E402
+from voiceinput.mac import system as macsys  # noqa: E402
 from voiceinput.textfmt import format_text  # noqa: E402
 
 failures = []
@@ -58,14 +59,14 @@ system.setup(qapp)
 ov = Overlay(lambda: 0.0)
 ov.show_recording()
 qapp.processEvents()
-win = system._window(ov)
+win = macsys._window(ov)
 check(win is not None and win.ignoresMouseEvents() and not win.hidesOnDeactivate(),
       "indicator: click-through, stays when the app is inactive")
 pk = Picker()
 pk.show_loading("測試", (100, 100, 40, 20))
 pk.show_candidates("測試", ["測試", "側試"])
 qapp.processEvents()
-pw = system._window(pk)
+pw = macsys._window(pk)
 check(pw is not None and bool(pw.styleMask() & (1 << 7)), "選字 menu: nonactivating panel")
 handle = system.window_handle(pk)
 g = pk.frameGeometry()
