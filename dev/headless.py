@@ -142,7 +142,9 @@ appmod.recordings.DIR = Path(S) / "recordings"   # set:save_recordings=1 saves h
 appmod.recordings.INDEX = appmod.recordings.DIR / "index.jsonl"
 qapp = QApplication(sys.argv)
 qapp.setQuitOnLastWindowClosed(False)
+appmod.Overlay.show = lambda self: None   # no indicator on the user's screen next to their own app's
 A = appmod.App(qapp)
+A.tray.hide()
 A.tray.showMessage = lambda title, text, *a: print(f"      [通知] {title}: {text}")
 
 

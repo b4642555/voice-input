@@ -181,7 +181,11 @@ last commit: a breath between 句號 and 送出 was typed as "Shh") and then run
 sentence is decoded again and its text, punctuation included, typed in place (`_refine_job`). Only the open
 sentence: text up to the last ， or 。 that the recognizer put in a pause between pieces (token timestamps,
 `Recognizer.recognize_timed`) is settled and not decoded again, so a pause or a commit costs one sentence (the
-user's request after a commit of a long draft took 3.25s; ~0.2-0.35s per pause on TTS). The 一般 tab's 定稿時機
+user's request after a commit of a long draft took 3.25s; ~0.2-0.35s per pause on TTS). The open sentence is decoded
+from its pieces only (`App._speech`: the silence between them cut to their own 0.5s lead-in and 0.25s tail, token
+times mapped back): with the user's real thinking pauses (15s) a draft passed 30s, beyond which the recognizer gives
+no timestamps, so nothing settled and every pause took 1.2-2.8s (2026-10-15; on that recording now 0.2-0.8s per pause,
+the commit 2.92s -> 0.25s). The 一般 tab's 定稿時機
 (`commit_at`) picks when a draft is committed: on a command or the end of listening (default, the user's choice) or
 at every pause; a draft longer than 60s is committed at a pause. Drafts get no sentence-final punctuation while
 speaking (a pause is not a sentence end); a commit by an operation (換行, 送出, 「X改成Y」 …) or by the end of listening

@@ -37,6 +37,7 @@ from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
+import numpy as np
 from PySide6.QtCore import QLockFile, QObject, QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
@@ -520,7 +521,8 @@ class App(QObject):
             self._on_main(lambda: None)
             d = self._draft
             if d is not None:
-                self._commit_job(self._draft_start, d.anchor, end, end, d.ctx, final=True)
+                spans = [p for p in self._spans if p.start >= d.anchor]
+                self._commit_job(self._draft_start, d.anchor, end, end, d.ctx, final=True, spans=spans)
 
             def run():
                 if done and not self._listening:
@@ -775,6 +777,9 @@ class App(QObject):
                 state.update(drafted=d is not None, alone=d is None or not d.final,
                              anchor=d.anchor if d is not None else self._draft_start)
             self._on_main(check)
+            if "anchor" not in state:   # the main thread did not answer in time
+                log.warning("piece dropped: the main thread is busy")
+                return
             ctx = probe.result() if probe is not None else Context()
             start, anchor = self._draft_start, state["anchor"]
             self._spans = [p for p in self._spans if p.start >= anchor] + [piece]
@@ -793,7 +798,7 @@ class App(QObject):
                 # decoded with the draft's audio before it (as a commit would), a short piece may turn out to be a
                 # command it missed alone: the user's 換行 came out as Hangan, then as 換行 in the draft, and was
                 # typed as text at the next command (2026-10-14)
-                whole = self.listener.audio(anchor, piece.hi)
+                whole, _ = self._speech(anchor, piece.hi, self._spans)
                 again = self._decode(whole, ctx, commands=True)
                 more = format_text(again, True)
                 op, typed, change = self._command(more, ctx, steps)
@@ -801,17 +806,18 @@ class App(QObject):
                     log.info("piece with the draft before it: %s -> %s", raw, again)
                     raw, formatted, audio = again, more, whole
             if op is not None or typed or change is not None:
-                self._spans = []
+                spans, self._spans = [p for p in self._spans if p is not piece], []
                 self._keep(audio, asr=raw, fmt=formatted, result=typed or "",
                            op=op.phrase if op else "改成" if change else None)
                 entry.update(kind="操作", main=op.phrase) if op else entry.update(kind="輸入", main=typed, copy=typed)
                 # nothing said since the last commit: the audio before the command is not decoded (a breath
                 # between 句號 and 送出 was typed as "Shh", 2026-10-14)
                 end = piece.start if state["drafted"] else anchor
-                self._commit_job(start, anchor, end, piece.hi, ctx, (op, typed, change, entry), final=not typed)
+                self._commit_job(start, anchor, end, piece.hi, ctx, (op, typed, change, entry), final=not typed,
+                                 spans=spans)
             elif self.cfg.commit_at == "pause" or piece.hi - anchor > _DRAFT_MAX * SAMPLE_RATE:
-                self._spans = []
-                self._commit_job(start, anchor, piece.hi, piece.hi, ctx)
+                spans, self._spans = self._spans, []
+                self._commit_job(start, anchor, piece.hi, piece.hi, ctx, spans=spans)
             else:
                 self._refine_job(start, anchor, piece, ctx)
         except Exception:
@@ -822,12 +828,12 @@ class App(QObject):
         or 。 the recognizer put in an earlier pause is settled: it is not decoded again, so a pause costs one
         sentence, not the whole draft (the user's request, 2026-10-14: a commit of a long draft took 3.25s)."""
         t0 = time.monotonic()
-        text, tokens, times = self.recognizer.recognize_timed(self.listener.audio(anchor, piece.hi),
-                                                              self._bias_words(ctx))
+        audio, index = self._speech(anchor, piece.hi, self._spans)
+        text, tokens, times = self.recognizer.recognize_timed(audio, self._bias_words(ctx))
         settled, live, after = "", text, anchor
         marks = [i for i, tok in enumerate(tokens[:-1]) if tok.strip() in _MARKS]
         for k in range(len(marks) - 1, -1, -1):
-            at = anchor + int(times[marks[k]] * SAMPLE_RATE)
+            at = _sample_at(index, int(times[marks[k]] * SAMPLE_RATE))
             gap = next((nxt for prev, nxt in zip(self._spans, self._spans[1:])
                         if prev.end - _MARK_SLACK <= at <= nxt.start + _MARK_SLACK), None)
             spots = [i for i, ch in enumerate(text) if ch in _MARKS]
@@ -841,10 +847,35 @@ class App(QObject):
         log.info("draft %.2fs: %s | %s", time.monotonic() - t0, settled, live)
         self.main.emit(lambda: self._refine(start, anchor, settled, live, after, ctx))
 
-    def _commit_job(self, start: int, anchor: int, end: int, at: int, ctx, command=None, final: bool = False):
+    def _speech(self, anchor: int, end: int, spans: list):
+        """The open sentence's audio [anchor, end) with the silence between its pieces (spans) cut down to their own
+        lead-in and tail, and an index of (offset in it, sample) for each stretch kept. The user thinks between
+        sentences: with 15s pauses kept a draft passed the 30s beyond which the recognizer gives no timestamps,
+        so nothing was settled and each pause decoded it all again, 2-3s (2026-10-15)."""
+        stretches = []
+        for p in spans:
+            lo, hi = max(p.lo, anchor), min(p.hi, end)
+            if hi <= lo:
+                continue
+            if stretches and lo <= stretches[-1][1]:
+                stretches[-1][1] = max(stretches[-1][1], hi)
+            else:
+                stretches.append([lo, hi])
+        if not stretches:
+            return self.listener.audio(anchor, end), [(0, anchor)]
+        parts, index, n = [], [], 0
+        for lo, hi in stretches:
+            a = self.listener.audio(lo, hi)
+            parts.append(a)
+            index.append((n, lo))
+            n += a.size
+        return np.concatenate(parts), index
+
+    def _commit_job(self, start: int, anchor: int, end: int, at: int, ctx, command=None, final: bool = False,
+                    spans: list = ()):
         """The draft's open sentence, audio [anchor, end), decoded again; the main thread puts the draft's text in
         its place (final: with its sentence-final mark)."""
-        audio = self.listener.audio(anchor, end)
+        audio, _ = self._speech(anchor, end, spans)
         steps, text, raw = [], "", ""
         t0 = time.monotonic()
         if audio.size >= SAMPLE_RATE * 0.2:
@@ -1223,6 +1254,16 @@ class App(QObject):
 
 _CJK_CHAR = re.compile(r"[㐀-䶿一-鿿]")
 _TRAILING = re.compile(r"[\s，。、！？；：,.!?;:…]+$")
+
+
+def _sample_at(index: list, offset: int) -> int:
+    """The sample an offset into App._speech's audio was recorded at."""
+    for n, lo in reversed(index):
+        if offset >= n:
+            return lo + offset - n
+    return index[0][1]
+
+
 _SENTENCE_END = re.compile(r"[。？！.?!]$")
 _MARKS = "，。？！；"          # punctuation that may close a settled part of a draft
 _MARK_SLACK = int(0.2 * SAMPLE_RATE)   # samples a mark may lie outside the pause it closes
