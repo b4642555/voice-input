@@ -160,6 +160,7 @@ class App(QObject):
         self._listen_hwnd = 0                    # the window it was typed in
         self._quitting = False
         self._marked = None                      # the buffer when the last commit added its sentence-final mark
+        self._committed = None                   # (text before it, _Draft) of the last commit, which 復原 may revive
         self._spans: list = []                   # worker thread: the pieces of the draft's open sentence
         self._ignored: set[str] = set()          # keys pressed while another was held
         self._could_record = rules.can_record(self.cfg.rules)
@@ -479,6 +480,7 @@ class App(QObject):
             def reset():
                 self._draft, self._draft_start = None, begin
                 self._listen_typed, self._listen_hwnd = False, 0
+                self._committed = None
                 self.listener.keep(begin)
             self._on_main(reset)
         self.worker.submit(fresh)
@@ -666,6 +668,7 @@ class App(QObject):
             d = self._new_draft(ctx)
         elif not d.placed:   # nothing typed yet: the latest speech's caret and selection
             d.ctx, d.sel = ctx, ctx.selection
+        _go_on(d)
         d.settled = _joined(d.settled, settled)
         d.anchor = after
         d.final = _TRAILING.sub("", _joined(d.settled, live))
@@ -693,6 +696,8 @@ class App(QObject):
             elif d is not None and not d.placed:
                 d.ctx, d.sel = ctx, ctx.selection
             if d is not None:
+                if text:
+                    _go_on(d)
                 d.final = _TRAILING.sub("", _joined(d.settled, text))
                 end = _SENTENCE_END.search(_joined(d.settled, text))
                 if final and d.final and not _inside(d.ctx):
@@ -710,16 +715,24 @@ class App(QObject):
             self.listener.keep(at)
             if d is not None:
                 self._marked = self.session.buffer if marked else None
+                b = self.session.buffer
+                self._committed = (b[:len(b) - len(d.typed)], d) \
+                    if d.placed and d.typed and self.session.clean() and b.endswith(d.typed) else None
         if command is not None or d is not None and d.final:
             self._listen_typed, self._listen_hwnd = True, foreground()
         if command is not None:
-            self._run_command(command, ctx)
+            # the selection made before the command was said, unless the text before it went there
+            sel = ctx.selection
+            if d is not None and d.placed and d.sel is sel:
+                sel = None
+            self._run_command(command, ctx, sel)
         self._overlay_idle()
         self._input_done()
 
-    def _run_command(self, command, ctx):
+    def _run_command(self, command, ctx, sel=None):
         """Main thread: an operation spoken alone runs its steps; a punctuation name or a described character is
-        typed after the text."""
+        typed after the text, or over `sel` (the selection made before it was said: a selected 。 said 冒號 over
+        stayed and ： was typed at the caret, 2026-10-15)."""
         op, typed, entry = command
         self.record.emit(entry)
         if op is not None:
@@ -728,7 +741,16 @@ class App(QObject):
         else:
             log.info("typed: %s", typed)
             s = self.session
-            if typed in edit.SYMBOLS.values() and self._marked is not None and s.clean() \
+            if sel is not None:
+                if sel.term is not None:
+                    self.overlay.hide_now()
+                pasted = _paste_over(sel, typed)
+                self._overlay_idle()
+                if pasted:
+                    s.replaced_selection(sel.before, typed, foreground(), sel.before + sel.text)
+                else:
+                    self._notify(_SEL_LOST)
+            elif typed in edit.SYMBOLS.values() and self._marked is not None and s.clean() \
                     and s.buffer == self._marked:
                 # the mark a commit added (after 換行 or the like) gives way to the one said now: not 。。
                 s.changed(s.buffer[:-1] + typed)
@@ -942,6 +964,18 @@ class App(QObject):
                 stretches.append([lo, hi])
         if not stretches:
             return self.listener.audio(anchor, end), [(0, anchor)]
+        # with only the pieces' own 0.75s between them the recognizer's marks there were a coin toss: the user's
+        # 難道這樣沒有問題嗎 [3.7s] 還是說… came out without its ？ in 7 of 10 tries, 0 of 10 with 0.5s more kept
+        # (2026-10-15)
+        for a, b in zip(stretches, stretches[1:]):
+            a[1] = min(a[1] + _GAP_KEEP, b[0])
+        merged = [stretches[0]]
+        for lo, hi in stretches[1:]:
+            if lo <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], hi)
+            else:
+                merged.append([lo, hi])
+        stretches = merged
         parts, index, n = [], [], 0
         for lo, hi in stretches:
             a = self.listener.audio(lo, hi)
@@ -1063,13 +1097,20 @@ class App(QObject):
     def undo(self):
         """Main thread, 復原 (and 刪除剛輸入的文字): take back VoiceInput's last change while it is still right before
         the caret: up to session.UNDO_DEPTH of them, one each time; a draft's are its pauses' updates. After one,
-        the draft is left as it now is (not decoded again: the audio taken back would come back) and the next speech
-        starts a new one."""
+        what is left of the draft (or of the draft the last commit typed) is a draft again, its text fixed (decoded
+        again, the audio taken back would come back): speech goes on after it, and a command or the end of
+        listening gives it its sentence end (the user's choice, 2026-10-15: 細節 was left without its 。 after
+        換行 misheard and taken back)."""
         s = self.session
         step = s.deletable()
         if step is None:
             log.info("undo: nothing to take back")
             return
+        d = self._draft
+        if d is not None and d.placed and step.after.endswith(d.typed):
+            source = (step.after[:len(step.after) - len(d.typed)], d)
+        else:
+            source = self._committed
         n, tail = s.plan_to(step.before)
         log.info("undo: %d backspaces + %r", n, tail)
         if self.cfg.save_recordings:
@@ -1078,12 +1119,23 @@ class App(QObject):
         if tail:
             paste_text(tail)
         s.deleted_last(step)
-        d = self._draft
-        if d is not None and d.placed and step.after.endswith(d.typed):   # the draft's change was taken back
+        self._committed = None
+        if source is not None and source[1] is d:   # the draft's change was taken back
             self._draft = None
             self._draft_start = self.listener.now if self._listening else 0
             if self._listening:
                 self.listener.keep(self._draft_start)
+        if source is not None and self._listening and self._draft is None:
+            before, old = source
+            rest = step.before[len(before):] if step.before.startswith(before) else ""
+            if rest:
+                now = self.listener.now
+                self._draft = _Draft(now, old.ctx, anchor=now, settled=rest, final=rest, typed=rest, placed=True,
+                                     shown=now, revived=True)
+                self._draft_start = now
+                self.listener.keep(now)
+                self._marked = None
+                log.info("undo: a draft again: %s", rest)
         p = len(os.path.commonprefix([step.before, step.after]))
         gone, back = step.after[p:], step.before[p:]
         self.record.emit({"time": time.strftime("%H:%M:%S"), "kind": "復原",
@@ -1340,6 +1392,15 @@ def _inside(ctx) -> bool:
     return sides is not None and all(t.strip() for t in sides)
 
 
+def _go_on(d) -> None:
+    """A draft 復原 brought back gets a mark before the speech that goes on after it (its text is not decoded with
+    that speech, which would have put one in the pause): ， (？ after 嗎)."""
+    if d.revived:
+        d.revived = False
+        if d.settled and d.settled[-1] not in _MARKS + "、：；…":
+            d.settled += "？" if d.settled.endswith("嗎") else "，" if _CJK_CHAR.search(d.settled[-1]) else ","
+
+
 def _split_at(text: str, tokens: list, times: list, index: list, at: int) -> tuple[str, str]:
     """The recognizer's text split before the first token emitted at sample `at` or later (times in App._speech's
     audio, index its map): (before, from there on); ("", "") when no token is that late."""
@@ -1367,6 +1428,7 @@ def _sample_at(index: list, offset: int) -> int:
 _SENTENCE_END = re.compile(r"[。？！.?!]$")
 _MARKS = "，。？！；"          # punctuation that may close a settled part of a draft
 _MARK_SLACK = int(0.2 * SAMPLE_RATE)   # samples a mark may lie outside the pause it closes
+_GAP_KEEP = int(0.5 * SAMPLE_RATE)     # more of a pause kept between pieces than their own tail and lead-in
 
 
 @dataclass
@@ -1382,6 +1444,7 @@ class _Draft:
     lead: str = ""             # a space typed before it
     placed: bool = False
     shown: int = 0             # the sample its typed text was decoded up to
+    revived: bool = False      # brought back by 復原: what is said next goes on after a mark
 
 
 class _Known:

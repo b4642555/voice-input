@@ -188,7 +188,9 @@ user's request after a commit of a long draft took 3.25s; ~0.2-0.35s per pause o
 from its pieces only (`App._speech`: the silence between them cut to their own 0.5s lead-in and 0.25s tail, token
 times mapped back): with the user's real thinking pauses (15s) a draft passed 30s, beyond which the recognizer gives
 no timestamps, so nothing settled and every pause took 1.2-2.8s (2026-10-15; on that recording now 0.2-0.8s per pause,
-the commit 2.92s -> 0.25s). The 一般 tab's 定稿時機
+the commit 2.92s -> 0.25s). 0.5s more of each pause is kept (`_GAP_KEEP`): with 0.75s the recognizer's marks
+there were a coin toss (the user's 難道這樣沒有問題嗎 [3.7s] 還是說… lost its ？ in 7 of 10 decodes with inaudible
+noise added, 0 of 10 with 0.5s more; their text came out run together). The 一般 tab's 定稿時機
 (`commit_at`) picks when a draft is committed: on a command or the end of listening (default, the user's choice) or
 at every pause; a draft longer than 60s is committed at a pause. A draft shows the recognizer's 。？！ at its end while
 speaking, and the next pause turns it into ， when the sentence goes on (the user's request, 2026-10-15; before, drafts
@@ -196,6 +198,8 @@ had none while speaking, as a pause is not a sentence end); a commit by an opera
 keeps the recognizer's 。？！, or gets 。 when it gave none (？ after 嗎, . after English only; the user's choice,
 2026-10-14/15), unless the caret had text on both sides; a commit by a
 spoken punctuation mark gets that mark instead, and a mark said right after an added one replaces it (not 。。).
+A spoken mark (or described character) with text selected when it was said replaces the selection (it was typed at
+the caret until 2026-10-15: a selected 。 said 冒號 over stayed, ： went to the end).
 「X改成Y」 said alone changed the last X typed before the caret to Y (same characters, then the same toneless
 reading) for a few hours on 2026-10-14/15; removed at the user's request (git: 8e14854 adds it).
 A piece that is no command alone but, decoded at the pause with the speech before it, is exactly a command (its
@@ -244,8 +248,11 @@ draft (dropped, so it is not typed again at the commit), a punctuation mark, a n
 "\n"), text spoken over a selection (the selection comes back), a deleted selection. A double tap on a
 selection still deletes it (rules_version 7 adds that rule back, the user's request). A draft's changes are its pauses'
 updates, one each (the user's request, 2026-10-15: a whole draft at once took back what was said long before); a
-commit belongs to the update before it. After one is taken back the draft stays as it is, not decoded again (the
-audio taken back would return), and the next speech starts a new draft.
+commit belongs to the update before it. After one is taken back, what is left of the draft, or of the draft the
+last commit typed (a 換行 taken back), is a draft again with its text fixed (decoded again, the audio taken back
+would return): speech goes on after it, behind a ， (？ after 嗎) when it ends in none, and a command or the end of
+listening gives it its sentence end (the user's choice, 2026-10-15: 換行 misheard and taken back left 細節 without
+its 。; the draft used to be dropped).
 While listening, the indicator's red dot gets a spinning arc while speech is being decoded (`App._decoding` counts
 the worker's jobs; `spin_while_decoding`, a 一般 checkbox, on by default; the user's request, 2026-10-15). Typing or clicking ends the
 history: what the user changed is unknown. Logged as 復原 on the 辨識紀錄 tab.
