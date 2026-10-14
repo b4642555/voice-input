@@ -112,7 +112,9 @@ unlisted (100%, or its ticked pack's), keeping its aliases; only words away from
 UI name of the smart picks since 2026-10-14; 智慧選字 did not fit something this mechanical): each example as
 這個ying3片是 → 這個影片是 (context with the reading, then with the pick; the user's design), date, ✕ (it replaced the
 一般 tab's button that opened smart-picks.json; editing the character was there for a few hours). 英文強制替換: the
-aliases (Dipsick → DeepSeek), date (`alias_added`; older ones show the word's date), ✕. Every list has its own 排序
+aliases (Dipsick → DeepSeek), date (`alias_added`; older ones show the word's date), ✕. Entries record when they were added to
+the second since 2026-10-14 (older ones the date alone, sorting before same-day ones with a time); the tab shows
+the date, the time is in its tooltip. Every list has its own 排序
 drop-down, remembered (`hotword_sort`: 優先度, name A→Z / Z→A by pinyin, date; `pick_sort`: date, reading;
 `alias_sort`: date, name). Mute (2026-10-06, `mute.py`): Core Audio via
 comtypes; muted when the recording indicator shows, unmuted once the text is pasted or the press ends in nothing; a

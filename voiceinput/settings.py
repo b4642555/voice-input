@@ -123,8 +123,9 @@ def _card() -> tuple[QFrame, QHBoxLayout]:
 _PACK_SHOWN = 5   # terms shown after a pack's name
 
 
-def _date_label(date: str) -> QLabel:
-    label = QLabel(date, toolTip="加入的日期")
+def _date_label(added: str) -> QLabel:
+    """The date of an entry; the time, kept for sorting (2026-10-14), only in the tooltip."""
+    label = QLabel(added[:10], toolTip=f"加入時間：{added}")
     label.setStyleSheet("color: gray")
     return label
 

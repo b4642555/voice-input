@@ -66,13 +66,15 @@ class Hotword:
     word: str
     pct: int
     source: str = MANUAL
-    added: str = ""          # date it was first added, YYYY-MM-DD
+    added: str = ""          # when it was first added, YYYY-MM-DD HH:MM:SS (the date alone before 2026-10-14)
     aliases: list = field(default_factory=list)   # misheard English spellings rewritten as this word (spelling.py)
-    alias_added: dict = field(default_factory=dict)   # alias -> date it was learned (2026-10-14; before: the word's)
+    alias_added: dict = field(default_factory=dict)   # alias -> when it was learned (2026-10-14; before: the word's)
 
 
-def _today() -> str:
-    return time.strftime("%Y-%m-%d")
+def _now() -> str:
+    """When something is added, to the second (2026-10-14, for a true order; the 詞庫 tab shows the date only).
+    Older entries hold the date alone and sort before same-day ones with a time."""
+    return time.strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _from_weight(word: str, weight: float, source: str) -> int:
@@ -138,7 +140,7 @@ class Hotwords:
             return False
         h = self.find(word)
         if h is None:
-            self.items.append(Hotword(word, TOP, MANUAL, _today()))
+            self.items.append(Hotword(word, TOP, MANUAL, _now()))
         else:
             h.pct, h.source = TOP, MANUAL
         self.save()
@@ -149,7 +151,7 @@ class Hotwords:
         a word back where it would be unlisted leaves the list."""
         h = self.find(word)
         if h is None:
-            h = Hotword(word, self.base(word), PICKED, _today())
+            h = Hotword(word, self.base(word), PICKED, _now())
             self.items.append(h)
         elif h.source == MANUAL:
             return
@@ -187,11 +189,11 @@ class Hotwords:
             return
         h = self.find(new)
         if h is None:
-            h = Hotword(new, self.base(new), PICKED, _today())
+            h = Hotword(new, self.base(new), PICKED, _now())
             self.items.append(h)
         if all(letters(a) != letters(old) for a in h.aliases):
             h.aliases.append(old)
-            h.alias_added[old] = _today()
+            h.alias_added[old] = _now()
             log.info("alias %s of %s learned", old, new)
 
     def remove_alias(self, word: str, alias: str):

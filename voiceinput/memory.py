@@ -139,7 +139,7 @@ class Memory:
                     continue          # phrases and English were learned before the change to single characters
                 self.examples.setdefault(ex["key"], []).append(
                     {"value": ex["value"], "left": list(ex["left"]), "right": list(ex["right"]),
-                     "serial": int(ex["serial"]), "added": ex.get("added") or _today()})
+                     "serial": int(ex["serial"]), "added": ex.get("added") or _now()[:10]})
             self.styles = {k: int(v) for k, v in data.get("styles", {}).items()}
             if old:
                 self.save()
@@ -226,7 +226,7 @@ class Memory:
 
     def _learn(self, key: str, value: str, text: str, start: int, end: int):
         left, right = situation(text, start, end)
-        new = {"value": value, "left": left, "right": right, "serial": self._serial, "added": _today()}
+        new = {"value": value, "left": left, "right": right, "serial": self._serial, "added": _now()}
         with self._lock:
             self._serial += 1
             exs = [e for e in self.examples.get(key, [])
@@ -312,8 +312,8 @@ def _blocked(full: str, a: int, b: int, value: str, levels: dict[str, int]) -> s
     return ""
 
 
-def _today() -> str:
-    return time.strftime("%Y-%m-%d")
+def _now() -> str:
+    return time.strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _single(text: str) -> bool:
