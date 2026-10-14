@@ -855,7 +855,9 @@ class App(QObject):
         audio, index = self._speech(anchor, piece.hi, self._spans)
         text, tokens, times = self.recognizer.recognize_timed(audio, self._bias_words(ctx))
         settled, live, after = "", text, anchor
-        marks = [i for i, tok in enumerate(tokens[:-1]) if tok.strip() in _MARKS]
+        # a blank token (between English letters) is no mark: "" in _MARKS is True, and counting it settled a whole
+        # sentence that was then typed again (2026-10-15)
+        marks = [i for i, tok in enumerate(tokens[:-1]) if tok.strip() and tok.strip() in _MARKS]
         for k in range(len(marks) - 1, -1, -1):
             at = _sample_at(index, int(times[marks[k]] * SAMPLE_RATE))
             gap = next((nxt for prev, nxt in zip(self._spans, self._spans[1:])
