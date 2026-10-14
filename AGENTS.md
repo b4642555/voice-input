@@ -269,7 +269,9 @@ removed the same day they were built: the user corrects by selecting with the mo
   a 一般 checkbox, on by default): an utterance that is exactly <words>的<character> types only that character when
   the last 4 characters before 的 contain it, or one that sounds like it (X-ASR wrote 一張的章: 張 is typed). Also
   這個字是教育的育, 偉是偉大的偉 (said that way in the log before the feature existed). Typed as is, like a
-  punctuation mark (replaces a selection, no smart picks). No false hits on 3182 logged results; TTS 節日的節,
+  punctuation mark (replaces a selection, no smart picks). A character that only sounds like it counts only when
+  at most 4 characters come before 的 (2026-10-14: 我這邊想要顯示的是 typed 示); on 3931 logged results that was the
+  only false hit; TTS 節日的節,
   薔薇的薇, 這個字是教育的育 right (程式的程 was heard as 城市的城 and typed 城).
 - **Bopomofo spelling** (拼讀: ㄔ ㄤ 昌 types 昌) was built and reverted on 2026-10-11 (db3f0e7, c0ae24e): with a real
   voice X-ASR heard most symbol names as English letters (ㄐ ㄧ ㄝ → "G E A"), and there is no way to force Chinese,

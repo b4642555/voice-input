@@ -47,6 +47,10 @@ def described(formatted: str) -> str | None:
     word = before[-_WORD:]
     if ch in word:
         return ch
+    # a character that only sounds like it, when the word is all there is: 我這邊想要顯示的是 is a sentence, not
+    # 顯示的示 (2026-10-14); the misheard ones in the log (一張的章, 測試的是) have two characters before 的
+    if len(before) > _WORD:
+        return None
     return next((c for c in reversed(word) if _sounds(c) & _sounds(ch)), None)
 
 
