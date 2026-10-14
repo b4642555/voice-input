@@ -14,6 +14,12 @@ middle button to record; double click it on a selection to delete it, or right a
 press records again: delete and say it again. A tap on a selection opens 選字. Gestures no operation takes are
 given back to the key.
 
+A tap turns continuous listening on and off (連續聽寫, listen.py, 2026-10-14; the user's main way of dictating on
+the continuous-mic branch): the microphone stays on, every pause ends a piece, and each piece is handled at once like
+a short press-and-talk: typed without sentence-final punctuation, run as an operation or typed as a punctuation mark
+when it is exactly one, or put over the text selected when the piece started (the user may select with the mouse
+while listening).
+
 The one popup (picker.py) is the 選字 candidate menu; it came back 2026-10-11 after the lean branch removed every
 popup, and a redesign is planned (the 加入熱詞 notice with 撤銷 lived for a few hours the same day). Its input box
 takes a typed word, which replaces the selection and becomes a hotword. The second opinion (SenseVoice + suspects.py) is
@@ -39,6 +45,7 @@ from .config import Config
 from .hotwords import Hotwords
 from .hotkey import Hotkeys
 from .keys import MOUSE_TRIGGERS, combo_vks
+from .listen import Listener
 from .memory import Memory, is_latin, situation
 from .mute import Muter
 from .output import backspace, paste_text, press_chord, press_delete
@@ -70,6 +77,7 @@ _NO_RECORD = "目前沒有任何操作會錄音，無法語音輸入。請到「
 _CUE_LATENCY = 0.25
 _STEP_GAP = 0.03           # seconds between the steps of an operation
 _MENU_ROWS = 8
+_SPACED = re.compile(r"[A-Za-z0-9]")
 
 
 @dataclass
@@ -95,6 +103,7 @@ class _Press:
     mic_at: float = 0.0               # monotonic time the microphone started for it
     consumed: bool = False            # it only stopped a recording a tap had started
     deleted: object = None            # Selection a 刪除 step removed (the dictation goes there)
+    listening: bool = False           # a piece of continuous listening, not a press
     resolved: threading.Event = field(default_factory=threading.Event)   # steps before 錄音 are done
 
 
@@ -145,6 +154,9 @@ class App(QObject):
         self._pending_timer = QTimer(self, singleShot=True, timeout=self._pending_expired)
         self._toggle: _Press | None = None       # a recording a tap started: the next press stops it
         self._mic: _Press | None = None          # the press the microphone records for
+        self.listener: Listener | None = None    # continuous listening (連續聽寫)
+        self._listen_probe = None                # (ContextProbe, time) started when the current piece's speech began
+        self._listen_out = 0.0                   # when a piece last changed the text
         self._ignored: set[str] = set()          # keys pressed while another was held
         self._could_record = rules.can_record(self.cfg.rules)
         self.hotwords = Hotwords()
@@ -156,7 +168,8 @@ class App(QObject):
         self.icon_idle = make_icon(QColor(235, 235, 235) if self._dark_taskbar() else QColor(40, 40, 40))
         self.icon_rec = make_icon(QColor(255, 69, 58))
 
-        self.overlay = Overlay(lambda: self.recorder.level)
+        self.overlay = Overlay(lambda: self.listener.level if self._listening and self._mic is None
+                               else self.recorder.level)
         self.picker = Picker()
         self.picker.picked.connect(self.on_menu_pick)
         self.picker.typed.connect(self.on_menu_typed)
@@ -262,6 +275,7 @@ class App(QObject):
                 models.download(key, progress)
             self.status.emit("載入模型中…")
             self.recognizer = Recognizer(key)
+            models.vad_path()   # continuous listening's voice activity detection, ~2MB
             self.status.emit("就緒")
         except Exception as e:
             log.exception("model load failed")
@@ -456,6 +470,8 @@ class App(QObject):
             self._notify(f"無法開啟麥克風：{e}")
             return
         self._mic, press.recording, press.mic_at = press, True, time.monotonic()
+        if self._listening:
+            self.listener.pause(True)   # the press has the microphone; listening goes on after it
         self._hwnd = foreground()
         self._stop_cue = False   # an end sound still waiting for the speakers belongs to an older recording
 
@@ -490,19 +506,23 @@ class App(QObject):
         press.recording = False
         if self._mic is press:
             self._mic = None
-        self.tray.setIcon(self.icon_idle)
-        return self.recorder.stop()
+        audio = self.recorder.stop()
+        if self._listening:
+            self.listener.pause(False)
+        else:
+            self.tray.setIcon(self.icon_idle)
+        return audio
 
     def _discard_mic(self, press: _Press):
         if press.recording:
             self._release_mic(press)
-            self.overlay.hide_overlay()
+            self._overlay_idle()
             self._input_done()
 
     def _stop_recording(self, press: _Press):
         audio = self._release_mic(press)
         if audio is None:
-            self.overlay.hide_overlay()
+            self._overlay_idle()
             self._input_done()
             return
         if press.shown and audio.size and self.cfg.stop_sound:
@@ -519,11 +539,88 @@ class App(QObject):
     def _input_done(self):
         """Main thread: a recording ended in nothing, or its text was pasted. Unmute, unless another recording
         has started meanwhile."""
-        if self._mic is None:
+        if self._mic is None and not self._listening:
             self.muter.restore()
             if self._stop_cue:
                 self._stop_cue = False
                 cues.play(self.cfg.stop_sound, "stop")
+
+    def _overlay_idle(self):
+        """Main thread: a press or piece is done; while listening the indicator stays."""
+        if self._listening:
+            self.overlay.show_recording()
+        else:
+            self.overlay.hide_overlay()
+
+    # --- continuous listening ---
+    @property
+    def _listening(self) -> bool:
+        return self.listener is not None and self.listener.active
+
+    def toggle_listen(self):
+        """Main thread, 連續聽寫: turn continuous listening on or off."""
+        if self._listening:
+            self._stop_listen()
+        else:
+            self._start_listen()
+
+    def _start_listen(self):
+        if self.recognizer is None:
+            self._notify(self._status_text or "模型尚未就緒")
+            return
+        if self._mic is not None:
+            self._discard_mic(self._mic)
+        try:
+            if self.listener is None:
+                self.listener = Listener(str(models.vad_path()), self._on_listen_speech, self._on_listen_piece)
+            self.listener.start(self.cfg.mic)
+        except Exception as e:
+            log.exception("listen start failed")
+            self._notify(f"無法開啟麥克風：{e}")
+            return
+        log.info("listen: on")
+        self._stop_cue = False
+        self.tray.setIcon(self.icon_rec)
+        self.overlay.show_recording()
+        cues.play(self.cfg.start_sound, "start")
+        wait = cues.duration(self.cfg.start_sound, "start")
+        if wait:
+            wait += _CUE_LATENCY
+            self.listener.still(wait)   # the start sound is not speech
+        if self.cfg.mute_while_recording:
+            QTimer.singleShot(int(wait * 1000), lambda: self.muter.mute() if self._listening else None)
+
+    def _stop_listen(self):
+        self.listener.stop()   # speech still going on is handed over as a last piece
+        log.info("listen: off")
+        self.tray.setIcon(self.icon_idle)
+        self.overlay.hide_overlay()
+        self.muter.restore()
+        if self.cfg.stop_sound:
+            cues.play(self.cfg.stop_sound, "stop")
+
+    def _on_listen_speech(self):
+        """Listener thread: speech began. What is selected now is what the piece replaces."""
+        self._listen_probe = (ContextProbe(), time.monotonic())
+
+    def _on_listen_piece(self, audio):
+        """Listener thread: a piece of speech ended; it is recognized and handled like a short press-and-talk."""
+        (probe, began), self._listen_probe = self._listen_probe or (ContextProbe(), time.monotonic()), None
+        if self.recognizer is None:
+            return
+        press = _Press("listen", probe, began, self.session.deletable() is not None, listening=True)
+        press.resolved.set()
+        self.worker.submit(self._transcribe_job, self.recognizer, audio, press, foreground())
+
+    def _spaced(self, text: str) -> str:
+        """A piece typed right after the previous one gets the space format_text puts between English and
+        Chinese or between English words."""
+        if not text or not self.session.clean():
+            return text
+        a, b = self.session.buffer[-1], text[0]
+        if (_SPACED.match(a) and (_SPACED.match(b) or _CJK_CHAR.match(b))) or (_CJK_CHAR.match(a) and _SPACED.match(b)):
+            return " " + text
+        return text
 
     # --- steps ---
     def _run_steps(self, press: _Press, steps: list, done=None):
@@ -554,6 +651,8 @@ class App(QObject):
                     self._on_main(lambda: self._delete_selection(press, ctx))
                 elif step.type == rules.COMMAND and step.value == rules.DELETE_DICTATION:
                     self._on_main(self.delete_last)
+                elif step.type == rules.COMMAND and step.value == rules.LISTEN:
+                    self._on_main(self.toggle_listen)
                 elif step.type == rules.COMMAND and step.value == rules.PICK:
                     ctx = press.probe.result()
                     sel = ctx.selection if press.deleted is None else None
@@ -590,7 +689,10 @@ class App(QObject):
         log.info("delete %r on %s", sel.text, sel.app)
         if sel.term is not None:
             self.overlay.hide_now()
-        if not _delete_selection(sel):
+        deleted = _delete_selection(sel)
+        if sel.term is not None:
+            self._overlay_idle()
+        if not deleted:
             self._notify(_SEL_LOST)
             return
         press.deleted = sel
@@ -625,6 +727,12 @@ class App(QObject):
         stamp = time.strftime("%H:%M:%S")
         try:
             ctx = press.probe.result()
+            if press.listening:
+                # the previous piece may still be on its way in (the user spoke again within a pause): once it is,
+                # read the selection again, or a selection it replaced would be replaced twice
+                self._on_main(lambda: None)
+                if press.down_at < self._listen_out:
+                    ctx = ContextProbe().result()
             press.resolved.wait(3.0)
             t0 = time.monotonic()
             heard = cues.remove(audio, press.cue, SAMPLE_RATE, press.cue_at) if press.cue else audio
@@ -640,7 +748,8 @@ class App(QObject):
             t_asr = time.monotonic() - t0
             log.info("asr %.2fs: %s%s", t_asr, raw, f" (terms: {len(ctx.terms)})" if ctx.terms else "")
             # no sentence-final punctuation when the caret has text on both sides: the user is inserting
-            mid = ctx.caret is not None and all(s.strip() for s in ctx.caret)
+            # (continuous listening never adds it: the user says 句號; pieces cut at a pause join up)
+            mid = press.listening or (ctx.caret is not None and all(s.strip() for s in ctx.caret))
             steps = []   # (name, before, after) of every step that changed the text, for the transcript
             formatted = format_text(raw, mid, steps)
             known = spelling.table(self._known_terms(ctx.terms), self.hotwords.aliases())
@@ -698,7 +807,7 @@ class App(QObject):
             self.main.emit(lambda: self._dictate(text, audio, hwnd, press))
         except Exception:
             log.exception("transcribe failed")
-            self.main.emit(self.overlay.hide_overlay)
+            self.main.emit(self._overlay_idle)
             self.main.emit(self._input_done)
 
     def _learn_spelled(self, old: str, new: str):
@@ -747,14 +856,19 @@ class App(QObject):
         return [w for w in words if w and len(set(w)) > 1]
 
     def _spoken_operation(self, press: _Press, op):
-        self.overlay.hide_overlay()
+        if press.listening:
+            self._listen_out = time.monotonic()
+        self._overlay_idle()
         self._input_done()
         self._run_steps(press, op.steps)
 
     # --- dictation ---
     def _dictate(self, text: str, audio, hwnd: int, press: _Press):
         """Main thread: paste a dictation, then run the operation's steps after 錄音."""
-        self.overlay.hide_overlay()
+        self._overlay_idle()
+        if press.listening:
+            text = self._spaced(text)
+            self._listen_out = time.monotonic()
         log.info("result: %s", text)
         if not text:
             self._input_done()
@@ -884,7 +998,10 @@ class App(QObject):
         log.info("menu %s: %s -> %s", "typed" if typed else "pick", text, word)
         if sel.term is not None:
             self.overlay.hide_now()
-        if not _paste_over(sel, sel.text[:lead] + word + sel.text[lead + len(text):]):
+        pasted = _paste_over(sel, sel.text[:lead] + word + sel.text[lead + len(text):])
+        if sel.term is not None:
+            self._overlay_idle()
+        if not pasted:
             self._notify(_SEL_LOST)
             return
         line = sel.before + sel.text + sel.after
@@ -921,7 +1038,9 @@ class App(QObject):
     def on_edited(self, sel, rep: str, press: _Press):
         if sel.term is not None:
             self.overlay.hide_now()
-        self.overlay.hide_overlay()
+        self._overlay_idle()
+        if press.listening:
+            self._listen_out = time.monotonic()
         if not rep:
             self._input_done()
             return
@@ -970,6 +1089,8 @@ class App(QObject):
             self.settings.set_status(f"開機啟動設定失敗：{e}")
 
     def quit(self):
+        if self._listening:
+            self.listener.stop()
         self.muter.restore()
         self.hotkeys.stop()
         if self._mouse:

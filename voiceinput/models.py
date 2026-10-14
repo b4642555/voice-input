@@ -27,6 +27,18 @@ MODELS = {
 }
 
 
+# Voice activity detection for continuous listening (listen.py): one file, ~2MB.
+VAD_FILE = "silero_vad.onnx"
+
+
+def vad_path() -> Path:
+    """The VAD model, downloaded first if missing."""
+    path = DEFAULT_MODELS_DIR / VAD_FILE
+    if not path.exists():
+        fetch(BASE_URL + VAD_FILE, path)
+    return path
+
+
 def model_dir(key: str) -> Path:
     return DEFAULT_MODELS_DIR / MODELS[key]["dir"]
 

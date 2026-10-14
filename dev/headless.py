@@ -9,7 +9,9 @@ box), click (the user clicks: ends what the app knows about the text), tap (one 
 hotkey:NAME (the key or button the next steps press, default mouse_middle), rules:default (the default operations),
 rule:JSON (add an operation, rules.Rule.from_dict), at:WORD (put the caret right after the last WORD; at: puts it at
 the end), say:TEXT (dictate TEXT as if recognized), set:NAME=VALUE (change a setting in memory only), packs:ID+ID (tick term packs, in memory only) or key:BACK (the
-user presses Backspace n times: key:BACK*3), dbl:MS (a double tap, each press MS ms long), dblbusy (a double tap whose release is handled 0.5s late), pick:N / pickw:WORD (click a row of the 選字 menu), logshot:NAME (the 辨識紀錄 tab saved as <dir>/NAME.png), type:TEXT (type TEXT in the menu's input box and press Enter). Settings are never saved; hotwords and smart picks live in <dir> (hotwords.test.json,
+user presses Backspace n times: key:BACK*3), dbl:MS (a double tap, each press MS ms long), dblbusy (a double tap whose release is handled 0.5s late), pick:N / pickw:WORD (click a row of the 選字 menu), feed:WAV (while
+continuous listening is on: WAV and 1s of silence reach the microphone; feed:WAV+WAV joins clips with 0.6s pauses),
+logshot:NAME (the 辨識紀錄 tab saved as <dir>/NAME.png), type:TEXT (type TEXT in the menu's input box and press Enter). Settings are never saved; hotwords and smart picks live in <dir> (hotwords.test.json,
 smart-picks.test.json, emptied at the start), never in the real files.
 """
 import json
@@ -23,7 +25,7 @@ import numpy as np
 from PySide6.QtWidgets import QApplication
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from voiceinput import app as appmod, output, rules, selection, session  # noqa: E402
+from voiceinput import app as appmod, listen, output, rules, selection, session  # noqa: E402
 
 S = sys.argv[1]
 HWND = 4242
@@ -90,6 +92,33 @@ appmod.Hotkeys.start = lambda self: None           # no real hotkey / keyboard h
 replayed = []                                      # gestures given back to the key (key name per press)
 appmod.Hotkeys.replay = lambda self, name, times=1: replayed.extend([name] * times)
 appmod.App._watch_mouse = lambda self: None       # the user's real clicks must not end the simulated session
+
+
+class Listener(appmod.Listener):
+    """Continuous listening without the microphone: feed:WAV puts audio where the microphone would."""
+
+    def start(self, device_name=""):
+        import sherpa_onnx
+        cfg = sherpa_onnx.VadModelConfig()
+        cfg.silero_vad.model = self._vad_model
+        cfg.silero_vad.min_silence_duration = listen.SILENCE
+        cfg.silero_vad.max_speech_duration = listen.MAX_PIECE
+        cfg.sample_rate = 16000
+        import queue
+        import threading
+        self._queue = queue.Queue()
+        self._thread = threading.Thread(target=self._run, daemon=True, args=(
+            lambda: sherpa_onnx.VoiceActivityDetector(cfg, buffer_size_in_seconds=40), cfg.silero_vad.window_size))
+        self._thread.start()
+        self._stream = True
+
+    def stop(self):
+        self._stream = None
+        self._queue.put(None)
+        self._thread.join(5)
+
+
+appmod.Listener = Listener
 
 
 class Probe:
@@ -281,6 +310,21 @@ try:
             pump(0.6)
             print(f"[{step}] {'' if shown else '（沒有氣泡）'} → 文字框：{box.text[:box.caret] + '|' + box.text[box.caret:]!r}"
                   f"  熱詞：{A.hotwords.bias()}")
+            continue
+        if step.startswith("feed:"):
+            if not A._listening:
+                print(f"[{step}]（沒有在聽寫）")
+                continue
+            parts = []
+            for name in step[5:].split("+"):
+                parts += [load(name), np.zeros(int(0.6 * 16000), np.float32)]
+            audio = np.concatenate(parts[:-1] + [np.zeros(16000, np.float32)])
+            for i in range(0, len(audio), 480):
+                A.listener._queue.put(audio[i:i + 480])
+                if i % 4800 == 0:
+                    pump(0.02)
+            pump(3.0)
+            print(f"[{step}] → 文字框：{box.text[:box.caret] + '|' + box.text[box.caret:]!r}")
             continue
         if step == "click":
             A.session.on_input()
