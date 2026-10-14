@@ -47,6 +47,7 @@ def _show_pct(label, pct: int):
 
 _SET_PAUSE = 0.8   # seconds between the start and end sound when a set is previewed
 _CARD_STYLE = "QFrame#card { border: 1px solid palette(mid); border-radius: 6px; }"
+_KIND_COLORS = {"輸入": "#1F5FAF", "操作": "#B35A00", "取代": "#0E7A6E", "選字": "#6B3FA0", "刪除": "#B42318"}
 
 
 def _scroll_instead(widget, e):
@@ -580,29 +581,42 @@ class SettingsDialog(QDialog):
         """Render entries newest first (2026-10-14, the user's design): what happened first, in normal size (【輸入】
         the typed text, 【操作】 a spoken operation, 【取代】 old → new, 【選字】, 【刪除】), then the details smaller:
         the recognizer's text and time, and each step that changed the text as its changed fragments. Each entry:
-        time, kind, main, and optionally asr, asr_s, steps [(name, before, after or None for a note)]."""
-        def row(label, text, extra=""):
-            return (f"<tr><td style='color:gray' width=70>{html.escape(label)}</td><td style='color:gray'>{extra}</td>"
-                    f"<td>{text}</td></tr>")
+        time, kind, main, and optionally asr, asr_s, steps [(name, before, after or None for a note)]. Each entry is
+        a framed block whose first row, on a darker ground, holds the kind, the main text and the time (the user's
+        pick among three designs, 2026-10-14)."""
+        gray = "#5F6670"
+
+        def row(label, text):
+            return (f"<tr><td style='color:{gray}; padding-right:8px' width=90>{label}</td>"
+                    f"<td style='color:#3D434B'>{text}</td></tr>")
 
         def step(name, before, after):
             if after is None:
-                return row(name, html.escape(before))
-            arrow = " <span style='color:gray'>→</span> "
+                return row(html.escape(name), html.escape(before))
+            arrow = f" <span style='color:{gray}'>→</span> "
             frags = changes(before, after) or [(before, after)]
-            return row(name, "；".join(html.escape(a or "（空）") + arrow + html.escape(b or "（空）") for a, b in frags))
+            return row(html.escape(name),
+                       "；".join(html.escape(a or "（空）") + arrow + html.escape(b or "（空）") for a, b in frags))
 
         def block(e):
-            main = html.escape(e.get("main") or "") or "<span style='color:gray'>（沒有辨識到文字）</span>"
+            main = html.escape(e.get("main") or "") or f"<span style='color:{gray}'>（沒有辨識到文字）</span>"
+            kind = e.get("kind", "輸入")
             rows = ""
             if e.get("asr_s") is not None:
-                rows += row("ASR", html.escape(e.get("asr") or ""), f"{e['asr_s']:.2f}s&nbsp;")
+                rows += row(f"ASR {e['asr_s']:.2f}s", html.escape(e.get("asr") or ""))
             rows += "".join(step(*s) for s in e.get("steps", []))
-            details = f"<table cellspacing=0 cellpadding=1 style='font-size:small'>{rows}</table>" if rows else ""
-            return (f"<div style='color:gray; font-size:small'>{e['time']}</div>"
-                    f"<div><b>【{e.get('kind', '輸入')}】</b>{main}</div>{details}")
+            details = (f"<tr><td style='padding:4px 10px 6px 10px'>"
+                       f"<table cellspacing=0 cellpadding=1 style='font-size:13px'>{rows}</table></td></tr>"
+                       if rows else "")
+            return (f"<table width='100%' cellspacing=0 cellpadding=0 border=1 style='border-collapse:collapse; "
+                    f"border-color:#D5DAE1; border-style:solid; margin-bottom:10px'>"
+                    f"<tr><td bgcolor='#E6EAF0' style='padding:6px 10px'>"
+                    f"<table width='100%' cellspacing=0 cellpadding=0 border=0><tr><td style='font-size:15px'>"
+                    f"<b style='color:{_KIND_COLORS.get(kind, '#1F2328')}'>{html.escape(kind)}</b>&nbsp;&nbsp;{main}</td>"
+                    f"<td align=right valign=top width=64 style='padding-top:2px; font-size:12px; color:{gray}'>"
+                    f"{e['time']}</td></tr></table></td></tr>{details}</table>")
 
-        self.log.setHtml("<br>".join(block(e) for e in reversed(entries)))
+        self.log.setHtml("".join(block(e) for e in reversed(entries)))
         self.log.verticalScrollBar().setValue(0)
 
     # --- 自訂操作: one card per rule ---
