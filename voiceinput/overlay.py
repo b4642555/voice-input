@@ -31,6 +31,7 @@ class Overlay(QWidget):
         self._level_source = level_source   # callable -> float 0..1
         self._busy_source = busy_source     # callable -> bool: speech is being decoded (the dot spins)
         self.glow = glow                    # glow.EdgeGlow shown with the recording indicator
+        self.pill = True                    # the indicator itself is shown (a setting; the glow does not depend on it)
         self._state = self.IDLE
         self._top = False                   # at the top of the screen (the pointer came over the bottom spot)
         self._on_screen = None              # the screen it is shown on
@@ -85,7 +86,8 @@ class Overlay(QWidget):
             self._on_screen = self._screen()
             self._reposition()
             self.setWindowOpacity(0.0)
-            self.show()
+            if self.pill:
+                self.show()
             self._make_click_through()
             self._fade.stop()
             self._fade.setStartValue(0.0)
@@ -98,6 +100,16 @@ class Overlay(QWidget):
                 self.glow.show(self._screen())
             else:
                 self.glow.hide()
+
+    def set_pill(self, on: bool):
+        """The setting changed: shown or hidden at once while recording."""
+        self.pill = on
+        if not on:
+            self.hide()
+        elif self._state != self.IDLE:
+            self.setWindowOpacity(1.0)
+            self.show()
+            self._make_click_through()
 
     def _screen(self):
         return QGuiApplication.screenAt(self.cursor().pos()) or QGuiApplication.primaryScreen()
@@ -133,7 +145,8 @@ class Overlay(QWidget):
                 self.glow.move(screen)
         # the pointer over the indicator sends it to the other end of the screen (the user's request, 2026-10-15:
         # it covered what they were looking at; following the caret through UI Automation missed)
-        if self._state != self.IDLE and self._slide.state() != QAbstractAnimation.Running                 and self.geometry().adjusted(-6, -6, 6, 6).contains(QCursor.pos()):
+        if self._state != self.IDLE and self.pill and self._slide.state() != QAbstractAnimation.Running \
+                and self.geometry().adjusted(-6, -6, 6, 6).contains(QCursor.pos()):
             self._top = not self._top
             self._reposition(slide=True)
         if self._state == self.RECORDING:

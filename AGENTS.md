@@ -232,6 +232,10 @@ does not listen for ever; 5 minutes by default, their choice; 不自動關閉 / 
 start of speech) for that long turns listening off with the end sound, a tray notice and no Enter (`_check_idle`,
 every 5s, not while decoding). The user sees listening as a switch now: on, it takes text, commands and the
 mouse's edits until turned off.
+錄音時顯示指示器 (`show_indicator`, a 一般 checkbox, on by default; the user's request, 2026-10-15): off, the pill is
+not shown (the glow, the sounds and the tray icon still are).
+An operation starting with Backspace (the spoken 刪除) gets no added sentence end when the draft showed none: it
+deleted that mark and seemed to do nothing.
 螢幕邊緣光暈 (`glow`, `glow.py`, the 一般 tab, off by default; the user's request, 2026-10-15, like Siri's): a glow
 around the edges of the indicator's screen while listening, shown and hidden with the indicator (which stays, the
 user's choice), brightening and reaching further in with the voice (their choice). Five styles in a drop-down
@@ -425,7 +429,11 @@ removed the same day they were built: the user corrects by selecting with the mo
   short (at most the longest command + 2 characters) it runs again with every speech operation's phrase and the
   punctuation names (when on) at score 5. Not by audio length: TTS 換行 alone was 1.7s with its silences. Fixed
   據點 -> 句點, 珊姐好 -> 刪節號; cost: 問好 / 分好 said alone become 問號 / 分號. Words of one repeated character
-  (點點點) are not boosted: they ran away (點點點點點點點點點).
+  (點點點) are not boosted: they ran away (點點點點點點點點點). Since 2026-10-15 that second decode has the commands
+  alone, without hotwords, packs and on-screen terms (they competed: the user felt 換行 had gone dull, and their
+  換行 heard as "One home." came out as 換行 without them; on their short recordings since 10-14, 363/374 commands
+  against 362, and of 211 short texts the only new "commands" were two misheard 換行). No code change had made
+  it worse: the misses were borderline decodes.
 - **Described characters** (`edit.described`, 2026-10-11, the user picked it among ideas for exact text by voice;
   a 一般 checkbox, on by default): an utterance that is exactly <words>的<character> types only that character when
   the last 4 characters before 的 contain it, or one that sounds like it (X-ASR wrote 一張的章: 張 is typed). Also

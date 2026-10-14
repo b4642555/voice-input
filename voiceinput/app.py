@@ -178,6 +178,7 @@ class App(QObject):
         self.glow.set_style(self.cfg.glow)
         self.overlay = Overlay(lambda: self.listener.level if self._listening else 0.0,
                                lambda: self.cfg.spin_while_decoding and self._busy > 0, glow=self.glow)
+        self.overlay.pill = self.cfg.show_indicator
         self.picker = Picker()
         self.picker.picked.connect(self.on_menu_pick)
         self.picker.typed.connect(self.on_menu_typed)
@@ -733,7 +734,9 @@ class App(QObject):
                     _go_on(d)
                 d.final = _TRAILING.sub("", _joined(d.settled, text))
                 end = _SENTENCE_END.search(_joined(d.settled, text))
-                if final and d.final and not _inside(d.ctx):
+                # an operation starting with Backspace (刪除) takes off the last character shown: a mark added
+                # first would be what it deletes, and it looked like it did nothing (2026-10-15)
+                if final and d.final and not _inside(d.ctx) and not (end is None and _backspace_first(command)):
                     # none from the recognizer (a short sentence often has none): 。 (the user's choice, 2026-10-15),
                     # ？ after 嗎 (the user's request the same day)
                     d.final += end.group() if end else "？" if d.final.endswith("嗎") \
@@ -806,7 +809,10 @@ class App(QObject):
         raw = self.recognizer.recognize(audio, words)
         names = self._command_words() if commands else []
         if names and self._short(raw, names):
-            again = self.recognizer.recognize(audio, _bias([(w, _COMMAND_SCORE) for w in names] + words))
+            # commands only: the hotwords, packs and on-screen terms competed with them (the user's 換行 came out as
+            # "One home." with them, 換行 without; on their short recordings 363/374 commands vs 362, no new false
+            # hits among 211 short texts, 2026-10-15)
+            again = self.recognizer.recognize(audio, _bias([(w, _COMMAND_SCORE) for w in names]))
             if again != raw:
                 log.info("asr with commands boosted: %s -> %s", raw, again)
             raw = again
@@ -1401,6 +1407,8 @@ class App(QObject):
 
     def apply_settings(self):
         self.hotkeys.set_keys(rules.bound_keys(self.cfg.rules))
+        if self.overlay.pill != self.cfg.show_indicator:
+            self.overlay.set_pill(self.cfg.show_indicator)
         if self.glow.style_id != self.cfg.glow:
             self.glow.set_style(self.cfg.glow)
             if self._listening and self.cfg.glow:
@@ -1443,6 +1451,11 @@ def _inside(ctx) -> bool:
     sel = ctx.selection
     sides = (sel.before, sel.after) if sel is not None else ctx.caret
     return sides is not None and all(t.strip() for t in sides)
+
+
+def _backspace_first(command) -> bool:
+    op = command[0] if command is not None else None
+    return op is not None and bool(op.steps) and op.steps[0].type == rules.KEYS and op.steps[0].value == "Backspace"
 
 
 def _go_on(d) -> None:

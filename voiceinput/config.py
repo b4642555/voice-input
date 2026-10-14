@@ -23,6 +23,7 @@ class Config:
     send_on_stop: bool = True
     spin_while_decoding: bool = True   # the indicator's red dot spins while speech is being decoded
     glow: str = ""                 # glow.py style along the screen's edges while listening, "" for none
+    show_indicator: bool = True    # the recording indicator (the pill); off, the glow and the sounds remain
     # minutes without speech after which listening turns itself off, 0 never (the user's request, 2026-10-15: a
     # microphone left on by mistake; 5 their choice of default)
     auto_off_minutes: int = 5

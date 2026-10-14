@@ -250,6 +250,8 @@ class SettingsDialog(QDialog):
         self.send_on_stop = QCheckBox("用按鍵關閉麥克風時自動送出（按 Enter）")
         self.spin = QCheckBox("錄音中正在辨識時，紅點旋轉")
         self.spin.setToolTip("講完一段、程式還在辨識時，錄音指示的紅點外會有一圈在轉")
+        self.show_pill = QCheckBox("錄音時顯示指示器（底部的小膠囊）")
+        self.show_pill.setToolTip("關掉後，麥克風開著只靠提示音和螢幕邊緣光暈（有開的話）提醒你")
         self.glow = QComboBox(toolTip="麥克風開著時，螢幕四周亮起一圈光，講話時會變亮；選了會先亮一下讓你看")
         self.glow.addItem("關閉", "")
         for st in glowmod.STYLES:
@@ -284,6 +286,7 @@ class SettingsDialog(QDialog):
         form.addRow("", self.describe)
         form.addRow("", self.send_on_stop)
         form.addRow("", self.spin)
+        form.addRow("", self.show_pill)
         form.addRow("", self.autostart)
         form.addRow("開發測試", audio_row)
         page = QWidget()
@@ -300,7 +303,7 @@ class SettingsDialog(QDialog):
         self.commit_at.currentIndexChanged.connect(self._apply)
         self.auto_off.currentIndexChanged.connect(self._apply)
         self.glow.currentIndexChanged.connect(self._glow_changed)
-        for box in (self.punct, self.period_comma, self.describe, self.send_on_stop, self.spin,
+        for box in (self.punct, self.period_comma, self.describe, self.send_on_stop, self.spin, self.show_pill,
                     self.autostart,
                     self.mute, self.keep_audio):
             box.toggled.connect(self._apply)
@@ -316,6 +319,7 @@ class SettingsDialog(QDialog):
         self.describe.setChecked(self.cfg.describe_char)
         self.send_on_stop.setChecked(self.cfg.send_on_stop)
         self.spin.setChecked(self.cfg.spin_while_decoding)
+        self.show_pill.setChecked(self.cfg.show_indicator)
         self.keep_audio.setChecked(self.cfg.save_recordings)
         self.start_sound.setCurrentIndex(max(0, self.start_sound.findData(self.cfg.start_sound)))
         self.stop_sound.setCurrentIndex(max(0, self.stop_sound.findData(self.cfg.stop_sound)))
@@ -350,6 +354,7 @@ class SettingsDialog(QDialog):
         self.cfg.describe_char = self.describe.isChecked()
         self.cfg.send_on_stop = self.send_on_stop.isChecked()
         self.cfg.spin_while_decoding = self.spin.isChecked()
+        self.cfg.show_indicator = self.show_pill.isChecked()
         self.cfg.save_recordings = self.keep_audio.isChecked()
         self.cfg.start_sound = self.start_sound.currentData()
         self.cfg.stop_sound = self.stop_sound.currentData()
