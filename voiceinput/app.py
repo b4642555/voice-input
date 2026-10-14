@@ -240,6 +240,7 @@ class App(QObject):
         self.session.on_input()
         term_watcher.forget()
         self.main.emit(self.picker.dismiss)
+        self.main.emit(self._caret_left)
 
     def _on_picker(self, pt) -> bool:
         """Mouse hook thread: the point is on the 選字 menu."""
@@ -265,6 +266,7 @@ class App(QObject):
                     return False   # a click in the 選字 menu leaves the caret and the selection where they are
                 self.main.emit(self.picker.dismiss)   # a click anywhere else closes it
                 self.session.on_input()
+                self.main.emit(self._caret_left)
                 if msg == 0x201:
                     term_watcher.mouse_down(data.pt.x, data.pt.y)
                 else:
@@ -665,6 +667,16 @@ class App(QObject):
         d, s = self._draft, self.session
         return d is not None and d.placed and not (s.clean() and s.buffer.endswith(d.typed))
 
+    def _caret_left(self):
+        """Main thread: the user clicked or typed. A draft the caret left stays as typed now, so the log shows it
+        when it happens (the user's request, 2026-10-15: it showed at the next speech); speech after what is typed
+        is decoded again at the caret now, as when an update finds the caret moved."""
+        if not self._listening or not self._moved():
+            return
+        at = self._draft.shown
+        self._freeze(at)
+        self._decoding(self._redo_job, at)
+
     def _freeze(self, at: int | None = None):
         """Main thread: the caret moved away from the draft. It stays as typed; speech from `at` (default: the
         speech under way) starts a new draft."""
@@ -1056,6 +1068,7 @@ class App(QObject):
         self.steps.submit(self._steps_job, press, steps, done)
 
     def _steps_job(self, press: _Press, steps: list, done):
+        stop = False
         try:
             for n, step in enumerate(steps):
                 if n:
@@ -1073,6 +1086,8 @@ class App(QObject):
                         elif step.value == "Enter":   # sent: nothing left for the end of listening to send
                             self.session.on_input()
                             self._listen_typed = False
+                            if press.key == "listen" and self.cfg.stop_on_send:   # 送出 said, and the setting
+                                stop = True
                         else:
                             self.session.on_input()     # the caret may have moved
                 elif step.type == rules.TEXT:
@@ -1088,6 +1103,8 @@ class App(QObject):
                     ctx = press.probe.result()
                     sel = ctx.selection if press.deleted is None else None
                     self._on_main(lambda: self._open_candidates(sel, ctx.terms))
+            if stop:
+                self._on_main(lambda: self._stop_listen(send=False) if self._listening else None)
         except Exception:
             log.exception("steps failed")
         finally:

@@ -223,7 +223,8 @@ the commands boosted first, then plainly if that finds no command: plain, 換行
 out and turned up inside the sentence at the next pause (TTS + the user's 換行: 7/7 new lines, 3 by this path). While listening, the pointer over the indicator sends it to the other end of the screen
 (`Overlay._tick`; the user's request, 2026-10-15), sliding there in 0.2s with an ease-out curve so the eye
 can follow it. The pointer on another screen takes the indicator and the glow there (the user's request the same
-night; they have three screens). Following the caret through UIA (read after each update of the
+night; they have three screens). Where it was sent is remembered per screen while the app runs (it came back to the
+bottom at the next listening or screen change; the user's request, 2026-10-15). Following the caret through UIA (read after each update of the
 draft) was tried the same evening and missed: the user typed under it and it stayed. An underline under the open sentence like an IME's composition (an
 overlay drawn at its UIA rectangles) was offered and declined.
 用按鍵關閉麥克風時自動送出 (`send_on_stop`, on by default, the user's request 2026-10-14 so 送出 need not be said):
@@ -231,6 +232,8 @@ the key that turns listening off presses Enter once the text is in; not when 送
 when nothing was typed or run while listening, nor (2026-10-15) when another window is in front than the one the
 text went to, or everything typed was taken back. A ✕ on the indicator to stop without sending was asked for and
 dropped the same minute in favour of this checkbox.
+說「送出」時關閉麥克風 (`stop_on_send`, a 一般 checkbox, off by default; the user's request, 2026-10-15): a spoken
+operation with an Enter step turns listening off after its steps.
 自動關閉麥克風 (`auto_off_minutes`, the 一般 tab, 2026-10-15, the user's request so a microphone left on by mistake
 does not listen for ever; 5 minutes by default, their choice; 不自動關閉 / 1 / 3 / 5 / 10 / 30): no speech (the VAD's
 start of speech) for that long turns listening off with the end sound, a tray notice and no Enter (`_check_idle`,
@@ -253,7 +256,9 @@ Pastes (`output.paste_text`, 2026-10-14): the text is put on the clipboard with 
 and a paste or key waits 0.15s after the last Ctrl+V. Qt's clipboard hands data over lazily through our main
 thread, so a commit's paste followed 84ms later by the spoken 句號's replaced it before Windows Terminal read it:
 the whole draft was typed as 。. The clipboard is put back 0.4s after the last paste of a run. A draft placed where text was selected when its speech began replaces it; moving the caret (click,
-selection, typing) leaves a draft as typed, and the next speech starts a new one (`_moved`, `_freeze`); a pause's
+selection, typing) leaves a draft as typed, and the next speech starts a new one (`_moved`, `_freeze`; since
+2026-10-15 at the click or key itself, `_caret_left` from the hooks, so the log shows it then: 「（游標移到別處）」
+next to the draft's start … end, copyable; the user's request); a pause's
 update that arrives after the caret moved is not lost: the speech after what is typed (`_Draft.shown`) is decoded
 again as a new draft at the caret and selection now (`_redo_job`, 2026-10-15). A pause that decodes to nothing starts
 no draft, and a draft with nothing typed yet takes the latest speech's caret and selection. The text going into a

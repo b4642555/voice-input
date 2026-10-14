@@ -34,6 +34,7 @@ class Overlay(QWidget):
         self.pill = True                    # the indicator itself is shown (a setting; the glow does not depend on it)
         self._state = self.IDLE
         self._top = False                   # at the top of the screen (the pointer came over the bottom spot)
+        self._tops: dict[str, bool] = {}    # where it was last sent on each screen, kept while the app runs
         self._on_screen = None              # the screen it is shown on
         self._levels = [0.0] * BARS
         self._t0 = time.monotonic()
@@ -82,8 +83,8 @@ class Overlay(QWidget):
         self._state = state
         self._t0 = time.monotonic()
         if was_hidden:
-            self._top = False
             self._on_screen = self._screen()
+            self._top = self._tops.get(self._on_screen.name(), False)
             self._reposition()
             self.setWindowOpacity(0.0)
             if self.pill:
@@ -139,7 +140,7 @@ class Overlay(QWidget):
         screen = self._screen()
         if self._state != self.IDLE and screen is not self._on_screen:
             self._on_screen = screen
-            self._top = False
+            self._top = self._tops.get(screen.name(), False)
             self._reposition()
             if self.glow:
                 self.glow.move(screen)
@@ -148,6 +149,9 @@ class Overlay(QWidget):
         if self._state != self.IDLE and self.pill and self._slide.state() != QAbstractAnimation.Running \
                 and self.geometry().adjusted(-6, -6, 6, 6).contains(QCursor.pos()):
             self._top = not self._top
+            # remembered: it came back to the bottom at the next listening, a pick or another screen (the user's
+            # request, 2026-10-15)
+            self._tops[self._on_screen.name()] = self._top
             self._reposition(slide=True)
         if self._state == self.RECORDING:
             lvl = self._level_source()

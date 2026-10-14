@@ -214,9 +214,12 @@ class LogBook:
         self._row(heard, change, "定稿", "end", _tip([why], ""), after)
 
     def frozen(self, typed: str):
-        """The caret moved away from the draft: it stays as typed."""
-        self._row("", f"<span style='color:{_GRAY}'>照畫面上的字定下來</span>", "游標移開", "note",
-                  _tip(["你點了別的地方、選取或打了字，草稿就照現在的樣子留著；之後講的話從新的游標位置開始"], ""), typed)
+        """The caret moved away from the draft: it stays as typed, shown as its start … its end (the user's
+        design, 2026-10-15), copied whole."""
+        short = typed if len(typed) <= 2 * _CONTEXT + 1 else _keep_start(typed) + "…" + _keep_end(typed)
+        self._row("（游標移到別處）", esc(short), "照畫面上的字定下來", "note",
+                  _tip(["你點了別的地方、選取或打了字，草稿就照畫面上的樣子定下來；之後講的話從新的游標位置開始"], ""),
+                  typed)
 
     def undo(self, took: str, back: str, revived: str):
         """復原 took back `took` (and typed `back`); `revived`: the text left a draft again."""

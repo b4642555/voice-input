@@ -224,6 +224,12 @@ def _last_row() -> str:
     return rows[-1]["heard"] if rows else ""
 
 
+def user_input():
+    """A key or click of the user's, as the hooks report it."""
+    A.session.on_input()
+    A.main.emit(A._caret_left)
+
+
 def down():
     A.hotkeys._held.add(KEY)       # what the hook would record
     A.on_key_down(KEY, time.monotonic())
@@ -244,7 +250,7 @@ try:
             w = step[4:]
             i = box.text.rfind(w)
             box.sel, box.caret = (i, i + len(w)), i + len(w)
-            A.session.on_input()
+            user_input()
             print(f"[選取 {w}]")
             continue
         if step in ("tap", "undo", "tap2") or step.startswith("toggle:"):
@@ -283,7 +289,7 @@ try:
                 A._refine = refine
                 box.sel = None
                 box.caret = box.text.rfind(w) + len(w) if w else len(box.text)
-                A.session.on_input()
+                user_input()
                 print(f"      [游標移到 {w!r} 後面] {box.text[:box.caret] + '|' + box.text[box.caret:]!r}")
                 refine(*args)
             A._refine = moved_first
@@ -330,7 +336,7 @@ try:
             w = step[3:]
             box.sel = None
             box.caret = box.text.rfind(w) + len(w) if w else len(box.text)
-            A.session.on_input()
+            user_input()
             print(f"[游標移到] → 文字框：{box.text[:box.caret] + '|' + box.text[box.caret:]!r}")
             continue
         if step.startswith(("pick:", "pickw:")):
@@ -365,7 +371,7 @@ try:
             print(f"[{step}] → 文字框：{box.text[:box.caret] + '|' + box.text[box.caret:]!r}")
             continue
         if step == "click":
-            A.session.on_input()
+            user_input()
             print("[點滑鼠]")
             continue
         if step == "dblbusy":   # a double tap whose second release reaches the main thread 0.5s late (busy)
@@ -402,7 +408,7 @@ try:
             n = int(step.split("*")[1]) if "*" in step else 1
             box.back(n)
             for _ in range(n):
-                A.session.on_input()
+                user_input()
             print(f"[按 Backspace ×{n}]")
             continue
         down()

@@ -21,6 +21,9 @@ class Config:
     # the key that turns listening off presses Enter once the text is in (the user's request, 2026-10-14, so they
     # need not say 送出); not when listening ends by 送出 / 結束錄音, nor when nothing was typed
     send_on_stop: bool = True
+    # a spoken operation that presses Enter (送出) turns listening off once it ran (the user's request, 2026-10-15;
+    # since rules_version 9 送出 alone leaves listening on)
+    stop_on_send: bool = False
     spin_while_decoding: bool = True   # the indicator's red dot spins while speech is being decoded
     glow: str = ""                 # glow.py style along the screen's edges while listening, "" for none
     show_indicator: bool = True    # the recording indicator (the pill); off, the glow and the sounds remain
