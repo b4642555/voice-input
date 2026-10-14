@@ -2,7 +2,7 @@
 import math
 import time
 
-from PySide6.QtCore import QPropertyAnimation, QRectF, Qt, QTimer
+from PySide6.QtCore import QAbstractAnimation, QEasingCurve, QPoint, QPropertyAnimation, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QCursor, QGuiApplication, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QWidget
 
@@ -37,6 +37,10 @@ class Overlay(QWidget):
         self._timer = QTimer(self, interval=16, timeout=self._tick)
         self._fade = QPropertyAnimation(self, b"windowOpacity", self, duration=140)
         self._fade.finished.connect(self._on_fade_done)
+        # moving to the other end of the screen: fast but visible, so the eye can follow it (the user's request,
+        # 2026-10-15: a jump could leave people looking for it)
+        self._slide = QPropertyAnimation(self, b"pos", self, duration=200)
+        self._slide.setEasingCurve(QEasingCurve.OutCubic)
 
     # --- public API ---
     def show_recording(self):
@@ -61,6 +65,7 @@ class Overlay(QWidget):
         edit failed with 找不到選取的文字 and the three dots stood still)."""
         self._state = self.IDLE
         self._fade.stop()
+        self._slide.stop()
         self._timer.stop()
         self.hide()
 
@@ -87,10 +92,17 @@ class Overlay(QWidget):
             self._timer.stop()
             self.hide()
 
-    def _reposition(self):
+    def _reposition(self, slide: bool = False):
         screen = QGuiApplication.screenAt(self.cursor().pos()) or QGuiApplication.primaryScreen()
         g = screen.availableGeometry()
-        self.move(g.center().x() - W // 2, g.top() + 48 if self._top else g.bottom() - H - 48)
+        to = QPoint(g.center().x() - W // 2, g.top() + 48 if self._top else g.bottom() - H - 48)
+        self._slide.stop()
+        if slide:
+            self._slide.setStartValue(self.pos())
+            self._slide.setEndValue(to)
+            self._slide.start()
+        else:
+            self.move(to)
 
     def _make_click_through(self):
         _click_through(self)
@@ -98,9 +110,9 @@ class Overlay(QWidget):
     def _tick(self):
         # the pointer over the indicator sends it to the other end of the screen (the user's request, 2026-10-15:
         # it covered what they were looking at; following the caret through UI Automation missed)
-        if self._state != self.IDLE and self.geometry().adjusted(-6, -6, 6, 6).contains(QCursor.pos()):
+        if self._state != self.IDLE and self._slide.state() != QAbstractAnimation.Running                 and self.geometry().adjusted(-6, -6, 6, 6).contains(QCursor.pos()):
             self._top = not self._top
-            self._reposition()
+            self._reposition(slide=True)
         if self._state == self.RECORDING:
             lvl = self._level_source()
             self._levels = self._levels[1:] + [lvl]

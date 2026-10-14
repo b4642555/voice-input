@@ -198,7 +198,8 @@ reading) for a few hours on 2026-10-14/15; removed at the user's request (git: 8
 A piece that is no command alone but, decoded with the sentence before it, is exactly a command once the sentence
 settles before it runs as one (the user's 換行 came out as "Hang Hung," alone and as 換行 in the sentence, and was
 typed as text, 2026-10-15). While listening, the pointer over the indicator sends it to the other end of the screen
-(`Overlay._tick`; the user's request, 2026-10-15). Following the caret through UIA (read after each update of the
+(`Overlay._tick`; the user's request, 2026-10-15), sliding there in 0.2s with an ease-out curve so the eye
+can follow it. Following the caret through UIA (read after each update of the
 draft) was tried the same evening and missed: the user typed under it and it stayed. An underline under the open sentence like an IME's composition (an
 overlay drawn at its UIA rectangles) was offered and declined.
 用按鍵關閉麥克風時自動送出 (`send_on_stop`, on by default, the user's request 2026-10-14 so 送出 need not be said):
