@@ -621,7 +621,11 @@ class App(QObject):
     def _freeze(self, at: int | None = None):
         """Main thread: the caret moved away from the draft. It stays as typed; speech from `at` (default: the
         speech under way) starts a new draft."""
-        log.info("draft left as typed: %s", self._draft.typed if self._draft else "")
+        d = self._draft
+        log.info("draft left as typed: %s", d.typed if d else "")
+        if d is not None and d.placed and d.typed:   # never committed: logged as it stands
+            self.record.emit({"time": time.strftime("%H:%M:%S"), "kind": "輸入", "main": d.typed, "copy": d.typed,
+                              "steps": [("草稿", "游標移開了，照畫面上的文字定下來，沒有再重新辨識", None)]})
         self._draft = None
         if at is None:
             at = self._speech_sample if self._speech_sample > self._draft_start else self.listener.now
