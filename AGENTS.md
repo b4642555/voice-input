@@ -66,7 +66,7 @@ Memory with everything on: ~1.1GB (was ~3GB with the LLM). The word index held a
 `asr.py` (raw text, biased toward hotwords and on-screen terms) → `textfmt.format_text` → smart picks
 (`memory.apply`, single characters) → paste. Order inside `format_text` matters: s2tw → filler
 removal → disfluencies → 百分之 → numerals → spelled letters → 點 → percent → number+letter → English punctuation →
-CJK/ASCII spacing → English sentence end → trailing punctuation.
+CJK/ASCII spacing → English sentence end → 嗎 questions → trailing punctuation.
 
 - Trailing punctuation (2026-10-07, replacing the "strip trailing punctuation" setting): the model's sentence-final
   。，,. is kept, except when the caret's line has non-blank text on both sides of it (the user is inserting).
@@ -75,6 +75,9 @@ CJK/ASCII spacing → English sentence end → trailing punctuation.
 
 - English sentence end (2026-10-14, the user's request): . ? ! right after English become 。？！ when their sentence
   (since the previous 。？！ or . ? ! before a space) has Chinese: 幫我 push. → 幫我 push。; 今天很好。I love it. stays.
+- 嗎 questions (2026-10-15, the user's request): 嗎。 → 嗎？, and a commit that adds the sentence end adds ？ after 嗎.
+  Only 嗎 (the user's choice): all 36 of their recorded sentences ending in it were questions (17 had no mark and got
+  。); 呢 / 吧 end statements too (希望如此吧。).
 - Every step that changes the text is logged (`format <step>: before -> after`, the changed fragments) and shown
   on the 辨識紀錄 tab (`format_text(..., steps)`, `textfmt.changes`).
 - OpenCC `s2tw` only (glyph conversion). `s2twp` was dropped because it rewrites vocabulary (程序 → 程式).
@@ -190,7 +193,7 @@ the commit 2.92s -> 0.25s). The 一般 tab's 定稿時機
 at every pause; a draft longer than 60s is committed at a pause. A draft shows the recognizer's 。？！ at its end while
 speaking, and the next pause turns it into ， when the sentence goes on (the user's request, 2026-10-15; before, drafts
 had none while speaking, as a pause is not a sentence end); a commit by an operation (換行, 送出 …) or by the end of listening
-keeps the recognizer's 。？！, or gets 。 when it gave none (. after English only; the user's choice,
+keeps the recognizer's 。？！, or gets 。 when it gave none (？ after 嗎, . after English only; the user's choice,
 2026-10-14/15), unless the caret had text on both sides; a commit by a
 spoken punctuation mark gets that mark instead, and a mark said right after an added one replaces it (not 。。).
 「X改成Y」 said alone changed the last X typed before the caret to Y (same characters, then the same toneless
@@ -247,8 +250,8 @@ history: what the user changed is unknown. Logged as 復原 on the 辨識紀錄 
 Defaults are the user's own setup (their request, 2026-10-14): the rules in `rules.defaults` (tap middle = 錄音,
 double middle = 復原 (on a selection 刪除選取的文字), hold middle on a selection = 選字, spoken 撤銷 = 復原 and
 刪除 = Backspace (rules_version 8; a Backspace step is a change 復原 takes back), spoken 換行 / 送出 / 復原 / 標點 / 括號 / 貼上 / 空白;
-送出 presses Enter, then the 結束錄音 command turns listening off: the user's request, rules_version 5 adds it to
-saved configs), `gesture_time` 0.15s, mute while listening, the AI pack ticked, word list by date.
+送出 presses Enter and listening goes on, the key turns it off (the user's request, 2026-10-15, rules_version 9 removes
+the 結束錄音 step that rules_version 5 had added on 2026-10-14; an Enter step leaves nothing for send_on_stop)), `gesture_time` 0.15s, mute while listening, the AI pack ticked, word list by date.
 
 ## 選字, smart picks and hotwords (2026-10-11, reworked the same day)
 

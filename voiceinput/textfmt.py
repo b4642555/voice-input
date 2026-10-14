@@ -287,6 +287,9 @@ def _word_char(c: str) -> bool:
     return c.isascii() and c.isalnum()
 
 
+_QUESTION = re.compile(r"嗎[。.](?!\d)")
+
+
 def format_text(text: str, strip_trailing_punct: bool = False, steps: list | None = None) -> str:
     """steps: if given, gets (name, before, after) for each step that changed the text (also logged)."""
     def run(name, fn):
@@ -311,6 +314,9 @@ def format_text(text: str, strip_trailing_punct: bool = False, steps: list | Non
     run("英文標點", lambda t: _EN_PUNCT.sub(lambda m: m.group(1).translate(_HALF) + " ", t))
     run("中英空格", lambda t: _SPACE_ASCII_CJK.sub(r"\1 \2", _SPACE_CJK_ASCII.sub(r"\1 \2", t)))
     run("英文句尾", _cjk_sentence_end)
+    # a sentence ending in 嗎 is a question (the user's request, 2026-10-15: all 36 of theirs were; 呢 / 吧 are not
+    # always, 希望如此吧。)
+    run("問句", lambda t: _QUESTION.sub("嗎？", t))
     if strip_trailing_punct:
         run("插入不加句尾", lambda t: _TRAILING_PUNCT.sub("", t))
     return text

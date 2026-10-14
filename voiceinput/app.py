@@ -696,8 +696,10 @@ class App(QObject):
                 d.final = _TRAILING.sub("", _joined(d.settled, text))
                 end = _SENTENCE_END.search(_joined(d.settled, text))
                 if final and d.final and not _inside(d.ctx):
-                    # none from the recognizer (a short sentence often has none): 。 (the user's choice, 2026-10-15)
-                    d.final += end.group() if end else "。" if _CJK_CHAR.search(d.final) else "."
+                    # none from the recognizer (a short sentence often has none): 。 (the user's choice, 2026-10-15),
+                    # ？ after 嗎 (the user's request the same day)
+                    d.final += end.group() if end else "？" if d.final.endswith("嗎") \
+                        else "。" if _CJK_CHAR.search(d.final) else "."
                     marked = True
                 self._show_draft()
                 if d.final and d.typed == d.final:   # else left as typed (logged by _freeze)
@@ -973,6 +975,9 @@ class App(QObject):
                             self._on_main(lambda: self.session.dictated("\n", None, foreground()))
                         elif step.value == "Backspace":   # one character less, which 復原 can type again
                             self._on_main(self._backspaced)
+                        elif step.value == "Enter":   # sent: nothing left for the end of listening to send
+                            self.session.on_input()
+                            self._listen_typed = False
                         else:
                             self.session.on_input()     # the caret may have moved
                 elif step.type == rules.TEXT:
