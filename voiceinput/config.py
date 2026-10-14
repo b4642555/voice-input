@@ -35,6 +35,9 @@ class Config:
     # what shows the text while listening: "stream" (the streaming X-ASR model, as it is said) or "offline" (the
     # offline model, at each pause); the user wants to compare them (2026-10-14)
     live_model: str = "stream"
+    # where that text shows: "inline" (typed in the document, updated in place) or "preview" (a box above the
+    # indicator; typed in the document at a commit); the user wants to compare them (2026-10-14)
+    live_view: str = "inline"
     stop_sound_at: str = "stop"   # when the end sound plays: "stop" (recording stops) or "done" (text is in)
     save_recordings: bool = False   # development only, to be removed before release (recordings.py)
     rules: list = field(default_factory=rules.defaults)   # custom operations (rules.Rule)

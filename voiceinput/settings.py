@@ -25,7 +25,7 @@ SOURCES = [(rules.MOUSE, "滑鼠鍵"), (rules.KEY, "鍵盤鍵"), (rules.SPEECH, 
 GESTURES = [(rules.TAP, "按一下"), (rules.DOUBLE, "連按兩下"), (rules.HOLD, "按住")]
 SITUATIONS = [(rules.ANY, "不限"), (rules.DICTATED, "剛輸入完"), (rules.SELECTION, "有選取文字")]
 STEP_TYPES = [(rules.COMMAND, "命令"), (rules.KEYS, "按鍵"), (rules.TEXT, "輸入文字"), (rules.WAIT, "等待")]
-COMMANDS = [(rules.RECORD, "錄音"), (rules.PICK, "選字"),
+COMMANDS = [(rules.RECORD, "錄音"), (rules.STOP, "結束錄音"), (rules.PICK, "選字"),
             (rules.DELETE_SELECTION, "刪除選取的文字"),
             (rules.DELETE_DICTATION, "刪除剛輸入的文字")]
 _STEP_DEFAULTS = {rules.COMMAND: rules.DELETE_SELECTION, rules.KEYS: "", rules.TEXT: "", rules.WAIT: 100}
@@ -242,6 +242,9 @@ class SettingsDialog(QDialog):
         self.live_model = QComboBox(toolTip="下次開始錄音時生效")
         self.live_model.addItem("串流 X-ASR：邊講邊出字，停頓時修正", "stream")
         self.live_model.addItem("原本的 X-ASR：停頓後才出字", "offline")
+        self.live_view = QComboBox(toolTip="預覽框：字先顯示在錄音指示條上方，定稿時才打進文件")
+        self.live_view.addItem("直接打進文件，邊講邊更新", "inline")
+        self.live_view.addItem("預覽框，定稿時才打進文件", "preview")
         self.commit_at = QComboBox(toolTip="講話時字會先打出來、停頓時修正；定稿後才固定下來（整段重新辨識）")
         self.commit_at.addItem("講指令或關錄音時", "command")
         self.commit_at.addItem("每次停頓時", "pause")
@@ -264,6 +267,7 @@ class SettingsDialog(QDialog):
         form = QFormLayout()
         form.addRow("麥克風", self.mic)
         form.addRow("辨識方式", self.live_model)
+        form.addRow("顯示方式", self.live_view)
         form.addRow("定稿時機", self.commit_at)
         form.addRow("提示音", sound_row)
         form.addRow("", stop_at_row)
@@ -286,6 +290,7 @@ class SettingsDialog(QDialog):
         self.stop_at.currentIndexChanged.connect(self._apply)
         self.commit_at.currentIndexChanged.connect(self._apply)
         self.live_model.currentIndexChanged.connect(self._apply)
+        self.live_view.currentIndexChanged.connect(self._apply)
         for box in (self.punct, self.period_comma, self.describe, self.autostart, self.mute, self.keep_audio):
             box.toggled.connect(self._apply)
         return page
@@ -304,6 +309,7 @@ class SettingsDialog(QDialog):
         self.stop_at.setCurrentIndex(max(0, self.stop_at.findData(self.cfg.stop_sound_at)))
         self.commit_at.setCurrentIndex(max(0, self.commit_at.findData(self.cfg.commit_at)))
         self.live_model.setCurrentIndex(max(0, self.live_model.findData(self.cfg.live_model)))
+        self.live_view.setCurrentIndex(max(0, self.live_view.findData(self.cfg.live_view)))
         self.gesture_time.setValue(self.cfg.gesture_time)
         same = self.cfg.start_sound == self.cfg.stop_sound
         self.sound_set.setCurrentIndex(self.sound_set.findData(self.cfg.start_sound) if same
@@ -331,6 +337,7 @@ class SettingsDialog(QDialog):
         self.cfg.stop_sound_at = self.stop_at.currentData()
         self.cfg.commit_at = self.commit_at.currentData()
         self.cfg.live_model = self.live_model.currentData()
+        self.cfg.live_view = self.live_view.currentData()
         self._save()
 
     def _sound_changed(self, box, kind: str):

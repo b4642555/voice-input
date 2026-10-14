@@ -181,8 +181,9 @@ def feed(audio):
         A.listener._queue.put(audio[i:i + 480])
         if i % 4800 == 0:
             pump(0.1)   # real time: 0.3s of audio every 0.1s
-            if box.text != seen:
-                seen = box.text
+            now = box.text + (f"   預覽框：{A.preview.label.text()!r}" if A.preview.isVisible() else "")
+            if now != seen:
+                seen = now
                 print(f"      [{i / 16000:4.1f}s] {seen!r}")
 
 
@@ -283,7 +284,7 @@ try:
             print(f"[詞包 {ids}]（只改記憶體，不存檔）")
             continue
         if step.startswith("say:"):
-            A._dictate(step[4:], None, HWND, appmod._Press("", Probe(), 0, False))
+            A._type_text(step[4:])
             pump(0.5)
             print(f"[說 {step[4:]}（跳過辨識）] → 文字框：{box.text[:box.caret] + '|' + box.text[box.caret:]!r}")
             continue

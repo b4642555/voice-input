@@ -51,7 +51,7 @@ from .listen import LEAD, Listener
 from .memory import Memory, is_latin, situation
 from .mute import Muter
 from .output import backspace, paste_text, press_chord, press_delete
-from .overlay import Overlay
+from .overlay import Overlay, Preview
 from .picker import Picker
 from .reading import reading_key
 from .rules import DOUBLE, HOLD, TAP
@@ -170,6 +170,7 @@ class App(QObject):
         self.icon_rec = make_icon(QColor(255, 69, 58))
 
         self.overlay = Overlay(lambda: self.listener.level if self._listening else 0.0)
+        self.preview = Preview()                 # the draft's text when it is not typed until a commit
         self.picker = Picker()
         self.picker.picked.connect(self.on_menu_pick)
         self.picker.typed.connect(self.on_menu_typed)
@@ -488,6 +489,7 @@ class App(QObject):
             return
         self._listen_owner, self._listen_shown = press, False
         self._draft, self._draft_start, self._since, self._listen_probe = None, 0, 0, None
+        self.preview.hide()
         with self._early_lock:
             self._early_pieces = []
 
@@ -594,10 +596,15 @@ class App(QObject):
         self._draft = _Draft(self._draft_start, ctx, ctx.selection)
         return self._draft
 
-    def _show_draft(self):
-        """Main thread: make the document show the draft's text (its committed text and the streaming rest)."""
+    def _show_draft(self, commit: bool = False):
+        """Main thread: make the document show the draft's text (its committed text and the streaming rest); in
+        the preview box instead until it is committed when 顯示方式 says so."""
         d = self._draft
         text = _joined(d.final, d.partial)
+        if self.cfg.live_view == "preview":
+            self.preview.show_text("" if commit else text)
+            if not commit:
+                return
         if not d.placed:
             if not text:
                 return
@@ -666,7 +673,7 @@ class App(QObject):
             d = self._draft or (self._new_draft(ctx) if text else None)
             if d is not None:
                 d.final, d.partial = text, ""
-                self._show_draft()
+                self._show_draft(commit=True)
             self._draft = None
             self._draft_start = self._since = at
             if self._listening:
@@ -806,6 +813,8 @@ class App(QObject):
                     self._on_main(lambda: self._delete_selection(press, ctx))
                 elif step.type == rules.COMMAND and step.value == rules.DELETE_DICTATION:
                     self._on_main(self.delete_last)
+                elif step.type == rules.COMMAND and step.value == rules.STOP:
+                    self._on_main(lambda: self._stop_listen() if self._listening else None)
                 elif step.type == rules.COMMAND and step.value == rules.PICK:
                     ctx = press.probe.result()
                     sel = ctx.selection if press.deleted is None else None

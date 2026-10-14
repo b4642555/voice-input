@@ -179,7 +179,7 @@ listener thread and its text is typed in place (Backspace to the change + paste,
 offline model, with commands boosted when short. Said alone, an operation's phrase, a punctuation name or a described
 character commits the draft (its audio before the command decoded again as a whole) and then runs or is typed;
 otherwise the draft's audio so far is decoded again and its text, punctuation included, replaces the streaming text
-(`_refine`; streaming goes on after it). The 一般 tab's 定稿時機 (`commit_at`) picks when a draft is committed: on a
+(`_refine`; streaming goes on after it). The 一般 tab's 辨識方式 (`live_model`) picks what shows the text: the streaming model as it is said (default) or the offline model at each pause (the streaming model is then not loaded, ~0.3GB less); 顯示方式 (`live_view`) where: typed in the document and updated in place (default) or in a box above the indicator (`overlay.Preview`), typed at the commit. The user wants to compare them. Its 定稿時機 (`commit_at`) picks when a draft is committed: on a
 command or the end of listening (default, the user's choice) or at every pause; a draft longer than 60s is committed
 at a pause. Drafts never get sentence-final punctuation (the user says 句號). A draft placed where text was selected
 when its speech began replaces it; moving the caret (click, selection, typing) leaves a draft as typed, and the next
@@ -191,7 +191,8 @@ prints the document as the audio arrives.
 
 Defaults are the user's own setup (their request, 2026-10-14): the rules in `rules.defaults` (tap middle = 錄音,
 double middle on a selection / after a dictation = delete, hold middle on a selection = 選字, spoken 換行 / 送出 /
-標點 / 括號 / 貼上 / 空白), `gesture_time` 0.15s, mute while listening, the AI pack ticked, word list by date.
+標點 / 括號 / 貼上 / 空白; 送出 presses Enter, then the 結束錄音 command turns listening off: the user's request,
+rules_version 5 adds it to saved configs), `gesture_time` 0.15s, mute while listening, the AI pack ticked, word list by date.
 
 ## 選字, smart picks and hotwords (2026-10-11, reworked the same day)
 

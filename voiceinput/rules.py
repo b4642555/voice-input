@@ -2,7 +2,8 @@
 
 A rule is a trigger (a mouse button or keyboard key with a gesture: tap, double tap or hold; or an utterance that is
 exactly a phrase), a situation (any, right after a dictation, text selected) and a list of steps run in order:
-a command (錄音 record, 刪除選取的文字, 刪除剛輸入的文字, 選字), a key combination, text to type, or a wait.
+a command (錄音 record, 結束錄音 stop listening, 刪除選取的文字, 刪除剛輸入的文字, 選字), a key combination, text
+to type, or a wait.
 錄音 is continuous listening (listen.py; on the continuous-mic branch since 2026-10-14): every pause ends a piece
 that is typed at once or run as a command. Hold + 錄音 listens while held; tap or double tap + 錄音 turns it on and
 the next tap or double tap that records turns it off (other gestures work meanwhile). A rule's steps before 錄音 run
@@ -22,9 +23,12 @@ ANY, DICTATED, SELECTION = "any", "dictated", "selection"
 COMMAND, KEYS, TEXT, WAIT = "command", "keys", "text", "wait"
 RECORD, DELETE_SELECTION, DELETE_DICTATION = "record", "delete_selection", "delete_dictation"
 PICK = "pick"
+STOP = "stop"        # 結束錄音: listening off (送出 does it by default, the user's request 2026-10-14)
 _LISTEN = "listen"   # 連續聽寫, a command for a few hours on 2026-10-14 until 錄音 itself became continuous
 _ADD_HOTWORD = "add_hotword"   # 加入熱詞, removed 2026-10-11: hotwords are typed in the 選字 menu instead
-VERSION = 4   # config rules_version: 2 added the tap on a selection that opens 選字, 3 a tap that listens, 4 drops 連續聽寫
+# config rules_version: 2 added the tap on a selection that opens 選字, 3 a tap that listens, 4 dropped 連續聽寫,
+# 5 makes 送出 stop listening
+VERSION = 5
 
 _PUNCT = re.compile(r"[\s，。、！？；：,.!?;:…]+")
 
@@ -69,7 +73,7 @@ def defaults(key: str = "mouse_middle", newline: bool = True, send: bool = True)
     if newline:
         out.append(Rule(SPEECH, phrase="換行", steps=[Step(KEYS, "Shift+Enter")]))
     if send:
-        out.append(Rule(SPEECH, phrase="送出", steps=[Step(KEYS, "Enter")]))
+        out.append(Rule(SPEECH, phrase="送出", steps=[Step(KEYS, "Enter"), Step(COMMAND, STOP)]))
     out += [Rule(SPEECH, phrase="標點", steps=[Step(TEXT, "- ")]),
             Rule(SPEECH, phrase="括號", steps=[Step(TEXT, "（）"), Step(KEYS, "Left")]),
             Rule(SPEECH, phrase="貼上", steps=[Step(KEYS, "Alt+V")]),
@@ -111,6 +115,11 @@ def upgrade(rules: list[Rule], version: int) -> list[Rule]:
     if version < 4:
         for r in rules:
             r.steps = [Step(COMMAND, RECORD) if st.type == COMMAND and st.value == _LISTEN else st for st in r.steps]
+    if version < 5:
+        for r in rules:
+            if r.source == SPEECH and normalize(r.phrase) == "送出" and not any(
+                    st.type == COMMAND and st.value == STOP for st in r.steps):
+                r.steps.append(Step(COMMAND, STOP))
     return rules
 
 
