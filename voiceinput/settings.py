@@ -20,7 +20,6 @@ from .config import GESTURE_TIME_RANGE
 from .memory import BOUNDARY
 from .keys import KEY_TRIGGERS, MOUSE_TRIGGERS, combo_text, is_modifier
 from .rules import Rule, Step
-from .textfmt import changes
 
 SOURCES = [(rules.MOUSE, "滑鼠鍵"), (rules.KEY, "鍵盤鍵"), (rules.SPEECH, "說出")]
 GESTURES = [(rules.TAP, "按一下"), (rules.DOUBLE, "連按兩下"), (rules.HOLD, "按住")]
@@ -621,63 +620,108 @@ class SettingsDialog(QDialog):
     # --- 辨識紀錄 ---
     def _log_page(self) -> QWidget:
         self.log = QTextBrowser(openLinks=False)
-        self.log.setPlaceholderText("每次說話的辨識結果、格式化結果與操作會顯示在這裡（只保留這次執行期間）")
+        self.log.setPlaceholderText("每句話怎麼被聽到、重聽、定下來，以及指令和復原，會顯示在這裡（只保留這次執行期間）")
         self.log.anchorClicked.connect(self._log_link)
-        self._log_entries = []
-        return self.log
+        self.log_tech = QCheckBox("顯示技術細節")
+        self.log_tech.setToolTip("每一步的辨識秒數、模型原本的文字和格式化步驟")
+        self.log_tech.toggled.connect(lambda: self.set_log(self._log_cards))
+        self._log_cards = []
+        self._log_open: dict[int, bool] = {}   # card id -> expanded (default: only the newest)
+        page = QWidget()
+        v = QVBoxLayout(page)
+        v.setContentsMargins(0, 0, 0, 0)
+        top = QHBoxLayout()
+        top.addStretch()
+        top.addWidget(self.log_tech)
+        v.addLayout(top)
+        v.addWidget(self.log, 1)
+        return page
 
     def _log_link(self, url):
-        """複製 on an entry: its typed text to the clipboard."""
+        """複製 copies a card's text; 展開 / 收起 a card's steps."""
+        card = next((c for c in self._log_cards if str(c["id"]) == url.path()), None)
+        if card is None:
+            return
         if url.scheme() == "copy":
-            QApplication.clipboard().setText(self._log_entries[int(url.path())]["copy"])
+            QApplication.clipboard().setText(card["copy"])
             QToolTip.showText(QCursor.pos(), "已複製", self.log)
+        elif url.scheme() == "open":
+            newest = self._log_cards and self._log_cards[-1] is card
+            self._log_open[card["id"]] = not self._log_open.get(card["id"], newest)
+            pos = self.log.verticalScrollBar().value()
+            self.set_log(self._log_cards, keep_scroll=True)
+            self.log.verticalScrollBar().setValue(pos)
 
-    def set_log(self, entries):
-        """Render entries newest first (2026-10-14, the user's design): what happened first, in normal size (【輸入】
-        the typed text, 【操作】 a spoken operation, 【取代】 old → new, 【選字】, 【刪除】), then the details smaller:
-        the recognizer's text and time, and each step that changed the text as its changed fragments. Each entry:
-        time, kind, main, and optionally asr, asr_s, steps [(name, before, after or None for a note)]. Each entry is
-        a framed block whose first row, on a darker ground, holds the kind, the main text and the time (the user's
-        pick among three designs, 2026-10-14). An entry with copy (the text it typed) has a 複製 link."""
-        gray = "#5F6670"
-        self._log_entries = list(entries)
+    def set_log(self, cards, keep_scroll: bool = False):
+        """One card per sentence, newest first (the user's pick, 2026-10-15, design A; logbook.py builds them): the
+        sentence as it ended on a darker row with its kind, time, counts and 複製; below, what happened to it as a
+        timeline: what was heard and typed, each pause's new reading of the sentence (new text marked, removed text
+        struck through), the part that settled, the command or the end of listening, 復原. Each step has a plain
+        sentence of why in gray; the recognizer's seconds, its own text and the formatting steps only with 顯示技術細節.
+        Only the newest card is expanded; 展開 opens another."""
+        gray, ink = "#5F6670", "#1F2328"
+        self._log_cards = list(cards)
+        tech = self.log_tech.isChecked()
+        dots = {"input": "#1F5FAF", "fix": "#6B3FA0", "lock": "#5F6670", "op": "#B35A00", "end": "#B35A00",
+                "undo": "#5B6573", "note": "#5F6670"}
 
-        def row(label, text):
-            return (f"<tr><td style='color:{gray}; padding-right:8px; white-space:nowrap' width=80>{label}</td>"
-                    f"<td style='color:#3D434B'>{text}</td></tr>")
+        def step(st):
+            dot = f"<span style='color:{dots.get(st['kind'], gray)}; font-size:13px'>●</span>"
+            body = f"<div style='color:{ink}'>{st['html']}</div>"
+            if st["why"]:
+                body += f"<div style='color:{gray}; font-size:12px'>{html.escape(st['why'])}</div>"
+            if tech and st["tech"]:
+                body += (f"<div style='color:{gray}; font-size:11px; font-family:Consolas,monospace'>"
+                         f"{html.escape(st['tech'])}</div>")
+            return (f"<tr><td valign=top width=58 style='color:{gray}; font-size:11px; padding-top:2px; "
+                    f"font-family:Consolas,monospace'>{st['time']}</td>"
+                    f"<td valign=top width=16>{dot}</td><td style='padding-bottom:6px'>{body}</td></tr>")
 
-        def step(name, before, after):
-            if after is None:
-                return row(html.escape(name), html.escape(before))
-            arrow = f" <span style='color:{gray}'>→</span> "
-            frags = changes(before, after) or [(before, after)]
-            return row(html.escape(name),
-                       "；".join(html.escape(a or "（空）") + arrow + html.escape(b or "（空）") for a, b in frags))
-
-        def block(i, e):
-            copy = (f"<a href='copy:{i}' style='color:#1F5FAF; text-decoration:none'>複製</a>&nbsp;&nbsp;"
-                    if e.get("copy") else "")
-            main = html.escape(e.get("main") or "") or f"<span style='color:{gray}'>（沒有辨識到文字）</span>"
-            kind = e.get("kind", "輸入")
-            rows = ""
-            if e.get("asr_s") is not None:
-                rows += row(f"ASR {e['asr_s']:.2f}s", html.escape(e.get("asr") or ""))
-            rows += "".join(step(*s) for s in e.get("steps", []))
-            details = (f"<tr><td style='padding:3px 8px 4px 8px'>"
-                       f"<table cellspacing=0 cellpadding=0 style='font-size:12px'>{rows}</table></td></tr>"
-                       if rows else "")
-            # the kind in a cell of its own, so a wrapped main text stays indented right of it
+        def card(c, newest):
+            kind = c["kind"]
+            n = c["counts"]
+            meta = []
+            if n["pieces"] > 1:
+                meta.append(f"講了 {n['pieces']} 段")
+            if n["redo"]:
+                meta.append(f"整句重聽 {n['redo']} 次")
+            if n["undo"]:
+                meta.append(f"復原 {n['undo']} 次")
+            if c["end"]:
+                meta.append(f"以「{html.escape(c['end'])}」結束")
+            elif kind == "輸入" and c is self._log_cards[-1] and len(c["steps"]) and c["steps"][-1]["kind"] != "op":
+                meta.append("還在草稿")
+            opened = self._log_open.get(c["id"], newest)
+            links = []
+            steps = len(c["steps"])
+            if steps > 1 or steps and not opened:
+                label = "收起" if opened else f"展開經過（{steps} 步）"
+                links.append(f"<a href='open:{c['id']}' style='color:#1F5FAF; text-decoration:none'>{label}</a>")
+            if c["copy"]:
+                links.append(f"<a href='copy:{c['id']}' style='color:#1F5FAF; text-decoration:none'>複製</a>")
+            title = html.escape(c["title"]).replace("\n", "⏎") or f"<span style='color:{gray}'>（沒有文字）</span>"
+            head = (f"<tr><td bgcolor='#E6EAF0' style='padding:5px 8px'>"
+                    f"<table width='100%' cellspacing=0 cellpadding=0 border=0><tr>"
+                    f"<td valign=top width=38 style='white-space:nowrap; font-size:14px'>"
+                    f"<b style='color:{_KIND_COLORS.get(kind, ink)}'>{html.escape(kind)}</b></td>"
+                    f"<td style='font-size:14px'>{title}</td>"
+                    f"<td align=right valign=top width=64 style='font-size:12px; color:{gray}; padding-top:2px'>"
+                    f"{c['time']}</td></tr>"
+                    + (f"<tr><td></td><td colspan=2 style='font-size:12px; color:{gray}; padding-top:2px'>"
+                       f"{'　·　'.join(meta)}{'　' if meta and links else ''}{'　'.join(links)}</td></tr>"
+                       if meta or links else "")
+                    + "</table></td></tr>")
+            body = ""
+            if opened and c["steps"]:
+                body = (f"<tr><td style='padding:8px 8px 2px 8px'><table width='100%' cellspacing=0 cellpadding=0 "
+                        f"style='font-size:13px'>{''.join(step(st) for st in c['steps'])}</table></td></tr>")
             return (f"<table width='100%' cellspacing=0 cellpadding=0 border=1 style='border-collapse:collapse; "
-                    f"border-color:#D5DAE1; border-style:solid; margin-bottom:6px'>"
-                    f"<tr><td bgcolor='#E6EAF0' style='padding:4px 8px'>"
-                    f"<table width='100%' cellspacing=0 cellpadding=0 border=0 style='font-size:14px'><tr>"
-                    f"<td valign=top width=38 style='white-space:nowrap'>"
-                    f"<b style='color:{_KIND_COLORS.get(kind, '#1F2328')}'>{html.escape(kind)}</b></td><td>{main}</td>"
-                    f"<td align=right valign=top width=96 style='padding-top:2px; font-size:12px; color:{gray}; "
-                    f"white-space:nowrap'>{copy}{e['time']}</td></tr></table></td></tr>{details}</table>")
+                    f"border-color:#D5DAE1; border-style:solid; margin-bottom:8px'>{head}{body}</table>")
 
-        self.log.setHtml("".join(block(i, e) for i, e in reversed(list(enumerate(entries)))))
-        self.log.verticalScrollBar().setValue(0)
+        last = len(self._log_cards) - 1
+        self.log.setHtml("".join(card(c, i == last) for i, c in reversed(list(enumerate(self._log_cards)))))
+        if not keep_scroll:
+            self.log.verticalScrollBar().setValue(0)
 
     # --- 自訂操作: one card per rule ---
     def _gesture_time_changed(self, value: float):

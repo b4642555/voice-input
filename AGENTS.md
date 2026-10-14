@@ -134,6 +134,15 @@ drop-down, remembered (`hotword_sort`: 優先度, name A→Z / Z→A by pinyin, 
 comtypes; muted when the recording indicator shows, unmuted once the text is pasted or the press ends in nothing; a
 mute the user set is left alone. Selection edits and on-screen terms are always on.
 
+On the continuous-mic branch the 辨識紀錄 tab shows one card per sentence instead (`logbook.py`, rendered by
+`SettingsDialog.set_log`; the user's pick of three mockups, 2026-10-15, design A, so the workings can be seen): the
+sentence as it ended on the darker row with its kind, time, counts (pieces, pauses decoded again, 復原) and how it
+ended; below, a timeline of what happened, in plain words: what was heard and typed, each pause's new reading
+(added text green, removed struck through red, long unchanged stretches cut to …), the part settled, the command or
+the end of listening with the mark added, 復原, the caret moving away. A gray line says why where it is not obvious;
+seconds, the recognizer's own text and the formatting steps only with 顯示技術細節. Only the newest card is open.
+選字, deleting a selection and the like are cards of their own (the `record` signal still carries them).
+
 ## Custom operations (自訂操作, 2026-10-11)
 
 `rules.py`, stored as `rules` in config.json; they replaced the single hotkey setting and the 換行 / 送出 switches
@@ -209,7 +218,8 @@ tokens from where the piece began, `_split_at`) runs as one, the speech before i
 the commands boosted first, then plainly if that finds no command: plain, 換行 at the end of the audio was often left
 out and turned up inside the sentence at the next pause (TTS + the user's 換行: 7/7 new lines, 3 by this path). While listening, the pointer over the indicator sends it to the other end of the screen
 (`Overlay._tick`; the user's request, 2026-10-15), sliding there in 0.2s with an ease-out curve so the eye
-can follow it. Following the caret through UIA (read after each update of the
+can follow it. The pointer on another screen takes the indicator and the glow there (the user's request the same
+night; they have three screens). Following the caret through UIA (read after each update of the
 draft) was tried the same evening and missed: the user typed under it and it stayed. An underline under the open sentence like an IME's composition (an
 overlay drawn at its UIA rectangles) was offered and declined.
 用按鍵關閉麥克風時自動送出 (`send_on_stop`, on by default, the user's request 2026-10-14 so 送出 need not be said):
@@ -266,7 +276,9 @@ commit belongs to the update before it. After one is taken back, what is left of
 last commit typed (a 換行 taken back), is a draft again with its text fixed (decoded again, the audio taken back
 would return): speech goes on after it, behind a ， (？ after 嗎) when it ends in none, and a command or the end of
 listening gives it its sentence end (the user's choice, 2026-10-15: 換行 misheard and taken back left 細節 without
-its 。; the draft used to be dropped). Until something is said after it, the next piece counts as said alone and
+its 。; the draft used to be dropped). The last commit's draft comes back only when the change taken back is the commit's own or the one right after it
+(compared as history steps: comparing texts matched by chance, and undoing a mark typed over a selection elsewhere
+brought an old sentence back). Until something is said after it, the next piece counts as said alone and
 the silence since 復原 is not decoded (it came out as "So," before a 換行).
 While listening, the indicator's red dot gets a spinning arc while speech is being decoded (`App._decoding` counts
 the worker's jobs; `spin_while_decoding`, a 一般 checkbox, on by default; the user's request, 2026-10-15). Typing or clicking ends the

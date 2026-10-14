@@ -33,6 +33,7 @@ class Overlay(QWidget):
         self.glow = glow                    # glow.EdgeGlow shown with the recording indicator
         self._state = self.IDLE
         self._top = False                   # at the top of the screen (the pointer came over the bottom spot)
+        self._on_screen = None              # the screen it is shown on
         self._levels = [0.0] * BARS
         self._t0 = time.monotonic()
         self._timer = QTimer(self, interval=16, timeout=self._tick)
@@ -81,6 +82,7 @@ class Overlay(QWidget):
         self._t0 = time.monotonic()
         if was_hidden:
             self._top = False
+            self._on_screen = self._screen()
             self._reposition()
             self.setWindowOpacity(0.0)
             self.show()
@@ -120,6 +122,15 @@ class Overlay(QWidget):
         _click_through(self)
 
     def _tick(self):
+        # the pointer on another screen takes the indicator and the glow there (the user's request, 2026-10-15:
+        # working on screen B while they stayed on screen A)
+        screen = self._screen()
+        if self._state != self.IDLE and screen is not self._on_screen:
+            self._on_screen = screen
+            self._top = False
+            self._reposition()
+            if self.glow:
+                self.glow.move(screen)
         # the pointer over the indicator sends it to the other end of the screen (the user's request, 2026-10-15:
         # it covered what they were looking at; following the caret through UI Automation missed)
         if self._state != self.IDLE and self._slide.state() != QAbstractAnimation.Running                 and self.geometry().adjusted(-6, -6, 6, 6).contains(QCursor.pos()):

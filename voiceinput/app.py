@@ -35,7 +35,6 @@ import re
 import sys
 import threading
 import time
-from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
@@ -48,6 +47,7 @@ from . import autostart, candidates, cues, edit, models, packs, paths, recording
 from .asr import SAMPLE_RATE, Recognizer
 from .config import Config
 from .glow import EdgeGlow
+from .logbook import LogBook, esc
 from .hotwords import Hotwords
 from .hotkey import Hotkeys
 from .keys import MOUSE_TRIGGERS, combo_vks
@@ -142,7 +142,6 @@ class App(QObject):
         self.steps = ThreadPoolExecutor(max_workers=1)    # runs operations' steps in order
         # self.bg = ThreadPoolExecutor(max_workers=1)     # second opinion, second model load
         self._status_text = ""
-        self._records = deque(maxlen=100)       # transcript log, kept for this session only
         self.session = Session()
         self.muter = Muter()
         self._press: _Press | None = None        # the key or button held now
@@ -161,7 +160,7 @@ class App(QObject):
         self._listen_hwnd = 0                    # the window it was typed in
         self._quitting = False
         self._marked = None                      # the buffer when the last commit added its sentence-final mark
-        self._committed = None                   # (text before it, _Draft) of the last commit, which 復原 may revive
+        self._committed = None                   # (text before it, _Draft, its history step): 復原 may revive it
         self._spans: list = []                   # worker thread: the pieces of the draft's open sentence
         self._ignored: set[str] = set()          # keys pressed while another was held
         self._could_record = rules.can_record(self.cfg.rules)
@@ -186,6 +185,7 @@ class App(QObject):
         self._picker_hwnd = int(self.picker.winId())
         self.settings = SettingsDialog(self.cfg, self.hotwords, self.memory)
         self.settings.applied.connect(self.apply_settings)
+        self.book = LogBook(self._log_changed)   # the 辨識紀錄 tab, kept for this session only
         self.settings.glow_preview.connect(self._preview_glow)
         self._heard_at = 0.0                     # when speech last began while listening (auto_off_minutes)
         self._idle_timer = QTimer(self, interval=5000, timeout=self._check_idle)
@@ -502,6 +502,7 @@ class App(QObject):
             return
         log.info("listen: on (%s %s)", press.key, press.gesture)
         self._listen_shown = True
+        self.book.new_session()
         self.tray.setIcon(self.icon_rec)
         self.overlay.show_recording()
         cues.play(self.cfg.start_sound, "start")
@@ -562,7 +563,9 @@ class App(QObject):
             spans, self._spans = self._spans, []
             if d is not None:
                 spans = [p for p in spans if p.start >= d.anchor]
-                self._commit_job(self._draft_start, d.anchor, end, end, d.ctx, final=True, spans=spans)
+                # a draft 復原 brought back with nothing said since: the silence after it is not decoded ("So")
+                self._commit_job(self._draft_start, d.anchor, d.anchor if d.revived else end, end, d.ctx,
+                                 final=True, spans=spans)
 
             def run():
                 if done and not self._listening:
@@ -666,15 +669,15 @@ class App(QObject):
         d = self._draft
         log.info("draft left as typed: %s", d.typed if d else "")
         if d is not None and d.placed and d.typed:   # never committed: logged as it stands
-            self.record.emit({"time": time.strftime("%H:%M:%S"), "kind": "輸入", "main": d.typed, "copy": d.typed,
-                              "steps": [("草稿", "游標移開了，照畫面上的文字定下來，沒有再重新辨識", None)]})
+            self.book.frozen(d.typed)
         self._draft = None
         if at is None:
             at = self._speech_sample if self._speech_sample > self._draft_start else self.listener.now
         self._draft_start = at
         self.listener.keep(at)
 
-    def _refine(self, start: int, anchor: int, settled: str, live: str, after: int, upto: int, ctx):
+    def _refine(self, start: int, anchor: int, settled: str, live: str, after: int, upto: int, ctx,
+                info: dict | None = None):
         """Main thread: a pause. The draft's open sentence (its audio from `anchor` to `upto`) was decoded again:
         `settled` is the part up to a ， or 。 that fell in a pause, fixed from now on (the open sentence starts at
         `after`), `live` the rest. Typed in place of what was there."""
@@ -694,6 +697,7 @@ class App(QObject):
             d = self._new_draft(ctx)
         elif not d.placed:   # nothing typed yet: the latest speech's caret and selection
             d.ctx, d.sel = ctx, ctx.selection
+        before = d.typed if d.placed else ""
         _go_on(d)
         d.settled = _joined(d.settled, settled)
         d.anchor = after
@@ -707,6 +711,7 @@ class App(QObject):
         self._show_draft(step=True)
         if d.placed and d.typed == d.final:
             d.shown = upto
+            self.book.heard(info, before, d.typed, settled)
 
     def _commit(self, text: str, start: int, anchor: int, at: int, ctx, command=None, final: bool = False):
         """Main thread: the draft's open sentence decoded again joins its settled text and the draft is done; then
@@ -715,13 +720,15 @@ class App(QObject):
         not while speaking, where a pause is not a sentence end, nor before a spoken punctuation mark), unless the
         caret had text on both sides."""
         d = self._draft
-        marked = False
+        marked = added = logged = False
+        before = ""
         if start == self._draft_start and (d is None or d.anchor == anchor):
             if d is None and text:
                 d = self._new_draft(ctx)
             elif d is not None and not d.placed:
                 d.ctx, d.sel = ctx, ctx.selection
             if d is not None:
+                before = d.typed if d.placed else ""
                 if text:
                     _go_on(d)
                 d.final = _TRAILING.sub("", _joined(d.settled, text))
@@ -731,19 +738,20 @@ class App(QObject):
                     # ？ after 嗎 (the user's request the same day)
                     d.final += end.group() if end else "？" if d.final.endswith("嗎") \
                         else "。" if _CJK_CHAR.search(d.final) else "."
-                    marked = True
+                    marked, added = True, end is None   # added: the recognizer gave none
                 self._show_draft()
-                if d.final and d.typed == d.final:   # else left as typed (logged by _freeze)
-                    self.record.emit({"time": time.strftime("%H:%M:%S"), "kind": "輸入", "main": d.final,
-                                      "copy": d.final})
+                logged = bool(d.final) and d.typed == d.final   # else left as typed (logged by _freeze)
+                if logged and command is None:
+                    self.book.committed(before, d.typed, added, by_stop=final)
             self._draft = None
             self._draft_start = at
             self.listener.keep(at)
             if d is not None:
                 self._marked = self.session.buffer if marked else None
                 b = self.session.buffer
-                self._committed = (b[:len(b) - len(d.typed)], d) \
-                    if d.placed and d.typed and self.session.clean() and b.endswith(d.typed) else None
+                self._committed = (b[:len(b) - len(d.typed)], d, self.session.history[-1]) \
+                    if d.placed and d.typed and self.session.clean() and b.endswith(d.typed) \
+                    and self.session.history else None
         if command is not None or d is not None and d.final:
             self._listen_typed, self._listen_hwnd = True, foreground()
         if command is not None:
@@ -751,6 +759,10 @@ class App(QObject):
             sel = ctx.selection
             if d is not None and d.placed and d.sel is sel:
                 sel = None
+            drafted = d is not None and logged   # the command ends a sentence's card
+            op, typed, entry = command
+            self.book.command(entry, op, typed, before if drafted else "", d.typed if drafted else "", added,
+                              drafted, sel.text if sel is not None and typed else None)
             self._run_command(command, ctx, sel)
         self._overlay_idle()
         self._input_done()
@@ -760,7 +772,6 @@ class App(QObject):
         typed after the text, or over `sel` (the selection made before it was said: a selected 。 said 冒號 over
         stayed and ： was typed at the caret, 2026-10-15)."""
         op, typed, entry = command
-        self.record.emit(entry)
         if op is not None:
             log.info("spoken operation: %s", op.phrase)
             self._run_steps(_Press("listen", _Known(ctx), time.monotonic(), False), op.steps)
@@ -903,11 +914,12 @@ class App(QObject):
                 spans, self._spans = self._spans, []
                 self._commit_job(start, anchor, piece.hi, piece.hi, ctx, spans=spans)
             else:
-                self._refine_job(start, anchor, piece, ctx, short=bool(names) and self._short(raw, names))
+                self._refine_job(start, anchor, piece, ctx, short=bool(names) and self._short(raw, names),
+                                 info={"heard": formatted, "entry": entry})
         except Exception:
             log.exception("piece failed")
 
-    def _refine_job(self, start: int, anchor: int, piece, ctx, short: bool = False):
+    def _refine_job(self, start: int, anchor: int, piece, ctx, short: bool = False, info: dict | None = None):
         """The draft's open sentence (audio from `anchor`) decoded again up to this pause. Text up to the last ，
         or 。 the recognizer put in an earlier pause is settled: it is not decoded again, so a pause costs one
         sentence, not the whole draft (the user's request, 2026-10-14: a commit of a long draft took 3.25s).
@@ -920,7 +932,7 @@ class App(QObject):
         # the end was often left out, then turned up inside the sentence at the next pause (2026-10-15)
         for bias in ([_bias([(w, _COMMAND_SCORE) for w in names] + words)] if names else []) + [words]:
             text, tokens, times = self.recognizer.recognize_timed(audio, bias)
-            if self._ran_tail(text, tokens, times, index, piece, ctx, start, anchor, t0):
+            if self._ran_tail(text, tokens, times, index, piece, ctx, start, anchor, t0, info):
                 return
         settled, live, after = "", text, anchor
         # a blank token (between English letters) is no mark: "" in _MARKS is True, and counting it settled a whole
@@ -939,9 +951,10 @@ class App(QObject):
         settled = self._text_of(settled, ctx, [], keep_end=True) if settled else ""
         live = self._text_of(live, ctx, [], keep_end=True)
         log.info("draft %.2fs: %s | %s", time.monotonic() - t0, settled, live)
-        self.main.emit(lambda: self._refine(start, anchor, settled, live, after, piece.hi, ctx))
+        info = dict(info or {}, redo_s=time.monotonic() - t0)
+        self.main.emit(lambda: self._refine(start, anchor, settled, live, after, piece.hi, ctx, info))
 
-    def _ran_tail(self, text, tokens, times, index, piece, ctx, start, anchor, t0) -> bool:
+    def _ran_tail(self, text, tokens, times, index, piece, ctx, start, anchor, t0, info=None) -> bool:
         """The last piece, decoded after the speech before it, may be a command it was not alone: the user's 換行
         came out as "Hang Hung," alone and 送出 as "Contral.", as themselves after it, and were typed as text
         (2026-10-15). Then the speech before it is committed and the command runs (True)."""
@@ -954,7 +967,7 @@ class App(QObject):
         if op is not None or typed:
             log.info("piece with the speech before it: %s | %s", head, said)
             entry = {"time": time.strftime("%H:%M:%S"), "asr": to_traditional(tail),
-                     "asr_s": time.monotonic() - t0, "steps": steps}
+                     "asr_s": time.monotonic() - t0, "steps": steps, "alone": (info or {}).get("heard")}
             entry.update(kind="操作", main=op.phrase) if op else entry.update(kind="輸入", main=typed, copy=typed)
             self._spans = []
             head = self._text_of(head, ctx, []) if head.strip() else ""
@@ -972,7 +985,7 @@ class App(QObject):
         if not state.get("go") or not spans:   # a later piece got there first
             return
         self._spans = spans
-        self._refine_job(at, at, spans[-1], ContextProbe().result())
+        self._refine_job(at, at, spans[-1], ContextProbe().result(), info={"redo": True})
 
     def _speech(self, anchor: int, end: int, spans: list):
         """The open sentence's audio [anchor, end) with the silence between its pieces (spans) cut down to their own
@@ -1135,8 +1148,13 @@ class App(QObject):
         d = self._draft
         if d is not None and d.placed and step.after.endswith(d.typed):
             source = (step.after[:len(step.after) - len(d.typed)], d)
+        elif self._committed is not None and (step is self._committed[2] or len(s.history) > 1
+                                              and s.history[-2] is self._committed[2]):
+            # the commit's own change, or the one right after it (its 換行): not a later, unrelated one (a selection
+            # replaced elsewhere brought an old sentence back as a draft; comparing texts matched by chance)
+            source = self._committed[:2]
         else:
-            source = self._committed
+            source = None
         n, tail = s.plan_to(step.before)
         log.info("undo: %d backspaces + %r", n, tail)
         if self.cfg.save_recordings:
@@ -1146,6 +1164,7 @@ class App(QObject):
             paste_text(tail)
         s.deleted_last(step)
         self._committed = None
+        rest = ""
         if source is not None and source[1] is d:   # the draft's change was taken back
             self._draft = None
             self._draft_start = self.listener.now if self._listening else 0
@@ -1163,9 +1182,7 @@ class App(QObject):
                 self._marked = None
                 log.info("undo: a draft again: %s", rest)
         p = len(os.path.commonprefix([step.before, step.after]))
-        gone, back = step.after[p:], step.before[p:]
-        self.record.emit({"time": time.strftime("%H:%M:%S"), "kind": "復原",
-                          "main": f"{gone or '（無）'}" + (f" → {back}" if back else "")})
+        self.book.undo(step.after[p:], step.before[p:], rest if self._draft is not None else "")
 
     @staticmethod
     def _after_steps(press: _Press) -> list:
@@ -1365,12 +1382,18 @@ class App(QObject):
         self.settings.set_status(text)
 
     def on_record(self, entry: dict):
-        self._records.append(entry)
-        self.settings.set_log(self._records)
+        """Something done on its own (a 選字 pick, a selection deleted …): a card of one step."""
+        main = entry.get("main") or ""
+        self.book.single(entry.get("kind", "輸入"), main, esc(main) or "（無）", entry=entry,
+                         copy=entry.get("copy", ""))
+
+    def _log_changed(self):
+        if self.settings.isVisible():
+            self.settings.set_log(self.book.cards)
 
     def open_settings(self):
         self.settings.load_values()
-        self.settings.set_log(self._records)
+        self.settings.set_log(self.book.cards)
         self.settings.set_status(self._status_text)
         self.settings.show()
         self.settings.raise_()

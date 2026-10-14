@@ -140,6 +140,7 @@ class EdgeGlow:
             self._fades.append(fade)
         self._on = False
         self._shown = None   # the frame drawn last (frame())
+        self._masks = {}     # (x, y, w, h) of a screen -> each strip's masks
         self._ticks = 0
 
     @property
@@ -156,16 +157,7 @@ class EdgeGlow:
         if self._style is None or self._on:
             return
         self._on = True
-        g = (screen or QGuiApplication.primaryScreen()).geometry()
-        if g != self._screen:   # masks for this screen's size
-            self._screen = g
-            d = min(DEPTH, g.height() // 4, g.width() // 4)
-            rects = [QRect(g.left(), g.top(), g.width(), d), QRect(g.left(), g.bottom() - d + 1, g.width(), d),
-                     QRect(g.left(), g.top() + d, d, g.height() - 2 * d),
-                     QRect(g.right() - d + 1, g.top() + d, d, g.height() - 2 * d)]
-            for s, r in zip(self._strips, rects):
-                s.setGeometry(r)
-                s.masks = [mask(g, r, _strength(k)) for k in range(_LEVELS)]
+        self._place(screen)
         self._t0 = time.monotonic()
         self._level = 0.0
         self._shown = None
@@ -179,6 +171,32 @@ class EdgeGlow:
             fade.setEndValue(1.0)
             fade.start()
         self._timer.start()
+
+    def move(self, screen):
+        """While shown: to another screen at once (the pointer went there, 2026-10-15)."""
+        if self._on and screen is not None and screen.geometry() != self._screen:
+            self._place(screen)
+            self._shown = None
+            self._render()
+            for s in self._strips:
+                s.update()
+
+    def _place(self, screen):
+        """The strips along `screen`'s edges, with their masks (made once per screen size and place)."""
+        g = (screen or QGuiApplication.primaryScreen()).geometry()
+        if g == self._screen:
+            return
+        self._screen = g
+        d = min(DEPTH, g.height() // 4, g.width() // 4)
+        rects = [QRect(g.left(), g.top(), g.width(), d), QRect(g.left(), g.bottom() - d + 1, g.width(), d),
+                 QRect(g.left(), g.top() + d, d, g.height() - 2 * d),
+                 QRect(g.right() - d + 1, g.top() + d, d, g.height() - 2 * d)]
+        key = (g.x(), g.y(), g.width(), g.height())
+        if key not in self._masks:
+            self._masks[key] = [[mask(g, r, _strength(k)) for k in range(_LEVELS)] for r in rects]
+        for s, r, m in zip(self._strips, rects, self._masks[key]):
+            s.setGeometry(r)
+            s.masks = m
 
     def hide(self):
         if not self._on:
