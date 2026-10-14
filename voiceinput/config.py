@@ -22,6 +22,10 @@ class Config:
     # need not say 送出); not when listening ends by 送出 / 結束錄音, nor when nothing was typed
     send_on_stop: bool = True
     spin_while_decoding: bool = True   # the indicator's red dot spins while speech is being decoded
+    glow: str = ""                 # glow.py style along the screen's edges while listening, "" for none
+    # minutes without speech after which listening turns itself off, 0 never (the user's request, 2026-10-15: a
+    # microphone left on by mistake; 5 their choice of default)
+    auto_off_minutes: int = 5
     hotword_sort: str = "date"     # order of the 詞庫 tab (settings.HOTWORD_SORTS)
     pick_sort: str = "date"        # order of 選字記憶 on the 詞庫 tab (settings.PICK_SORTS)
     alias_sort: str = "date"       # order of 英文強制替換 (settings.ALIAS_SORTS)

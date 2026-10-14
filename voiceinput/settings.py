@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDia
                                QToolTip, QVBoxLayout, QWidget)
 
 from . import audio, cues, hotwords, packs, recordings, rules
+from . import glow as glowmod
 from .config import GESTURE_TIME_RANGE
 from .memory import BOUNDARY
 from .keys import KEY_TRIGGERS, MOUSE_TRIGGERS, combo_text, is_modifier
@@ -168,6 +169,7 @@ class KeyCapture(QLineEdit):
 
 class SettingsDialog(QDialog):
     applied = Signal()
+    glow_preview = Signal(str)   # a glow style picked: shown for a moment
 
     def __init__(self, cfg, hotwords, memory):
         super().__init__()
@@ -249,6 +251,14 @@ class SettingsDialog(QDialog):
         self.send_on_stop = QCheckBox("用按鍵關閉麥克風時自動送出（按 Enter）")
         self.spin = QCheckBox("錄音中正在辨識時，紅點旋轉")
         self.spin.setToolTip("講完一段、程式還在辨識時，錄音指示的紅點外會有一圈在轉")
+        self.glow = QComboBox(toolTip="麥克風開著時，螢幕四周亮起一圈光，講話時會變亮；選了會先亮一下讓你看")
+        self.glow.addItem("關閉", "")
+        for st in glowmod.STYLES:
+            self.glow.addItem(st.name, st.id)
+        self.auto_off = QComboBox(toolTip="麥克風開著卻一直沒聽到人聲時自動關掉，避免忘了關；關掉時播結束音，不按 Enter")
+        self.auto_off.addItem("不自動關閉", 0)
+        for m in (1, 3, 5, 10, 30):
+            self.auto_off.addItem(f"{m} 分鐘沒講話", m)
         self.send_on_stop.setToolTip("定稿後按 Enter；說「送出」關閉時不會再按一次，這次沒有打出任何字時也不會按")
         # development only, to be removed before release (the user's plan): recordings.py
         self.keep_audio = QCheckBox("保存錄音（測試用）")
@@ -265,6 +275,8 @@ class SettingsDialog(QDialog):
         form = QFormLayout()
         form.addRow("麥克風", self.mic)
         form.addRow("定稿時機", self.commit_at)
+        form.addRow("自動關閉麥克風", self.auto_off)
+        form.addRow("螢幕邊緣光暈", self.glow)
         form.addRow("提示音", sound_row)
         form.addRow("", stop_at_row)
         form.addRow("", self.mute)
@@ -287,6 +299,8 @@ class SettingsDialog(QDialog):
         self.sound_set.currentIndexChanged.connect(self._sound_set_changed)
         self.stop_at.currentIndexChanged.connect(self._apply)
         self.commit_at.currentIndexChanged.connect(self._apply)
+        self.auto_off.currentIndexChanged.connect(self._apply)
+        self.glow.currentIndexChanged.connect(self._glow_changed)
         for box in (self.punct, self.period_comma, self.describe, self.send_on_stop, self.spin,
                     self.autostart,
                     self.mute, self.keep_audio):
@@ -308,6 +322,12 @@ class SettingsDialog(QDialog):
         self.stop_sound.setCurrentIndex(max(0, self.stop_sound.findData(self.cfg.stop_sound)))
         self.stop_at.setCurrentIndex(max(0, self.stop_at.findData(self.cfg.stop_sound_at)))
         self.commit_at.setCurrentIndex(max(0, self.commit_at.findData(self.cfg.commit_at)))
+        self.glow.setCurrentIndex(max(0, self.glow.findData(self.cfg.glow)))
+        i = self.auto_off.findData(self.cfg.auto_off_minutes)
+        if i < 0:   # a value set by hand in config.json
+            self.auto_off.addItem(f"{self.cfg.auto_off_minutes} 分鐘沒講話", self.cfg.auto_off_minutes)
+            i = self.auto_off.count() - 1
+        self.auto_off.setCurrentIndex(i)
         self.gesture_time.setValue(self.cfg.gesture_time)
         same = self.cfg.start_sound == self.cfg.stop_sound
         self.sound_set.setCurrentIndex(self.sound_set.findData(self.cfg.start_sound) if same
@@ -336,7 +356,14 @@ class SettingsDialog(QDialog):
         self.cfg.stop_sound = self.stop_sound.currentData()
         self.cfg.stop_sound_at = self.stop_at.currentData()
         self.cfg.commit_at = self.commit_at.currentData()
+        self.cfg.glow = self.glow.currentData()
+        self.cfg.auto_off_minutes = self.auto_off.currentData()
         self._save()
+
+    def _glow_changed(self):
+        self._apply()
+        if not self._loading and self.glow.currentData():
+            self.glow_preview.emit(self.glow.currentData())
 
     def _sound_changed(self, box, kind: str):
         if not self._loading:

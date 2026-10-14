@@ -11,7 +11,7 @@ rule:JSON (add an operation, rules.Rule.from_dict), at:WORD (put the caret right
 the end), say:TEXT (dictate TEXT as if recognized), set:NAME=VALUE (change a setting in memory only; apply: as the settings window does after a change), packs:ID+ID (tick term packs, in memory only) or key:BACK (the
 user presses Backspace n times: key:BACK*3), dbl:MS (a double tap, each press MS ms long), dblbusy (a double tap whose release is handled 0.5s late), pick:N / pickw:WORD (click a row of the 選字 menu), feed:WAV (while
 continuous listening is on: WAV and 1s of silence reach the microphone; feed:WAV+WAV joins clips with 0.6s pauses),
-logshot:NAME (the 辨識紀錄 tab saved as <dir>/NAME.png), tap0 (a tap; the next step starts once it is known to be one,
+logshot:NAME (the 辨識紀錄 tab saved as <dir>/NAME.png), wait:SEC (silence for SEC seconds), tap0 (a tap; the next step starts once it is known to be one,
 while queued work still runs), racemove:WORD (the caret moves after the last WORD, at the end when empty, right
 before the next draft update reaches the document), type:TEXT (type TEXT in the menu's input box and press Enter). Settings are never saved; hotwords and smart picks live in <dir> (hotwords.test.json,
 smart-picks.test.json, emptied at the start), never in the real files.
@@ -146,6 +146,7 @@ appmod.recordings.INDEX = appmod.recordings.DIR / "index.jsonl"
 qapp = QApplication(sys.argv)
 qapp.setQuitOnLastWindowClosed(False)
 appmod.Overlay.show = lambda self: None   # no indicator on the user's screen next to their own app's
+appmod.EdgeGlow.show = lambda self, screen=None: None   # nor the glow around it
 A = appmod.App(qapp)
 A.tray.hide()
 A.tray.showMessage = lambda title, text, *a: print(f"      [通知] {title}: {text}")
@@ -257,6 +258,14 @@ try:
             given = f"  (還給按鍵：{replayed})" if replayed else ""
             given += menu()
             print(f"[{step}] → 文字框：{box.text[:box.caret] + '|' + box.text[box.caret:]!r}{given}")
+            continue
+        if step.startswith("wait:"):   # nothing happens for SEC seconds (the microphone hears silence)
+            end = time.monotonic() + float(step[5:])
+            while time.monotonic() < end:
+                if A._listening:
+                    A.listener._queue.put(np.zeros(4800, np.float32))
+                pump(0.3)
+            print(f"[{step}] 聽寫中：{A._listening}")
             continue
         if step == "tap0":   # a tap, and the next step right when it is known to be one (queued work still runs)
             down(), pump(0.05), up(), pump(A.cfg.gesture_time + 0.05)

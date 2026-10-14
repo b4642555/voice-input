@@ -22,7 +22,7 @@ def _click_through(widget):
 class Overlay(QWidget):
     IDLE, RECORDING, THINKING = range(3)
 
-    def __init__(self, level_source, busy_source=lambda: False):
+    def __init__(self, level_source, busy_source=lambda: False, glow=None):
         super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
                          | Qt.WindowDoesNotAcceptFocus | Qt.WindowTransparentForInput)
         self.setAttribute(Qt.WA_TranslucentBackground)
@@ -30,6 +30,7 @@ class Overlay(QWidget):
         self.setFixedSize(W, H)
         self._level_source = level_source   # callable -> float 0..1
         self._busy_source = busy_source     # callable -> bool: speech is being decoded (the dot spins)
+        self.glow = glow                    # glow.EdgeGlow shown with the recording indicator
         self._state = self.IDLE
         self._top = False                   # at the top of the screen (the pointer came over the bottom spot)
         self._levels = [0.0] * BARS
@@ -50,6 +51,8 @@ class Overlay(QWidget):
         self._set_state(self.THINKING)
 
     def hide_overlay(self):
+        if self.glow:
+            self.glow.hide()
         if self._state == self.IDLE:
             return
         self._state = self.IDLE
@@ -68,6 +71,8 @@ class Overlay(QWidget):
         self._slide.stop()
         self._timer.stop()
         self.hide()
+        if self.glow:
+            self.glow.hide_now()
 
     # --- internals ---
     def _set_state(self, state):
@@ -86,6 +91,14 @@ class Overlay(QWidget):
             self._fade.start()
         self._timer.start()
         self.update()
+        if self.glow:
+            if state == self.RECORDING:
+                self.glow.show(self._screen())
+            else:
+                self.glow.hide()
+
+    def _screen(self):
+        return QGuiApplication.screenAt(self.cursor().pos()) or QGuiApplication.primaryScreen()
 
     def _on_fade_done(self):
         if self._state == self.IDLE:
@@ -93,8 +106,7 @@ class Overlay(QWidget):
             self.hide()
 
     def _reposition(self, slide: bool = False):
-        screen = QGuiApplication.screenAt(self.cursor().pos()) or QGuiApplication.primaryScreen()
-        g = screen.availableGeometry()
+        g = self._screen().availableGeometry()
         to = QPoint(g.center().x() - W // 2, g.top() + 48 if self._top else g.bottom() - H - 48)
         self._slide.stop()
         if slide:

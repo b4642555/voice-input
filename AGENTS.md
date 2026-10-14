@@ -217,6 +217,20 @@ the key that turns listening off presses Enter once the text is in; not when 送
 when nothing was typed or run while listening, nor (2026-10-15) when another window is in front than the one the
 text went to, or everything typed was taken back. A ✕ on the indicator to stop without sending was asked for and
 dropped the same minute in favour of this checkbox.
+自動關閉麥克風 (`auto_off_minutes`, the 一般 tab, 2026-10-15, the user's request so a microphone left on by mistake
+does not listen for ever; 5 minutes by default, their choice; 不自動關閉 / 1 / 3 / 5 / 10 / 30): no speech (the VAD's
+start of speech) for that long turns listening off with the end sound, a tray notice and no Enter (`_check_idle`,
+every 5s, not while decoding). The user sees listening as a switch now: on, it takes text, commands and the
+mouse's edits until turned off.
+螢幕邊緣光暈 (`glow`, `glow.py`, the 一般 tab, off by default; the user's request, 2026-10-15, like Siri's): a glow
+around the edges of the indicator's screen while listening, shown and hidden with the indicator (which stays, the
+user's choice), brightening and reaching further in with the voice (their choice). Five styles in a drop-down
+(Siri 彩虹, 極光, 暖陽, 冰藍, 錄音紅); picking one shows it for 2.5s. Four click-through windows along the edges, each
+drawn at a third of its size (a conical gradient cut by a falloff mask made once per level) and scaled up: drawn as
+wide gradient strokes it took more than a CPU core; now ~10-17% of one core quiet (12 fps), ~21% talking (24 fps),
+most of it Windows compositing the strips. UI Automation looks through them (same elements under the edges with
+and without), so terminal selections near the edges still work. Not seen on the user's screen by an agent: the
+preview images were rendered offscreen.
 Pastes (`output.paste_text`, 2026-10-14): the text is put on the clipboard with Win32 (owned by a hidden window),
 and a paste or key waits 0.15s after the last Ctrl+V. Qt's clipboard hands data over lazily through our main
 thread, so a commit's paste followed 84ms later by the spoken 句號's replaced it before Windows Terminal read it:
@@ -252,7 +266,8 @@ commit belongs to the update before it. After one is taken back, what is left of
 last commit typed (a 換行 taken back), is a draft again with its text fixed (decoded again, the audio taken back
 would return): speech goes on after it, behind a ， (？ after 嗎) when it ends in none, and a command or the end of
 listening gives it its sentence end (the user's choice, 2026-10-15: 換行 misheard and taken back left 細節 without
-its 。; the draft used to be dropped).
+its 。; the draft used to be dropped). Until something is said after it, the next piece counts as said alone and
+the silence since 復原 is not decoded (it came out as "So," before a 換行).
 While listening, the indicator's red dot gets a spinning arc while speech is being decoded (`App._decoding` counts
 the worker's jobs; `spin_while_decoding`, a 一般 checkbox, on by default; the user's request, 2026-10-15). Typing or clicking ends the
 history: what the user changed is unknown. Logged as 復原 on the 辨識紀錄 tab.

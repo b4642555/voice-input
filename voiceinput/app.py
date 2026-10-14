@@ -41,12 +41,13 @@ from dataclasses import dataclass
 
 import numpy as np
 from PySide6.QtCore import QLockFile, QObject, QPointF, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
+from PySide6.QtGui import QAction, QColor, QGuiApplication, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 from . import autostart, candidates, cues, edit, models, packs, paths, recordings, rules, sounds, spelling
 from .asr import SAMPLE_RATE, Recognizer
 from .config import Config
+from .glow import EdgeGlow
 from .hotwords import Hotwords
 from .hotkey import Hotkeys
 from .keys import MOUSE_TRIGGERS, combo_vks
@@ -174,8 +175,10 @@ class App(QObject):
         self.icon_rec = make_icon(QColor(255, 69, 58))
 
         self._busy, self._busy_lock = 0, threading.Lock()   # decoding jobs queued or running
+        self.glow = EdgeGlow(lambda: self.listener.level if self._listening else 0.0)
+        self.glow.set_style(self.cfg.glow)
         self.overlay = Overlay(lambda: self.listener.level if self._listening else 0.0,
-                               lambda: self.cfg.spin_while_decoding and self._busy > 0)
+                               lambda: self.cfg.spin_while_decoding and self._busy > 0, glow=self.glow)
         self.picker = Picker()
         self.picker.picked.connect(self.on_menu_pick)
         self.picker.typed.connect(self.on_menu_typed)
@@ -183,6 +186,10 @@ class App(QObject):
         self._picker_hwnd = int(self.picker.winId())
         self.settings = SettingsDialog(self.cfg, self.hotwords, self.memory)
         self.settings.applied.connect(self.apply_settings)
+        self.settings.glow_preview.connect(self._preview_glow)
+        self._heard_at = 0.0                     # when speech last began while listening (auto_off_minutes)
+        self._idle_timer = QTimer(self, interval=5000, timeout=self._check_idle)
+        self._idle_timer.start()
 
         self.tray = QSystemTrayIcon(self.icon_idle)
         menu = QMenu()
@@ -502,12 +509,30 @@ class App(QObject):
         if wait:
             wait += _CUE_LATENCY
             self.listener.still(wait)   # the start sound is not speech; muting waits for its end
+        self._heard_at = time.monotonic()
         if self.cfg.mute_while_recording:
             QTimer.singleShot(int(wait * 1000), lambda: self.muter.mute() if self._listening else None)
         with self._early_lock:
             early, self._early_pieces = self._early_pieces, None
         for piece, probe in early or []:
             self._submit_piece(piece, probe)
+
+    def _check_idle(self):
+        """Main thread, every 5s: listening with no speech for auto_off_minutes turns itself off (the user's
+        request, 2026-10-15: a microphone left on by mistake), with the end sound and no Enter."""
+        minutes = self.cfg.auto_off_minutes
+        if minutes and self._listening and self._listen_shown and self._busy == 0 \
+                and time.monotonic() - self._heard_at > minutes * 60:
+            log.info("listen: off after %d minutes without speech", minutes)
+            self._stop_listen(send=False)
+            self._notify(f"已自動關閉麥克風（{minutes} 分鐘沒有聽到講話）")
+
+    def _preview_glow(self, style_id: str):
+        """A glow style picked in the settings: shown for a moment (unless listening shows it already)."""
+        self.glow.set_style(style_id)
+        if not self._listening:
+            self.glow.show(QGuiApplication.screenAt(self.settings.geometry().center()))
+            QTimer.singleShot(2500, lambda: None if self._listening else self.glow.hide())
 
     def _discard_listen(self, press: _Press):
         """The press that started listening unseen does something else: the microphone off, nothing kept."""
@@ -555,6 +580,7 @@ class App(QObject):
 
     def _on_listen_speech(self):
         """Listener thread: speech began. What is selected now is what a new draft replaces."""
+        self._heard_at = time.monotonic()
         self._listen_probe = ContextProbe()
         self._speech_sample = max(0, self.listener.now - int(LEAD * SAMPLE_RATE))
 
@@ -832,7 +858,7 @@ class App(QObject):
                 if self._moved():
                     self._freeze(piece.lo)
                 d = self._draft
-                state.update(drafted=d is not None, alone=d is None or not d.final, start=self._draft_start,
+                state.update(drafted=d is not None and not d.revived, alone=d is None or not d.final or d.revived, start=self._draft_start,
                              anchor=d.anchor if d is not None else self._draft_start)
             self._on_main(check)
             if "anchor" not in state:   # the main thread did not answer in time
@@ -1352,6 +1378,10 @@ class App(QObject):
 
     def apply_settings(self):
         self.hotkeys.set_keys(rules.bound_keys(self.cfg.rules))
+        if self.glow.style_id != self.cfg.glow:
+            self.glow.set_style(self.cfg.glow)
+            if self._listening and self.cfg.glow:
+                self.glow.show(self.overlay.screen())
         can = rules.can_record(self.cfg.rules)
         if self._could_record and not can:
             self._notify(_NO_RECORD)
