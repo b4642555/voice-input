@@ -1,7 +1,8 @@
 """Settings window in four tabs: 一般 (general), 辨識紀錄 (live transcript log), 自訂操作 (custom operations,
-rules.py) and 詞庫 (hotwords.py, the UI name for hotwords since 2026-10-13: term packs to tick (packs.py), then every
-listed word with its 優先度 (−100% .. +100%, 0 does nothing; stored as 0 .. 200%), −/+ by 10%, removable). Every change is applied
-and saved immediately."""
+rules.py) and 詞庫 (hotwords.py, the UI name for hotwords since 2026-10-13), in four sections one open at a time:
+term packs to tick (packs.py), every listed word with its 優先度 (−100% .. +100%, 0 does nothing; stored as 0 ..
+200%), −/+ by 10%, removable; smart picks (memory.py), each character editable or removable; English replacements
+(hotword aliases), removable. Every change is applied and saved immediately."""
 import html
 import os
 
@@ -9,10 +10,12 @@ from pypinyin import lazy_pinyin
 from PySide6.QtCore import QEvent, Qt, QTimer, Signal
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
                                QFormLayout, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
-                               QPushButton, QScrollArea, QSpinBox, QTabWidget, QTextBrowser, QVBoxLayout, QWidget)
+                               QPushButton, QScrollArea, QSizePolicy, QSpinBox, QTabWidget, QTextBrowser, QToolButton,
+                               QVBoxLayout, QWidget)
 
 from . import audio, cues, hotwords, packs, recordings, rules
 from .config import GESTURE_TIME_RANGE
+from .memory import BOUNDARY
 from .keys import KEY_TRIGGERS, MOUSE_TRIGGERS, combo_text, is_modifier
 from .rules import Rule, Step
 
@@ -72,6 +75,54 @@ def _combo(items, value, tip="") -> QComboBox:
     return c
 
 
+def _card_list(empty_text: str, top=None):
+    """A section of the 詞庫 tab: optional controls on top, a gray note shown while empty, then cards in a scroll
+    area. Returns (layout the cards go in, the note, the section's widget)."""
+    cards = QVBoxLayout()
+    cards.setSpacing(4)
+    inner = QWidget()
+    v = QVBoxLayout(inner)
+    v.setContentsMargins(0, 0, 0, 0)
+    v.addLayout(cards)
+    v.addStretch(1)
+    scroll = QScrollArea(widgetResizable=True, frameShape=QFrame.NoFrame)
+    scroll.setWidget(inner)
+    scroll.viewport().setAutoFillBackground(False)   # the page's background, not a gray box under few cards
+    inner.setAutoFillBackground(False)
+    empty = QLabel(empty_text)
+    empty.setStyleSheet("color: gray")
+    empty.setWordWrap(True)
+    body = QWidget()
+    layout = QVBoxLayout(body)
+    layout.setContentsMargins(0, 0, 0, 0)
+    if top is not None:
+        layout.addLayout(top)
+    layout.addWidget(empty)
+    layout.addWidget(scroll, 1)
+    return cards, empty, body
+
+
+def _clear(layout):
+    while layout.count():
+        w = layout.takeAt(0).widget()
+        w.setParent(None)
+        w.deleteLater()
+
+
+def _card() -> tuple[QFrame, QHBoxLayout]:
+    card = QFrame(objectName="card")
+    card.setStyleSheet(_CARD_STYLE)
+    row = QHBoxLayout(card)
+    row.setContentsMargins(8, 4, 4, 4)
+    return card, row
+
+
+def _remove_button(tip: str, slot) -> QPushButton:
+    b = QPushButton("✕", toolTip=tip, clicked=slot)
+    b.setFixedWidth(28)
+    return b
+
+
 class KeyCapture(QLineEdit):
     """Click, then press a key combination: shows and stores it as text (Ctrl+Shift+Z)."""
     captured = Signal(str)
@@ -102,11 +153,11 @@ class KeyCapture(QLineEdit):
 class SettingsDialog(QDialog):
     applied = Signal()
 
-    def __init__(self, cfg, hotwords, memory_path):
+    def __init__(self, cfg, hotwords, memory):
         super().__init__()
         self.cfg = cfg
         self.hotwords = hotwords
-        self.memory_path = memory_path
+        self.memory = memory
         self._loading = False
         self.setWindowTitle("VoiceInput 設定")
         self.resize(620, 560)
@@ -176,11 +227,6 @@ class SettingsDialog(QDialog):
         self.mute.setToolTip("錄音期間把喇叭靜音，文字輸入完成後恢復；原本就靜音的話不會動")
         self.describe = QCheckBox("說「詞＋的＋字」時只輸入那個字，例如「節日的節」")
         self.describe.setToolTip("整句剛好是「某個詞的某個字」才算，輸入的是詞裡讀音相同的那個字")
-        memory = QPushButton("開啟紀錄檔", clicked=self._open_memory)
-        memory.setToolTip("選字時學到的前後文例子與英文寫法偏好（smart-picks.json）")
-        memory_row = QHBoxLayout()
-        memory_row.addWidget(memory)
-        memory_row.addStretch()
         # development only, to be removed before release (the user's plan): recordings.py
         self.keep_audio = QCheckBox("保存錄音（測試用）")
         self.keep_audio.setToolTip("每句話存成 wav，並記下辨識結果與之後的選字、刪除，用來以真實聲音檢查辨識；不會自動刪除")
@@ -202,7 +248,6 @@ class SettingsDialog(QDialog):
         form.addRow("", self.period_comma)
         form.addRow("", self.describe)
         form.addRow("", self.autostart)
-        form.addRow("智慧選字", memory_row)
         form.addRow("開發測試", audio_row)
         page = QWidget()
         v = QVBoxLayout(page)
@@ -301,66 +346,86 @@ class SettingsDialog(QDialog):
         recordings.DIR.mkdir(parents=True, exist_ok=True)
         os.startfile(recordings.DIR)
 
-    def _open_memory(self):
-        if not self.memory_path.exists():
-            self.memory_path.parent.mkdir(parents=True, exist_ok=True)
-            self.memory_path.write_text('{\n"examples": [\n],\n"styles": {}\n}\n', encoding="utf-8")
-        os.startfile(self.memory_path)
-
     # --- 詞庫 (hotwords) ---
     def _hotwords_page(self) -> QWidget:
-        self.hw_list = QVBoxLayout()
-        self.hw_list.setSpacing(4)
-        inner = QWidget()
-        v = QVBoxLayout(inner)
-        v.setContentsMargins(0, 0, 0, 0)
-        v.addLayout(self.hw_list)
-        v.addStretch(1)
-        scroll = QScrollArea(widgetResizable=True, frameShape=QFrame.NoFrame)
-        scroll.setWidget(inner)
-        self.hw_sort = _combo(HOTWORD_SORTS, self.cfg.hotword_sort)
-        self.hw_sort.currentIndexChanged.connect(self._sort_hotwords)
+        """Four sections, one open at a time (2026-10-14, the user's design): the open one fills the page and
+        scrolls inside, the other headers stay in view; the open one is remembered (hotword_section)."""
         pack_grid = QGridLayout()
-        pack_grid.addWidget(QLabel("詞包"), 0, 0, Qt.AlignTop)
         for n, pack in enumerate(packs.available()):
             box = QCheckBox(f"{pack.name}（{len(pack.words)}）", checked=pack.id in self.cfg.packs)
-            box.setToolTip(f"整包的詞以優先度 {_shown(packs.PCT)} 辨識；選字選過或被換掉的詞會列在下面，以那裡的優先度為準")
+            box.setToolTip(f"整包的詞以優先度 {_shown(packs.PCT)} 辨識；選字選過或被換掉的詞會列在詞庫列表，以那裡的優先度為準")
             box.toggled.connect(lambda on, i=pack.id: self._toggle_pack(i, on))
-            pack_grid.addWidget(box, n // 3, 1 + n % 3)
-        pack_grid.setColumnStretch(4, 1)
+            pack_grid.addWidget(box, n // 3, n % 3)
+        pack_grid.setColumnStretch(3, 1)
+        pack_body = QWidget()
+        v = QVBoxLayout(pack_body)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.addLayout(pack_grid)
+        v.addStretch(1)
+
+        self.hw_sort = _combo(HOTWORD_SORTS, self.cfg.hotword_sort)
+        self.hw_sort.currentIndexChanged.connect(self._sort_hotwords)
         top = QHBoxLayout()
         top.addWidget(QLabel("排序"))
         top.addWidget(self.hw_sort)
         top.addStretch()
-        self.hw_empty = QLabel("詞庫裡還沒有詞。選字時選了詞語（被換掉的詞也會列出，優先度較低），或在選字選單的輸入框輸入文字，就會加到這裡。")
-        self.hw_empty.setStyleSheet("color: gray")
-        self.hw_empty.setWordWrap(True)
+        self.hw_list, self.hw_empty, hw_body = _card_list(
+            "詞庫裡還沒有詞。選字時選了詞語（被換掉的詞也會列出，優先度較低），或在選字選單的輸入框輸入文字，就會加到這裡。", top)
+        self.pick_list, self.pick_empty, pick_body = _card_list(
+            "還沒有學到的字。用選字換掉單一個中文字，就會記下它前後的字，之後在同樣的前後文自動換成那個字。")
+        self.alias_list, self.alias_empty, alias_body = _card_list(
+            "還沒有強制替換。選字或打字把英文換成另一種拼法的詞（例如 Dipsick 換成 DeepSeek），之後辨識出舊拼法就一律改成新的。")
+
+        self._sections = {}
         page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.addLayout(pack_grid)
-        layout.addLayout(top)
-        layout.addWidget(self.hw_empty)
-        layout.addWidget(scroll, 1)
+        self._section_layout = QVBoxLayout(page)
+        self._section_layout.setSpacing(2)
+        for key, body in (("packs", pack_body), ("words", hw_body), ("picks", pick_body), ("aliases", alias_body)):
+            header = QToolButton(checkable=True, autoRaise=True, toolButtonStyle=Qt.ToolButtonTextBesideIcon)
+            header.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            header.setStyleSheet("QToolButton { font-weight: bold; padding: 4px; }"
+                                 " QToolButton:checked { background: transparent; border: none; }")
+            header.clicked.connect(lambda on, k=key: self._open_section(k if on else ""))
+            body.setVisible(False)
+            self._section_layout.addWidget(header)
+            self._section_layout.addWidget(body)
+            self._sections[key] = (header, body)
+        self._section_layout.addStretch(1)
+        self._open_section(self.cfg.hotword_section, save=False)
         return page
 
+    def _open_section(self, key: str, save: bool = True):
+        for k, (header, body) in self._sections.items():
+            on = k == key
+            header.setChecked(on)
+            header.setArrowType(Qt.DownArrow if on else Qt.RightArrow)
+            body.setVisible(on)
+            self._section_layout.setStretchFactor(body, 1 if on else 0)
+        self._section_layout.setStretch(self._section_layout.count() - 1, 0 if key in self._sections else 1)
+        if save and key != self.cfg.hotword_section:
+            self.cfg.hotword_section = key
+            self.cfg.save()
+
+    def _set_headers(self):
+        texts = {"packs": f"詞包（已勾選 {len(self.cfg.packs)}）", "words": f"詞庫列表（{len(self.hotwords.items)}）",
+                 "picks": f"智慧選字（{len(self.memory.listed())}）",
+                 "aliases": f"英文強制替換（{len(self.hotwords.aliases())}）"}
+        for k, (header, _) in self._sections.items():
+            header.setText(texts[k])
+
     def refresh_hotwords(self):
+        """The whole 詞庫 tab: hotwords, smart picks, English replacements and the section headers."""
+        self._refresh_words()
+        self._refresh_picks()
+        self._refresh_aliases()
+        self._set_headers()
+
+    def _refresh_words(self):
         self._hw_rows = {}
-        while self.hw_list.count():
-            w = self.hw_list.takeAt(0).widget()
-            w.setParent(None)
-            w.deleteLater()
+        _clear(self.hw_list)
         for h in self._sorted_hotwords():
-            card = QFrame(objectName="card")
-            card.setStyleSheet(_CARD_STYLE)
-            row = QHBoxLayout(card)
-            row.setContentsMargins(8, 4, 4, 4)
+            card, row = _card()
             row.addWidget(QLabel(h.word))
-            for alias in h.aliases:
-                fix = QPushButton(f"{alias} ✕", flat=True, clicked=lambda _=False, w=h.word, a=alias:
-                                  self._remove_alias(w, a))
-                fix.setToolTip(f"辨識出「{alias}」時會改成「{h.word}」（選字時學到的）；按一下就不再改")
-                fix.setStyleSheet("color: gray")
-                row.addWidget(fix)
             row.addStretch(1)
             added = QLabel(h.added)
             added.setStyleSheet("color: gray")
@@ -383,11 +448,67 @@ class SettingsDialog(QDialog):
             up.setEnabled(h.pct < hotwords.TOP)
             row.addWidget(up)
             self._hw_rows[h.word] = (down, percent, up)
-            remove = QPushButton("✕", toolTip="從詞庫刪除", clicked=lambda _=False, w=h.word: self._remove_hotword(w))
-            remove.setFixedWidth(28)
-            row.addWidget(remove)
+            row.addWidget(_remove_button("從詞庫刪除", lambda _=False, w=h.word: self._remove_hotword(w)))
             self.hw_list.addWidget(card)
         self.hw_empty.setVisible(not self.hotwords.items)
+
+    def _refresh_picks(self):
+        """Each example: the context with the picked character in bold (｜ where nothing usable came before) and the
+        reading it was heard as; the character can be typed over or the example removed."""
+        _clear(self.pick_list)
+        rows = self.memory.listed()
+        for e in rows:
+            card, row = _card()
+            left = "".join(c for c in e["left"] if c != BOUNDARY)
+            start = "<span style='color:gray'>｜</span>" if BOUNDARY in e["left"] else ""
+            context = QLabel()
+            context.setToolTip("聽成這個讀音、前後是這些字時，自動換成粗體的字；｜表示前面是句首、標點或英文")
+            row.addWidget(context)
+            reading = QLabel(e["key"])
+            reading.setStyleSheet("color: gray")
+            row.addWidget(reading)
+            row.addStretch(1)
+
+            def show(value, label=context, start=start, left=left, right="".join(e["right"])):
+                label.setText(f"{start}{html.escape(left)}<b>{html.escape(value)}</b>{html.escape(right)}")
+            show(e["value"])
+            value = QLineEdit(e["value"], toolTip="換成的字（一個中文字）")
+            value.setFixedWidth(40)
+            value.setAlignment(Qt.AlignCenter)
+            value.editingFinished.connect(lambda box=value, k=e["key"], n=e["serial"], show=show:
+                                          self._change_pick(box, k, n, show))
+            row.addWidget(value)
+            row.addWidget(_remove_button("刪除這筆", lambda _=False, k=e["key"], n=e["serial"]:
+                                         self._remove_pick(k, n)))
+            self.pick_list.addWidget(card)
+        self.pick_empty.setVisible(not rows)
+
+    def _change_pick(self, box: QLineEdit, key: str, serial: int, show):
+        text = box.text().strip()
+        old = next((e["value"] for e in self.memory.listed() if e["key"] == key and e["serial"] == serial), "")
+        if text == old:
+            return
+        if self.memory.change(key, serial, text):
+            show(text)
+        else:
+            box.setText(old)
+
+    def _remove_pick(self, key: str, serial: int):
+        self.memory.remove(key, serial)
+        self.refresh_hotwords()
+
+    def _refresh_aliases(self):
+        _clear(self.alias_list)
+        pairs = sorted(self.hotwords.aliases(), key=lambda p: (p[1].casefold(), p[0].casefold()))
+        for alias, word in pairs:
+            card, row = _card()
+            label = QLabel(f"{html.escape(alias)} <span style='color:gray'>→</span> {html.escape(word)}")
+            label.setToolTip(f"辨識出「{alias}」時一律改成「{word}」")
+            row.addWidget(label)
+            row.addStretch(1)
+            row.addWidget(_remove_button("不再替換", lambda _=False, w=word, a=alias: self._remove_alias(w, a)))
+            self.alias_list.addWidget(card)
+        self.alias_empty.setVisible(not pairs)
 
     def _sorted_hotwords(self) -> list:
         """The list in the chosen order; ties by percentage, then name. Names sort by their pinyin, so Chinese words
@@ -424,6 +545,7 @@ class SettingsDialog(QDialog):
         self.cfg.packs = ids
         self.cfg.save()
         self.hotwords.set_packs(packs.words_for(ids), packs.PCT)
+        self._set_headers()
 
     def _remove_alias(self, word: str, alias: str):
         self.hotwords.remove_alias(word, alias)

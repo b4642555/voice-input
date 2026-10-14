@@ -100,13 +100,17 @@ CJK/ASCII spacing → trailing punctuation.
 ## Settings window (tabs since 2026-10-11)
 
 Four tabs, sized for the log: 一般 (microphone, "mute the speakers while recording", punctuation names, "selected 。 →
-，", "節日的節" (described characters), autostart, a button that opens smart-picks.json; the menu timeout was
-removed 2026-10-11), 辨識紀錄 (the transcript log), 自訂操作 (custom operations, below) and 詞庫 (hotwords; the UI
-says 詞庫 and 優先度 instead of 熱詞 and weight since 2026-10-13, the code keeps "hotwords": term pack check boxes on
-top, then the list: date added, the 優先度 between −/+ buttons (shown as stored − 100: 0% does nothing, −30% in
+，", "節日的節" (described characters), autostart; the menu timeout was removed
+2026-10-11), 辨識紀錄 (the transcript log), 自訂操作 (custom operations, below) and 詞庫 (hotwords; the UI
+says 詞庫 and 優先度 instead of 熱詞 and weight since 2026-10-13, the code keeps "hotwords"). Since 2026-10-14 the
+詞庫 tab has four collapsible sections, one open at a time (the user's design): the open one fills the tab and
+scrolls inside, the other headers stay in view; the open one is remembered (`hotword_section`). 詞包: term pack
+check boxes. 詞庫列表: date added, the 優先度 between −/+ buttons (shown as stored − 100: 0% does nothing, −30% in
 red is lowered, +100% is the top; the user found 70% did not read as lowered, 2026-10-13) (10% a click; the row is updated in place,
 re-sorting made it jump away), remove; the source is not shown; a 排序 drop-down: 優先度, name A→Z / Z→A by pinyin,
-date; remembered). Mute (2026-10-06, `mute.py`): Core Audio via
+date; remembered). 智慧選字: every smart pick as its context with the character in bold and the reading; the
+character can be typed over (one Chinese character) or the example removed (it replaced the 一般 tab's button that
+opened smart-picks.json). 英文強制替換: the aliases (Dipsick → DeepSeek), each removable. Mute (2026-10-06, `mute.py`): Core Audio via
 comtypes; muted when the recording indicator shows, unmuted once the text is pasted or the press ends in nothing; a
 mute the user set is left alone. Selection edits and on-screen terms are always on.
 
@@ -160,16 +164,18 @@ lived a few hours: the user wants hotwords added quietly (they come from deliber
   whose letters equal a known term's (user list, ticked packs, on-screen terms) is written as the term; case alone
   only when it adds inner capitals (deepseek → DeepSeek; cursor, Open Source stay). Aliases: an English spelling with
   other letters replaced in 選字 or by typing (Dipsick → DeepSeek) is stored on the word (`aliases` in
-  hotword-list.json, shown after the word on the 詞庫 tab, ✕ removes one; picking it back removes it) and always
+  hotword-list.json, listed under 英文強制替換 on the 詞庫 tab, ✕ removes one; picking it back removes it) and always
   rewritten. This is replacement after recognition, for English only. Why not more: the user's real DeepSeek at
   200% still came out as Dipsick / Dipsi / deep sick; TTS showed +4 helps a little (Ollama alone), +5 breaks
   (DeepSeek → Deep, queue → que), and negative scores for misheard spellings made it worse (Deep Seek → Deepsec). (Single characters still
   use `candidates.homophones`: common first, then the reading tiers.) English: spellings (`memory.variants`: Claude / claude / CLAUDE; voiceInput /
   VoiceInput / Voice Input / voice input / VOICE INPUT / voice_input / voice-input / voiceinput, the styles picked
   most first, counted apart for one word and for several), hotwords among them first by weight. 8 rows.
-- **Smart picks** (`memory.py`, DATA_DIR/smart-picks.json, one example per line, opened from the 一般 tab): single
+- **Smart picks** (`memory.py`, DATA_DIR/smart-picks.json, one example per line, listed on the 詞庫 tab): single
   Chinese characters only (the user's choice). Modelled on art-shuangpin's core/user_preferences (spec §7): key
-  (toned pinyin) + left (two characters, `^` boundary) + right (two toneless readings) + value; applied after
+  (toned pinyin) + left (two characters, `^` boundary) + right (two characters; toneless readings until 2026-10-14, when the user chose
+  characters on both sides: both are recognized text here, unlike an input method's unconverted pinyin, and the
+  examples learned before were dropped) + value; applied after
   formatting when at least one token agrees, most agreement wins, left alone on a tie. Since 2026-10-14 a change that breaks
   a raised hotword or makes a lowered one is not made (`Hotwords.levels`; 一 -> 依 learned in 右的依序 turned
   一瞬間 into 依瞬間 through the agreeing shun, though the user had 依瞬間 at −100%), and a pick that puts back

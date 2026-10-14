@@ -19,6 +19,7 @@ class Config:
     punctuation_names: bool = True  # an utterance of just a punctuation name (逗號, 句號 …) types the mark
     describe_char: bool = True     # 節日的節 types 節 (edit.described)
     hotword_sort: str = "weight"   # order of the 詞庫 tab (settings.HOTWORD_SORTS)
+    hotword_section: str = ""      # the open section of the 詞庫 tab ("" none, packs, words, picks, aliases)
     packs: list = field(default_factory=list)   # ids of the ticked term packs (packs.py)
     pack_hints: list = field(default_factory=list)   # packs a notice already suggested (App._suggest_pack)
     start_sound: str = "blip"     # cues.py id played when the recording indicator shows, "" for none

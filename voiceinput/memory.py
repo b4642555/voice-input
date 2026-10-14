@@ -6,9 +6,11 @@ picked in 選字 raises its X-ASR hotword weight instead (hotwords.py), and noth
 Modelled on art-shuangpin's core/user_preferences (its docs/spec.md §7). Every pick is one EXAMPLE: "the span that
 sounds like <key>, between <left> and <right>, was picked as <value>". key is the span's reading (toned pinyin per
 character, casefolded English words: "cheng2 shi4", "voice input"); left is up to two characters in front, nearest
-last, `^` for "nothing usable in front" (the start, punctuation, English); right is up to two toneless readings after
-it, nearest first. Readings on the right because what follows may be misheard too. (The rules below were written
-for phrases too; with single characters only, the phrase cases no longer arise.)
+last, `^` for "nothing usable in front" (the start, punctuation, English); right is up to two characters after it,
+nearest first. Both sides are characters since 2026-10-14 (the user's choice): the right side held toneless readings
+before, as in the input method, where what follows is still unconverted pinyin; here both sides are recognized text,
+and readings matched too loosely. Files from before (no "version") lose their examples. (The rules below were
+written for phrases too; with single characters only, the phrase cases no longer arise.)
 
 After formatting, every span whose reading has examples is matched: walking outward from the span on each side,
 agreeing tokens count until the first disagreement. Most agreement wins, then more on the right, then the boundary,
@@ -18,8 +20,8 @@ user's choice: picked once, used everywhere until picked back in another context
 with another value whose context does not conflict with it; examples in conflicting contexts stay, which is how one
 reading learns two answers.
 
-Also learned, in the same file so the user can read everything (DATA_DIR/smart-picks.json, opened from the 一般
-tab): styles, how often each way of writing English was picked (voiceInput, Voice Input …), counted apart for one
+Also learned, in the same file so the user can read everything (DATA_DIR/smart-picks.json; the examples are listed
+and edited on the 詞庫 tab since 2026-10-14): styles, how often each way of writing English was picked (voiceInput, Voice Input …), counted apart for one
 word and for several, to order those candidates. (Picks raising a word's X-ASR bias was planned and dropped the same
 day: X-ASR barely follows Chinese biasing, and the user chose not to keep it for English alone.)
 """
@@ -35,6 +37,7 @@ log = logging.getLogger("voiceinput")
 
 PATH = DATA_DIR / "smart-picks.json"
 BOUNDARY = "^"
+VERSION = 2   # 2: right side as characters (2026-10-14)
 _SIDE = 2
 _CAMEL = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+")
 _LATIN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _\-]*$")
@@ -43,7 +46,7 @@ _STYLES_MANY = ["camel", "pascal", "title", "lower", "upper", "snake", "kebab", 
 
 def situation(text: str, start: int, end: int) -> tuple[list[str], list[str]]:
     """(left, right) around text[start:end]: left characters nearest last (with `^` when they stop before two),
-    right toneless readings nearest first."""
+    right characters nearest first."""
     toks = tokens(text)
     before = [t for t in toks if t.end <= start]
     after = [t for t in toks if t.start >= end]
@@ -59,7 +62,7 @@ def situation(text: str, start: int, end: int) -> tuple[list[str], list[str]]:
     for t in after:
         if len(right) == _SIDE or t.kind != "cjk" or t.start != pos:
             break
-        right.append(t.toneless)
+        right.append(t.text)
         pos = t.end
     return left, right
 
@@ -129,13 +132,16 @@ class Memory:
         self._serial = 1
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-            for ex in data.get("examples", []):
+            old = data.get("version", 1) < VERSION   # right side as readings: dropped (the user's choice)
+            for ex in [] if old else data.get("examples", []):
                 if not _single(ex["value"]):
                     continue          # phrases and English were learned before the change to single characters
                 self.examples.setdefault(ex["key"], []).append(
                     {"value": ex["value"], "left": list(ex["left"]), "right": list(ex["right"]),
                      "serial": int(ex["serial"])})
             self.styles = {k: int(v) for k, v in data.get("styles", {}).items()}
+            if old:
+                self.save()
         except (OSError, ValueError, KeyError, TypeError):
             pass
         for exs in self.examples.values():
@@ -148,12 +154,39 @@ class Memory:
                     for k, exs in sorted(self.examples.items()) for e in exs]
             # one example per line, so the file reads as a list
             lines = ",\n".join("  " + json.dumps(r, ensure_ascii=False) for r in rows)
-            text = ('{\n"examples": [\n' + lines + '\n],\n"styles": '
+            text = ('{\n"version": ' + str(VERSION) + ',\n"examples": [\n' + lines + '\n],\n"styles": '
                     + json.dumps(self.styles, ensure_ascii=False) + "\n}\n")
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self.path.write_text(text, encoding="utf-8")
 
     # --- examples ---
+    def listed(self) -> list[dict]:
+        """Every example as {key, value, left, right, serial}, newest first (the 詞庫 tab)."""
+        with self._lock:
+            rows = [dict(e, key=k) for k, exs in self.examples.items() for e in exs]
+        return sorted(rows, key=lambda e: -e["serial"])
+
+    def remove(self, key: str, serial: int):
+        with self._lock:
+            exs = [e for e in self.examples.get(key, []) if e["serial"] != serial]
+            if exs:
+                self.examples[key] = exs
+            else:
+                self.examples.pop(key, None)
+        self.save()
+
+    def change(self, key: str, serial: int, value: str) -> bool:
+        """Give an example another character (edited on the 詞庫 tab); False if value is not one Chinese
+        character."""
+        if not _single(value):
+            return False
+        with self._lock:
+            for e in self.examples.get(key, []):
+                if e["serial"] == serial:
+                    e["value"] = value
+        self.save()
+        return True
+
     def lookup(self, key: str, left, right, single: bool) -> str | None:
         with self._lock:
             exs = self.examples.get(key)

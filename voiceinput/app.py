@@ -161,7 +161,7 @@ class App(QObject):
         self.picker.typed.connect(self.on_menu_typed)
         self.picker.closed.connect(self._forget_menu)
         self._picker_hwnd = int(self.picker.winId())
-        self.settings = SettingsDialog(self.cfg, self.hotwords, self.memory.path)
+        self.settings = SettingsDialog(self.cfg, self.hotwords, self.memory)
         self.settings.applied.connect(self.apply_settings)
 
         self.tray = QSystemTrayIcon(self.icon_idle)
