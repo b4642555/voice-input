@@ -138,6 +138,20 @@ class Recognizer:
             text += gap + part if text and part else part
         return text
 
+    def recognize_timed(self, audio: np.ndarray, hotwords: list[tuple[str, float]] | None = None):
+        """(text, tokens, seconds each token was emitted at) for audio up to _PIECE seconds; longer audio gives
+        the text alone, without tokens."""
+        if audio.size < SAMPLE_RATE * 0.2:
+            return "", [], []
+        if audio.size > _PIECE * SAMPLE_RATE:
+            return self.recognize(audio, hotwords), [], []
+        spec = self.hotword_spec(hotwords) if hotwords and self.supports_hotwords else ""
+        stream = self._rec.create_stream(spec) if spec else self._rec.create_stream()
+        stream.accept_waveform(SAMPLE_RATE, audio.astype(np.float32))
+        self._rec.decode_stream(stream)
+        r = stream.result
+        return self._clean(r.text), list(r.tokens), list(r.timestamps)
+
     @staticmethod
     def _clean(text: str) -> str:
         # SenseVoice may emit tags like <|zh|><|NEUTRAL|>

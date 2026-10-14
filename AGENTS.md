@@ -177,8 +177,11 @@ English word as one: by letters the user's 換行 heard as "Hangan" was too long
 typed as text at the next command); a short piece that starts a draft and is no command alone is decoded again with
 the draft's audio before it. Said alone, an operation's phrase, a punctuation name or a described character commits
 the draft (its audio before the command decoded again as a whole; nothing is decoded when nothing was said since the
-last commit: a breath between 句號 and 送出 was typed as "Shh") and then runs or is typed; otherwise the draft's audio
-so far is decoded again and its text, punctuation included, typed in place (`_refine`). The 一般 tab's 定稿時機
+last commit: a breath between 句號 and 送出 was typed as "Shh") and then runs or is typed; otherwise the draft's open
+sentence is decoded again and its text, punctuation included, typed in place (`_refine_job`). Only the open
+sentence: text up to the last ， or 。 that the recognizer put in a pause between pieces (token timestamps,
+`Recognizer.recognize_timed`) is settled and not decoded again, so a pause or a commit costs one sentence (the
+user's request after a commit of a long draft took 3.25s; ~0.2-0.35s per pause on TTS). The 一般 tab's 定稿時機
 (`commit_at`) picks when a draft is committed: on a command or the end of listening (default, the user's choice) or
 at every pause; a draft longer than 60s is committed at a pause. Drafts never get sentence-final punctuation (the
 user says 句號). A draft placed where text was selected when its speech began replaces it; moving the caret (click,
