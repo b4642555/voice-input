@@ -1,4 +1,6 @@
-"""Text formatting applied to every result (after ASR, before pasting)."""
+"""Text formatting applied to every result (after ASR, before pasting). Each step that changes the text is logged
+and, given a list, recorded as (step name, before, after) for the 辨識紀錄 tab (2026-10-14, the user's request)."""
+import difflib
 import logging
 import re
 
@@ -67,6 +69,10 @@ _HALF = str.maketrans("，。？！；：", ",.?!;:")
 _SPACE_CJK_ASCII = re.compile(f"([{CJK}])\\s*([A-Za-z0-9])")
 _SPACE_ASCII_CJK = re.compile(f"([A-Za-z0-9%])\\s*([{CJK}])")
 _TRAILING_PUNCT = re.compile(r"[。，,.]+$")
+# a Chinese sentence ending in English: 幫我 push. -> 幫我 push。 (2026-10-14, the user's request; ? and ! too)
+_EN_END = re.compile(f"(?<=[A-Za-z0-9])([.?!])[ \t]*(?=$|[{CJK}])")
+_SENTENCE_END = re.compile(r"[。？！]|[.?!](?=\s)")
+_FULL_END = str.maketrans(".?!", "。？！")
 _FILLER = re.compile(r"[嗯呃]+[，,、。]?\s*")
 
 # Disfluencies (2026-09-29, from the user's log: 我們我們明天見, 你可不可不可以, 今天今天, 先打開那個，先打開設定頁).
@@ -246,21 +252,65 @@ def ends_with_punct(text: str) -> bool:
     return bool(_TRAILING_PUNCT.search(text))
 
 
-def format_text(text: str, strip_trailing_punct: bool = False) -> str:
-    text = to_traditional(text)
-    text = _FILLER.sub("", text)
-    text = remove_disfluencies(text)
-    text = _PERCENT.sub(_percent, text)
-    text = _convert_numbers(text)
-    text = _SPELLED.sub(lambda m: m.group(0).replace(" ", "").upper(), text)
-    text = _DOT_DIGITS.sub(".", text)
-    text = _DOT_LETTERS.sub(".", text)
-    text = _PERCENT_EN.sub(r"\1%", text)
-    text = _DIGIT_LETTER.sub(r"\1\2", text)  # 5 h -> 5h, 2 B -> 2B
-    text = _LETTER_DIGIT.sub(r"\1\2", text)  # M 3 -> M3, V 4.1 -> V4.1 (one letter only: Opus 4.8 keeps its space)
-    text = _EN_PUNCT.sub(lambda m: m.group(1).translate(_HALF) + " ", text)
-    text = _SPACE_CJK_ASCII.sub(r"\1 \2", text)
-    text = _SPACE_ASCII_CJK.sub(r"\1 \2", text)
+def _cjk_sentence_end(text: str) -> str:
+    """. ? ! after English become 。？！ when their sentence (since the previous sentence end) has Chinese."""
+    def sub(m):
+        start = 0
+        for b in _SENTENCE_END.finditer(text, 0, m.start()):
+            start = b.end()
+        return m.group(1).translate(_FULL_END) if _CJK_CHAR.search(text, start, m.start()) else m.group(0)
+    return _EN_END.sub(sub, text)
+
+
+def changes(before: str, after: str, context: int = 2) -> list[tuple[str, str]]:
+    """The changed fragments of before -> after, each with up to `context` characters around it (overlapping ones
+    merged): 了七百二十八個 -> 了 728 個."""
+    groups = []
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, before, after, autojunk=False).get_opcodes():
+        if tag == "equal":
+            continue
+        if groups and i1 - groups[-1][1] <= 2 * context:
+            groups[-1][1], groups[-1][3] = i2, j2
+        else:
+            groups.append([i1, i2, j1, j2])
+    def frag(s, a, b):
+        a, b = max(0, a - context), min(len(s), b + context)
+        while 0 < a and _word_char(s[a - 1]) and _word_char(s[a]):   # whole English words: push. not sh.
+            a -= 1
+        while b < len(s) and _word_char(s[b - 1]) and _word_char(s[b]):
+            b += 1
+        return s[a:b].strip()
+    return [(frag(before, i1, i2), frag(after, j1, j2)) for i1, i2, j1, j2 in groups]
+
+
+def _word_char(c: str) -> bool:
+    return c.isascii() and c.isalnum()
+
+
+def format_text(text: str, strip_trailing_punct: bool = False, steps: list | None = None) -> str:
+    """steps: if given, gets (name, before, after) for each step that changed the text (also logged)."""
+    def run(name, fn):
+        nonlocal text
+        new = fn(text)
+        if new != text:
+            log.info("format %s: %s", name, "; ".join(f"{a} -> {b}" for a, b in changes(text, new)))
+            if steps is not None:
+                steps.append((name, text, new))
+            text = new
+
+    text = to_traditional(text)   # the transcript shows the recognizer's text converted already: not a step
+    run("語助詞", lambda t: _FILLER.sub("", t))
+    run("重複", remove_disfluencies)
+    run("百分比", lambda t: _PERCENT.sub(_percent, t))
+    run("數字", _convert_numbers)
+    run("拼字字母", lambda t: _SPELLED.sub(lambda m: m.group(0).replace(" ", "").upper(), t))
+    run("小數點", lambda t: _DOT_LETTERS.sub(".", _DOT_DIGITS.sub(".", t)))
+    run("百分比", lambda t: _PERCENT_EN.sub(r"\1%", t))
+    # 5 h -> 5h, 2 B -> 2B; M 3 -> M3, V 4.1 -> V4.1 (one letter only: Opus 4.8 keeps its space)
+    run("英數相連", lambda t: _LETTER_DIGIT.sub(r"\1\2", _DIGIT_LETTER.sub(r"\1\2", t)))
+    run("英文標點", lambda t: _EN_PUNCT.sub(lambda m: m.group(1).translate(_HALF) + " ", t))
+    run("中英空格", lambda t: _SPACE_ASCII_CJK.sub(r"\1 \2", _SPACE_CJK_ASCII.sub(r"\1 \2", t)))
+    run("英文句尾", _cjk_sentence_end)
     if strip_trailing_punct:
-        text = _TRAILING_PUNCT.sub("", text)
+        run("插入不加句尾", lambda t: _TRAILING_PUNCT.sub("", t))
     return text

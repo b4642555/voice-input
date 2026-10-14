@@ -66,13 +66,17 @@ Memory with everything on: ~1.1GB (was ~3GB with the LLM). The word index held a
 `asr.py` (raw text, biased toward hotwords and on-screen terms) → `textfmt.format_text` → smart picks
 (`memory.apply`, single characters) → paste. Order inside `format_text` matters: s2tw → filler
 removal → disfluencies → 百分之 → numerals → spelled letters → 點 → percent → number+letter → English punctuation →
-CJK/ASCII spacing → trailing punctuation.
+CJK/ASCII spacing → English sentence end → trailing punctuation.
 
 - Trailing punctuation (2026-10-07, replacing the "strip trailing punctuation" setting): the model's sentence-final
   。，,. is kept, except when the caret's line has non-blank text on both sides of it (the user is inserting).
   `selection.read_caret` reads that at key-down with the selection probe: UIA in normal apps, the input box row the
   Windows Terminal cursor is on in terminals (same behaviour everywhere, the user's requirement). Unknown → kept.
 
+- English sentence end (2026-10-14, the user's request): . ? ! right after English become 。？！ when their sentence
+  (since the previous 。？！ or . ? ! before a space) has Chinese: 幫我 push. → 幫我 push。; 今天很好。I love it. stays.
+- Every step that changes the text is logged (`format <step>: before -> after`, the changed fragments) and shown
+  on the 辨識紀錄 tab (`format_text(..., steps)`, `textfmt.changes`).
 - OpenCC `s2tw` only (glyph conversion). `s2twp` was dropped because it rewrites vocabulary (程序 → 程式).
 - After s2tw, 臺 is mapped back to 台 (s2tw turns 台北 into 臺北; the user wants 台), and 熒幕 / 熒光 to 螢幕 / 螢光
   (X-ASR writes 荧幕, which s2tw turns into 熒幕; 2026-10-11).
@@ -101,7 +105,10 @@ CJK/ASCII spacing → trailing punctuation.
 
 Four tabs, sized for the log: 一般 (microphone, "mute the speakers while recording", punctuation names, "selected 。 →
 ，", "節日的節" (described characters), autostart; the menu timeout was removed
-2026-10-11), 辨識紀錄 (the transcript log), 自訂操作 (custom operations, below) and 詞庫 (hotwords; the UI
+2026-10-11), 辨識紀錄 (the transcript log; since 2026-10-14, the user's design, each entry
+starts with what happened in normal size: 【輸入】 the typed text, 【操作】 a spoken operation, 【取代】 old → new,
+【選字】, 【刪除】; then smaller: ASR time and text, and every step that changed the text as its changed fragments,
+those of `format_text` and the app's: 英文拼寫, 標點名稱, 指定字, 選字記憶, 拼字, 取代標點, 選取句號, 刪除後重講), 自訂操作 (custom operations, below) and 詞庫 (hotwords; the UI
 says 詞庫 and 優先度 instead of 熱詞 and weight since 2026-10-13, the code keeps "hotwords"). Since 2026-10-14 the
 詞庫 tab has four collapsible sections, one open at a time (the user's design): the open one fills the tab and
 scrolls inside, the other headers stay in view; the open one is remembered (`hotword_section`). 詞包: one row per

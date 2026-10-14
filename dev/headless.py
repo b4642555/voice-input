@@ -9,7 +9,7 @@ box), click (the user clicks: ends what the app knows about the text), tap (one 
 hotkey:NAME (the key or button the next steps press, default mouse_middle), rules:default (the default operations),
 rule:JSON (add an operation, rules.Rule.from_dict), at:WORD (put the caret right after the last WORD; at: puts it at
 the end), say:TEXT (dictate TEXT as if recognized), set:NAME=VALUE (change a setting in memory only), packs:ID+ID (tick term packs, in memory only) or key:BACK (the
-user presses Backspace n times: key:BACK*3), dbl:MS (a double tap, each press MS ms long), dblbusy (a double tap whose release is handled 0.5s late), pick:N / pickw:WORD (click a row of the 選字 menu), type:TEXT (type TEXT in the menu's input box and press Enter). Settings are never saved; hotwords and smart picks live in <dir> (hotwords.test.json,
+user presses Backspace n times: key:BACK*3), dbl:MS (a double tap, each press MS ms long), dblbusy (a double tap whose release is handled 0.5s late), pick:N / pickw:WORD (click a row of the 選字 menu), logshot:NAME (the 辨識紀錄 tab saved as <dir>/NAME.png), type:TEXT (type TEXT in the menu's input box and press Enter). Settings are never saved; hotwords and smart picks live in <dir> (hotwords.test.json,
 smart-picks.test.json, emptied at the start), never in the real files.
 """
 import json
@@ -300,6 +300,14 @@ try:
             down(), pump(ms), up(), pump(0.05), down(), pump(ms), up(), pump(1.0)
             print(f"[{step}] → 文字框：{box.text[:box.caret] + '|' + box.text[box.caret:]!r}")
             continue
+        if step.startswith("logshot:"):
+            A.settings.set_log(A._records)
+            A.settings.tabs.setCurrentIndex(1)
+            A.settings.show()
+            pump(0.3)
+            A.settings.grab().save(f"{S}/{step[8:]}.png")
+            print(f"[辨識紀錄截圖 {S}/{step[8:]}.png]")
+            continue
         if step.startswith("key:BACK"):
             n = int(step.split("*")[1]) if "*" in step else 1
             box.back(n)
@@ -313,7 +321,7 @@ try:
         up()
         pump(2.5)
         shown = box.text[:box.caret] + "|" + box.text[box.caret:]
-        print(f"[{step}] {A._records[-1]['fmt'] if A._records else ''!r:32} → 文字框：{shown!r}{menu()}")
+        print(f"[{step}] {A._records[-1].get('main', '') if A._records else ''!r:32} → 文字框：{shown!r}{menu()}")
 finally:
     A.quit()
     shutil.rmtree(Path(S) / "__pycache__", ignore_errors=True)

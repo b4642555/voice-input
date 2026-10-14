@@ -18,6 +18,7 @@ from .config import GESTURE_TIME_RANGE
 from .memory import BOUNDARY
 from .keys import KEY_TRIGGERS, MOUSE_TRIGGERS, combo_text, is_modifier
 from .rules import Rule, Step
+from .textfmt import changes
 
 SOURCES = [(rules.MOUSE, "滑鼠鍵"), (rules.KEY, "鍵盤鍵"), (rules.SPEECH, "說出")]
 GESTURES = [(rules.TAP, "按一下"), (rules.DOUBLE, "連按兩下"), (rules.HOLD, "按住")]
@@ -576,20 +577,30 @@ class SettingsDialog(QDialog):
         return self.log
 
     def set_log(self, entries):
-        """Render entries newest first, in pipeline order. Each entry: time, asr, asr_s, fmt, and edit (an
-        operation or edit description, optional)."""
-        def row(label, secs, text, color=""):
-            t = f"{secs:.2f}s" if secs is not None else ""
-            style = f" style='color:{color}'" if color else ""
-            return (f"<tr><td width=40><b>{label}</b></td><td width=46 style='color:gray'>{t}</td>"
-                    f"<td{style}>{html.escape(text)}</td></tr>")
+        """Render entries newest first (2026-10-14, the user's design): what happened first, in normal size (【輸入】
+        the typed text, 【操作】 a spoken operation, 【取代】 old → new, 【選字】, 【刪除】), then the details smaller:
+        the recognizer's text and time, and each step that changed the text as its changed fragments. Each entry:
+        time, kind, main, and optionally asr, asr_s, steps [(name, before, after or None for a note)]."""
+        def row(label, text, extra=""):
+            return (f"<tr><td style='color:gray' width=70>{html.escape(label)}</td><td style='color:gray'>{extra}</td>"
+                    f"<td>{text}</td></tr>")
+
+        def step(name, before, after):
+            if after is None:
+                return row(name, html.escape(before))
+            arrow = " <span style='color:gray'>→</span> "
+            frags = changes(before, after) or [(before, after)]
+            return row(name, "；".join(html.escape(a or "（空）") + arrow + html.escape(b or "（空）") for a, b in frags))
 
         def block(e):
-            return (f"<div style='color:gray'>{e['time']}</div><table cellspacing=0 cellpadding=2>"
-                    + row("ASR", e["asr_s"], e["asr"])
-                    + row("格式", None, e["fmt"])
-                    + (row("編輯", None, e["edit"]) if e.get("edit") else "")
-                    + "</table>")
+            main = html.escape(e.get("main") or "") or "<span style='color:gray'>（沒有辨識到文字）</span>"
+            rows = ""
+            if e.get("asr_s") is not None:
+                rows += row("ASR", html.escape(e.get("asr") or ""), f"{e['asr_s']:.2f}s&nbsp;")
+            rows += "".join(step(*s) for s in e.get("steps", []))
+            details = f"<table cellspacing=0 cellpadding=1 style='font-size:small'>{rows}</table>" if rows else ""
+            return (f"<div style='color:gray; font-size:small'>{e['time']}</div>"
+                    f"<div><b>【{e.get('kind', '輸入')}】</b>{main}</div>{details}")
 
         self.log.setHtml("<br>".join(block(e) for e in reversed(entries)))
         self.log.verticalScrollBar().setValue(0)

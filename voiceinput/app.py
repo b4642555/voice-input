@@ -595,8 +595,7 @@ class App(QObject):
             return
         press.deleted = sel
         self.session.replaced_selection(sel.before, "", foreground())
-        self.record.emit({"time": time.strftime("%H:%M:%S"), "asr": "", "asr_s": None, "fmt": "",
-                          "edit": f"刪除「{sel.text}」"})
+        self.record.emit({"time": time.strftime("%H:%M:%S"), "kind": "刪除", "main": sel.text})
 
     def delete_last(self):
         """Main thread, 刪除剛輸入的文字: delete the last dictation (or text spoken over a selection) while it is
@@ -642,47 +641,57 @@ class App(QObject):
             log.info("asr %.2fs: %s%s", t_asr, raw, f" (terms: {len(ctx.terms)})" if ctx.terms else "")
             # no sentence-final punctuation when the caret has text on both sides: the user is inserting
             mid = ctx.caret is not None and all(s.strip() for s in ctx.caret)
-            formatted = format_text(raw, mid)
+            steps = []   # (name, before, after) of every step that changed the text, for the transcript
+            formatted = format_text(raw, mid, steps)
             known = spelling.table(self._known_terms(ctx.terms), self.hotwords.aliases())
+            before = formatted
             formatted, spelled = spelling.fix(formatted, known)
             if spelled:
                 log.info("spelling: %s", ", ".join(f"{a} -> {b}" for a, b in spelled))
+                steps.append(("英文拼寫", before, formatted))
+            entry = {"time": stamp, "asr": to_traditional(raw), "asr_s": t_asr, "steps": steps}
             selected = ctx.selection is not None and press.deleted is None and press.first is None
             op = rules.pick(rules.candidates(self.cfg.rules, rules.SPEECH, formatted), selected, press.dictated)
             if op is not None:
                 log.info("spoken operation: %s", op.phrase)
                 self._keep(audio, asr=raw, fmt=formatted, result="", op=op.phrase)
-                self.record.emit({"time": stamp, "asr": to_traditional(raw), "asr_s": t_asr, "fmt": "",
-                                  "edit": f"操作：「{op.phrase}」"})
+                self.record.emit(dict(entry, kind="操作", main=op.phrase))
                 self.main.emit(lambda: self._spoken_operation(press, op))
                 return
             sym = edit.symbol(formatted) if self.cfg.punctuation_names else None
+            if sym:
+                steps.append(("標點名稱", formatted, sym))
             described = None if sym or not self.cfg.describe_char else edit.described(formatted)
             if described:
                 log.info("described character: %s", described)
+                steps.append(("指定字", formatted, described))
                 sym = described   # typed as it is, like a punctuation mark
             text = sym or formatted
             if not sym:   # smart picks (single characters)
                 prefix = ctx.selection.before if selected else (ctx.caret[0] if ctx.caret else "")
                 text = self.memory.apply(text, prefix, self.hotwords.levels())
-            entry = {"time": stamp, "asr": to_traditional(raw), "asr_s": t_asr, "fmt": text}
-            if described:
-                entry["edit"] = f"指定字：{formatted.strip()} → {described}"
+                if text != formatted:
+                    steps.append(("選字記憶", formatted, text))
             if selected and not sym:
                 spelt = edit.spelled(ctx.selection.text, raw)
                 if spelt:   # letters over an English word: that word, spelled, in the selection's case
+                    steps.append(("拼字", text, spelt[0]))
                     text, sym = spelt[0], True
-                    entry["fmt"], entry["edit"] = text, f"拼字：{spelt[1]} → {spelt[2]}"
                     self.main.emit(lambda: self._learn_spelled(spelt[1], spelt[2]))
             if selected:
                 self._keep(audio, asr=raw, fmt=formatted, result=text, op=None, selection=ctx.selection.text)
                 self._edit_job(ctx.selection, text, bool(sym), entry, press)
                 return
             replaced = press.deleted
+            entry.update(kind="輸入", main=text)
             if replaced is not None:
                 if not sym:
-                    text = edit.replacement(replaced.text, text)
-                entry["edit"] = f"{replaced.text} → {text}（刪除後重講）"
+                    trimmed = edit.replacement(replaced.text, text)
+                    if trimmed != text:
+                        steps.append(("取代標點", text, trimmed))
+                    text = trimmed
+                entry.update(kind="取代", main=f"{replaced.text} → {text}")
+                steps.append(("刪除後重講", replaced.text, None))
             self._keep(audio, asr=raw, fmt=formatted, result=text, op=None,
                        replaced=replaced.text if replaced is not None else None)
             self.record.emit(entry)
@@ -889,8 +898,8 @@ class App(QObject):
         self._suggest_pack(word)
         self.settings.refresh_hotwords()
         self.session.replaced_selection(sel.before, word, foreground())
-        self.record.emit({"time": time.strftime("%H:%M:%S"), "asr": "", "asr_s": None, "fmt": "",
-                          "edit": f"{'輸入' if typed else '選字'}：{text} → {word}"})
+        self.record.emit({"time": time.strftime("%H:%M:%S"), "kind": "選字", "main": f"{text} → {word}",
+                          "steps": [("選單輸入", word, None)] if typed else []})
 
     # --- utterances on a selection ---
     def _edit_job(self, sel, text: str, sym: bool, entry: dict, press: _Press):
@@ -899,10 +908,13 @@ class App(QObject):
             rep = text
         elif self.cfg.period_to_comma and sel.text.strip() == "。":
             rep = edit.continue_sentence(text)
+            entry["steps"].append(("選取句號", text, rep))
         else:
             rep = edit.replacement(sel.text, text)
-        entry["edit"] = f"{sel.text} → {rep}"
-        log.info("edit on %s: %s", sel.app, entry["edit"])
+            if rep != text:
+                entry["steps"].append(("取代標點", text, rep))
+        entry.update(kind="取代", main=f"{sel.text} → {rep}")
+        log.info("edit on %s: %s", sel.app, entry["main"])
         self.record.emit(entry)
         self.edited.emit(sel, rep, press)
 
