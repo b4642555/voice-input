@@ -520,8 +520,9 @@ class App(QObject):
         def finished():   # worker thread, after the last piece: the rest of the draft is committed, then the steps
             self._on_main(lambda: None)
             d = self._draft
+            spans, self._spans = self._spans, []   # sample numbers start again at 0 when listening does
             if d is not None:
-                spans = [p for p in self._spans if p.start >= d.anchor]
+                spans = [p for p in spans if p.start >= d.anchor]
                 self._commit_job(self._draft_start, d.anchor, end, end, d.ctx, final=True, spans=spans)
 
             def run():
