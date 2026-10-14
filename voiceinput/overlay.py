@@ -3,7 +3,7 @@ import math
 import time
 
 from PySide6.QtCore import QPropertyAnimation, QRectF, Qt, QTimer
-from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPainterPath
+from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QWidget
 
 W, H = 132, 40
@@ -22,13 +22,14 @@ def _click_through(widget):
 class Overlay(QWidget):
     IDLE, RECORDING, THINKING = range(3)
 
-    def __init__(self, level_source):
+    def __init__(self, level_source, busy_source=lambda: False):
         super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
                          | Qt.WindowDoesNotAcceptFocus | Qt.WindowTransparentForInput)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.setFixedSize(W, H)
         self._level_source = level_source   # callable -> float 0..1
+        self._busy_source = busy_source     # callable -> bool: speech is being decoded (the dot spins)
         self._state = self.IDLE
         self._levels = [0.0] * BARS
         self._t0 = time.monotonic()
@@ -111,9 +112,20 @@ class Overlay(QWidget):
         t = time.monotonic() - self._t0
         cy = H / 2
         if self._state == self.RECORDING:
-            # red dot + level bars
-            p.setBrush(QColor(255, 69, 58))
-            p.drawEllipse(QRectF(16, cy - 4, 8, 8))
+            # red dot + level bars; while speech is decoded an arc spins around the dot (the user's request,
+            # 2026-10-15)
+            red = QColor(255, 69, 58)
+            p.setBrush(red)
+            if self._busy_source():
+                p.drawEllipse(QRectF(17, cy - 3, 6, 6))
+                pen = QPen(red, 2)
+                pen.setCapStyle(Qt.RoundCap)
+                p.setPen(pen)
+                p.setBrush(Qt.NoBrush)
+                p.drawArc(QRectF(13, cy - 7, 14, 14), int(-t * 540 * 16) % (360 * 16), 110 * 16)
+                p.setPen(Qt.NoPen)
+            else:
+                p.drawEllipse(QRectF(16, cy - 4, 8, 8))
             p.setBrush(QColor(255, 255, 255, 230))
             x0, gap, bw = 36, 9, 4
             for i, lvl in enumerate(self._levels):

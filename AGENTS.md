@@ -212,7 +212,12 @@ double-tap deletes: rules_version 6 turns them into it) takes back VoiceInput's 
 (`session.UNDO_DEPTH`, `Session.history`), one per use, while they are still right before the caret: typed text or a
 draft (dropped, so it is not typed again at the commit), a punctuation mark, a new line (Shift+Enter is recorded as
 "\n"), text spoken over a selection (the selection comes back), a deleted selection, a 「X改成Y」. A double tap on a
-selection still deletes it (rules_version 7 adds that rule back, the user's request). Typing or clicking ends the
+selection still deletes it (rules_version 7 adds that rule back, the user's request). A draft's changes are its pauses'
+updates, one each (the user's request, 2026-10-15: a whole draft at once took back what was said long before); a
+commit belongs to the update before it. After one is taken back the draft stays as it is, not decoded again (the
+audio taken back would return), and the next speech starts a new draft.
+While listening, the indicator's red dot gets a spinning arc while speech is being decoded (`App._decoding` counts
+the worker's jobs; `spin_while_decoding`, a 一般 checkbox, on by default; the user's request, 2026-10-15). Typing or clicking ends the
 history: what the user changed is unknown. Logged as 復原 on the 辨識紀錄 tab.
 
 Defaults are the user's own setup (their request, 2026-10-14): the rules in `rules.defaults` (tap middle = 錄音,

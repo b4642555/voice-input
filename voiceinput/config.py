@@ -22,6 +22,7 @@ class Config:
     # the key that turns listening off presses Enter once the text is in (the user's request, 2026-10-14, so they
     # need not say 送出); not when listening ends by 送出 / 結束錄音, nor when nothing was typed
     send_on_stop: bool = True
+    spin_while_decoding: bool = True   # the indicator's red dot spins while speech is being decoded
     hotword_sort: str = "date"     # order of the 詞庫 tab (settings.HOTWORD_SORTS)
     pick_sort: str = "date"        # order of 選字記憶 on the 詞庫 tab (settings.PICK_SORTS)
     alias_sort: str = "date"       # order of 英文強制替換 (settings.ALIAS_SORTS)

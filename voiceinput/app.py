@@ -169,7 +169,9 @@ class App(QObject):
         self.icon_idle = make_icon(QColor(235, 235, 235) if self._dark_taskbar() else QColor(40, 40, 40))
         self.icon_rec = make_icon(QColor(255, 69, 58))
 
-        self.overlay = Overlay(lambda: self.listener.level if self._listening else 0.0)
+        self._busy, self._busy_lock = 0, threading.Lock()   # decoding jobs queued or running
+        self.overlay = Overlay(lambda: self.listener.level if self._listening else 0.0,
+                               lambda: self.cfg.spin_while_decoding and self._busy > 0)
         self.picker = Picker()
         self.picker.picked.connect(self.on_menu_pick)
         self.picker.typed.connect(self.on_menu_typed)
@@ -531,7 +533,7 @@ class App(QObject):
                 if owner:
                     self._run_steps(owner, steps)
             self.main.emit(run)
-        self.worker.submit(finished)
+        self._decoding(finished)
 
     def _on_listen_speech(self):
         """Listener thread: speech began. What is selected now is what a new draft replaces."""
@@ -549,7 +551,20 @@ class App(QObject):
 
     def _submit_piece(self, piece, probe):
         if self.recognizer is not None:
-            self.worker.submit(self._piece_job, piece, probe)
+            self._decoding(self._piece_job, piece, probe)
+
+    def _decoding(self, fn, *args):
+        """fn on the worker thread, counted as decoding while queued or running (the indicator's spinner)."""
+        with self._busy_lock:
+            self._busy += 1
+
+        def run():
+            try:
+                fn(*args)
+            finally:
+                with self._busy_lock:
+                    self._busy -= 1
+        self.worker.submit(run)
 
     # --- the draft: text typed while listening, not committed yet ---
     def _new_draft(self, ctx):
@@ -557,8 +572,9 @@ class App(QObject):
         self._draft = _Draft(self._draft_start, ctx, ctx.selection, anchor=self._draft_start)
         return self._draft
 
-    def _show_draft(self):
-        """Main thread: make the document show the draft's text."""
+    def _show_draft(self, step: bool = False):
+        """Main thread: make the document show the draft's text. step: a pause's update, which 復原 takes back on
+        its own."""
         d = self._draft
         text = d.final
         if not d.placed:
@@ -591,7 +607,7 @@ class App(QObject):
         backspace(n)
         if tail:
             paste_text(tail)
-        s.retyped(new)
+        s.retyped(new, step)
         d.typed = text
 
     def _moved(self) -> bool:
@@ -621,7 +637,7 @@ class App(QObject):
         d.anchor = after
         d.final = _TRAILING.sub("", _joined(d.settled, live))
         self.listener.keep(after)
-        self._show_draft()
+        self._show_draft(step=True)
 
     def _commit(self, text: str, start: int, anchor: int, at: int, ctx, command=None, final: bool = False):
         """Main thread: the draft's open sentence decoded again joins its settled text and the draft is done; then
@@ -943,8 +959,9 @@ class App(QObject):
 
     def undo(self):
         """Main thread, 復原 (and 刪除剛輸入的文字): take back VoiceInput's last change while it is still right before
-        the caret: up to session.UNDO_DEPTH of them, one each time. A draft taken back is dropped, so what was said
-        in it is not typed again at the commit."""
+        the caret: up to session.UNDO_DEPTH of them, one each time; a draft's are its pauses' updates. After one,
+        the draft is left as it now is (not decoded again: the audio taken back would come back) and the next speech
+        starts a new one."""
         s = self.session
         step = s.deletable()
         if step is None:
@@ -959,7 +976,7 @@ class App(QObject):
             paste_text(tail)
         s.deleted_last(step)
         d = self._draft
-        if d is not None and d.placed and step.after.endswith(d.typed):   # the draft was the change taken back
+        if d is not None and d.placed and step.after.endswith(d.typed):   # the draft's change was taken back
             self._draft = None
             self._draft_start = self.listener.now if self._listening else 0
             if self._listening:

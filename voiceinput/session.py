@@ -9,7 +9,8 @@ click from the user ends the buffer: the caret may have moved.
 復原 (a double tap or saying it) takes back the last change VoiceInput made, up to UNDO_DEPTH of them, while they
 are still right before the caret (the user's request, 2026-10-14; one, the last dictation, from 2026-10-04): typed
 text, a punctuation mark, a new line, text spoken over a selection (the selection comes back), a deleted
-selection.
+selection. A draft counts each pause's update as a change (the user's request, 2026-10-15: a whole draft at once
+took back what was said long before).
 """
 import threading
 import time
@@ -83,11 +84,14 @@ class Session:
             self.history = [Step(undo_to, self.buffer, [])] if undo_to is not None else []
             self.hwnd, self.dirty = hwnd, False
 
-    def retyped(self, new: str):
-        """The caller turned the buffer into new (Backspace + paste): a draft shown while listening changed. The
-        last change, when it was the draft, now ends with it."""
+    def retyped(self, new: str, step: bool = False):
+        """The caller turned the buffer into new (Backspace + paste): a draft shown while listening changed. step:
+        a change of its own (a pause's update); otherwise the last change, when it was the draft, now ends with it
+        (a commit belongs to the update before it)."""
         with self._lock:
-            if self.history and self.history[-1].after == self.buffer:
+            if step:
+                self._push(Step(self.buffer, new, list(self.utterances)))
+            elif self.history and self.history[-1].after == self.buffer:
                 self.history[-1].after = new
             self.buffer = new
             self.dirty = False
