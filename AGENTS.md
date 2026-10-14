@@ -167,7 +167,7 @@ while listening (選字, double-tap deletes; unbound ones are given back). The m
 the press may turn listening on, unseen (`_start_listen`); once the gesture is known `_show_listen` plays the start
 sound (its length is silenced for the VAD) and pieces heard before are handled, or `_discard_listen` drops it all.
 A rule's steps after 錄音 run when listening stops. Removed with the old path: one-shot recordings, cutting the
-start sound out of the audio (`cues.remove`, now unused), any press stopping a tap's recording, and the held second
+start sound out of the audio (`cues.remove` / `cancel` and `audio.Recorder`, deleted 2026-10-15), any press stopping a tap's recording, and the held second
 press of a double tap recording again. Sections below that describe press-and-talk (start sound cut out, hold check,
 recording from key-down) are main's history.
 A draft (`_Draft`) holds the text since the last commit, typed in the document (Backspace to the change + paste,
@@ -204,19 +204,32 @@ draft) was tried the same evening and missed: the user typed under it and it sta
 overlay drawn at its UIA rectangles) was offered and declined.
 用按鍵關閉麥克風時自動送出 (`send_on_stop`, on by default, the user's request 2026-10-14 so 送出 need not be said):
 the key that turns listening off presses Enter once the text is in; not when 送出 / 結束錄音 turned it off, nor
-when nothing was typed or run while listening. A ✕ on the indicator to stop without sending was asked for and
+when nothing was typed or run while listening, nor (2026-10-15) when another window is in front than the one the
+text went to, or everything typed was taken back. A ✕ on the indicator to stop without sending was asked for and
 dropped the same minute in favour of this checkbox.
 Pastes (`output.paste_text`, 2026-10-14): the text is put on the clipboard with Win32 (owned by a hidden window),
 and a paste or key waits 0.15s after the last Ctrl+V. Qt's clipboard hands data over lazily through our main
 thread, so a commit's paste followed 84ms later by the spoken 句號's replaced it before Windows Terminal read it:
 the whole draft was typed as 。. The clipboard is put back 0.4s after the last paste of a run. A draft placed where text was selected when its speech began replaces it; moving the caret (click,
-selection, typing) leaves a draft as typed, and the next speech starts a new one (`_moved`, `_freeze`). Tried and
+selection, typing) leaves a draft as typed, and the next speech starts a new one (`_moved`, `_freeze`); a pause's
+update that arrives after the caret moved is not lost: the speech after what is typed (`_Draft.shown`) is decoded
+again as a new draft at the caret and selection now (`_redo_job`, 2026-10-15). A pause that decodes to nothing starts
+no draft, and a draft with nothing typed yet takes the latest speech's caret and selection. The text going into a
+selection with text on both sides of it on its line gets no added 。, like the caret (it did until 2026-10-15). Tried and
 dropped the same day (the user's verdict after comparing them with settings): the streaming X-ASR model (480ms) typing
 the text as it was said, corrected at each pause, and a preview box above the indicator holding the draft until the
-commit. Not carried over from press-and-talk yet: 選取句號 -> ，…。 (the setting is still on the tab), letters
+commit. Not carried over from press-and-talk yet: 選取句號 -> ，…。 (its checkbox is hidden on this branch), letters
 spelled over a selected English word, punctuation trimmed when replacing a selection. Why VAD + the offline model:
 `listen.py` and the experiment in `dev/streaming` (not committed; report "連續麥克風實驗報告" in the user's Claude
 docs). `dev/headless.py` feed:WAV prints the document as the audio arrives.
+Listener internals (2026-10-15, from a review): sample numbers go on from one listening session to the next (they
+started at 0 each time, and the last session's pieces and commit still queued on the worker read the new session's
+audio at their old numbers: a quick stop and start typed a sentence twice); the new session's draft state is reset by
+a worker job queued after them (`_start_listen`), not at key-down. The audio is kept as the microphone's chunks
+(appending to one array copied it all every 30ms) and trimmed while nobody speaks to the draft's audio, or only the
+next piece's lead-in when nothing was said since the last commit (a silent half hour was kept). Removing every
+operation that records turns listening off; quitting no longer waits up to 10s for a worker job asking the main
+thread.
 
 復原 (the command; a double tap and the spoken 復原 by default, the user's request 2026-10-14, replacing the
 double-tap deletes: rules_version 6 turns them into it) takes back VoiceInput's last change, up to three

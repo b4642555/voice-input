@@ -10,7 +10,7 @@ from pypinyin import lazy_pinyin
 from PySide6.QtCore import QEvent, Qt, QTimer, Signal
 from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
-                               QFormLayout, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
+                               QFormLayout, QFrame, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
                                QPushButton, QScrollArea, QSizePolicy, QSpinBox, QTabWidget, QTextBrowser, QToolButton,
                                QToolTip, QVBoxLayout, QWidget)
 
@@ -243,7 +243,7 @@ class SettingsDialog(QDialog):
         self.commit_at.addItem("講指令或關錄音時", "command")
         self.commit_at.addItem("每次停頓時", "pause")
         self.mute = QCheckBox("錄音時暫時靜音電腦音效")
-        self.mute.setToolTip("錄音期間把喇叭靜音，文字輸入完成後恢復；原本就靜音的話不會動")
+        self.mute.setToolTip("麥克風開著時把喇叭靜音，關閉麥克風後恢復；原本就靜音的話不會動")
         self.describe = QCheckBox("說「詞＋的＋字」時只輸入那個字，例如「節日的節」")
         self.describe.setToolTip("整句剛好是「某個詞的某個字」才算，輸入的是詞裡讀音相同的那個字")
         self.send_on_stop = QCheckBox("用按鍵關閉麥克風時自動送出（按 Enter）")
@@ -269,7 +269,7 @@ class SettingsDialog(QDialog):
         form.addRow("", stop_at_row)
         form.addRow("", self.mute)
         form.addRow("", self.punct)
-        form.addRow("", self.period_comma)
+        # form.addRow("", self.period_comma)   # not carried over to continuous listening yet
         form.addRow("", self.describe)
         form.addRow("", self.send_on_stop)
         form.addRow("", self.spin)

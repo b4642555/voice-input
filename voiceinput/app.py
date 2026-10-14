@@ -1,4 +1,5 @@
-"""VoiceInput: single-process tray app. Hold a key or mouse button to talk, or tap it to talk until the next tap.
+"""VoiceInput: single-process tray app. Tap a key or mouse button to listen until the next tap, or hold it to listen
+while held.
 
 What an utterance does:
 1. Text is selected (UI Automation): the utterance replaces it.
@@ -8,19 +9,20 @@ punctuation name (逗號, 句號 …) is typed as the mark (edit.symbol; a setti
 節 (edit.described, a setting). Dictated text then
 goes through the smart picks (memory.py, single characters only); words are left to X-ASR hotword biasing.
 
-What the mouse buttons and keys do is set by custom operations (rules.py, 2026-10-11). The defaults: hold the
-middle button to record; double click it on a selection to delete it, or right after a dictation to delete that
-(while it is still the last change). When a key's double tap does not record and its hold does, holding the second
-press records again: delete and say it again. A tap on a selection opens 選字. Gestures no operation takes are
-given back to the key.
+What the mouse buttons and keys do is set by custom operations (rules.py, 2026-10-11). The defaults
+(rules.defaults, the user's setup): tap the middle button to listen; double click it to take back VoiceInput's last
+change (復原), on a selection to delete it; hold it on a selection for 選字; spoken 換行, 送出, 復原 / 撤銷, 刪除
+(Backspace) and a few more. Gestures no operation takes are given back to the key.
 
 Recording is continuous listening (listen.py; on the continuous-mic branch since 2026-10-14 the one way, the
 user's choice: no cutting the recording to say a command). Every pause ends a piece: said alone, an operation's
 phrase or a punctuation name commits the draft and runs or types it; otherwise the piece joins the draft, which is
 decoded again and typed in place (in place of the text selected when its speech began, if any: the user may select
-with the mouse while listening), punctuation included. A commit (by a command, the end of listening, or every pause when
-commit_at says so) decodes the draft as a whole, without sentence-final punctuation (the user says 句號). Moving the
-caret leaves a draft as it is. Other gestures work while listening.
+with the mouse while listening), punctuation included; only its open sentence is decoded again (text up to a mark
+the recognizer put in a pause is settled). A commit (by a command, the end of listening, or every pause when
+commit_at says so) decodes the open sentence once more; by an operation or the end of listening it keeps the
+recognizer's 。？！ or gets 。 (a spoken mark is typed instead). Moving the caret leaves a draft as typed, and speech
+not typed yet is decoded again at the new caret. Other gestures work while listening.
 
 The one popup (picker.py) is the 選字 candidate menu; it came back 2026-10-11 after the lean branch removed every
 popup, and a redesign is planned (the 加入熱詞 notice with 撤銷 lived for a few hours the same day). Its input box
@@ -35,7 +37,7 @@ import threading
 import time
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
 from PySide6.QtCore import QLockFile, QObject, QPointF, QRectF, Qt, QTimer, Signal
@@ -101,8 +103,6 @@ class _Press:
     released: bool = False
     finished: bool = False
     deleted: object = None            # Selection a 刪除 step removed (the dictation goes there)
-    listening: bool = False           # a piece of continuous listening, not a press
-    resolved: threading.Event = field(default_factory=threading.Event)   # steps before 錄音 are done
 
 
 def make_icon(color: QColor) -> QIcon:
@@ -157,6 +157,8 @@ class App(QObject):
         self._draft: _Draft | None = None        # text typed while listening, not committed yet
         self._draft_start = 0                    # the sample the draft's audio starts at (the last commit)
         self._listen_typed = False               # something was typed or run while listening (send_on_stop)
+        self._listen_hwnd = 0                    # the window it was typed in
+        self._quitting = False
         self._marked = None                      # the buffer when the last commit added its sentence-final mark
         self._spans: list = []                   # worker thread: the pieces of the draft's open sentence
         self._ignored: set[str] = set()          # keys pressed while another was held
@@ -402,7 +404,7 @@ class App(QObject):
         if i is None:
             self._discard_listen(press)
             if rule is not None:
-                self._run_steps(press, rule.steps, done=press.resolved.set)
+                self._run_steps(press, rule.steps)
         elif self.recognizer is None:
             self._discard_listen(press)
             self._notify(self._status_text or "模型尚未就緒")
@@ -416,7 +418,7 @@ class App(QObject):
                 self._start_listen(press)
             if self._listening:
                 self._show_listen(press)
-                self._run_steps(press, rule.steps[:i], done=press.resolved.set)
+                self._run_steps(press, rule.steps[:i])
         if press.released:
             self._finish(press)
 
@@ -468,8 +470,18 @@ class App(QObject):
             self._notify(f"無法開啟麥克風：{e}")
             return
         self._listen_owner, self._listen_shown = press, False
-        self._draft, self._draft_start, self._listen_probe = None, 0, None
-        self._listen_typed = False   # something was typed or run while listening (send_on_stop)
+        self._listen_probe = None
+        begin = self.listener.now
+
+        def fresh():   # worker thread, after the last session's pieces and its end (they still need its draft)
+            self._spans = []
+
+            def reset():
+                self._draft, self._draft_start = None, begin
+                self._listen_typed, self._listen_hwnd = False, 0
+                self.listener.keep(begin)
+            self._on_main(reset)
+        self.worker.submit(fresh)
         with self._early_lock:
             self._early_pieces = []
 
@@ -520,7 +532,7 @@ class App(QObject):
         def finished():   # worker thread, after the last piece: the rest of the draft is committed, then the steps
             self._on_main(lambda: None)
             d = self._draft
-            spans, self._spans = self._spans, []   # sample numbers start again at 0 when listening does
+            spans, self._spans = self._spans, []
             if d is not None:
                 spans = [p for p in spans if p.start >= d.anchor]
                 self._commit_job(self._draft_start, d.anchor, end, end, d.ctx, final=True, spans=spans)
@@ -530,7 +542,8 @@ class App(QObject):
                     self.muter.restore()
                     cues.play(self.cfg.stop_sound, "stop")
                 steps = list(after)
-                if send and self.cfg.send_on_stop and self._listen_typed:
+                if send and self.cfg.send_on_stop and self._listen_typed and self.session.buffer \
+                        and foreground() == self._listen_hwnd:   # not into another window (2026-10-15)
                     log.info("listen: sent on stop")
                     steps.append(rules.Step(rules.KEYS, "Enter"))
                 if owner:
@@ -572,7 +585,8 @@ class App(QObject):
     # --- the draft: text typed while listening, not committed yet ---
     def _new_draft(self, ctx):
         """Main thread: a draft starts where the caret is, over the selection read when its speech began."""
-        self._draft = _Draft(self._draft_start, ctx, ctx.selection, anchor=self._draft_start)
+        self._draft = _Draft(self._draft_start, ctx, ctx.selection, anchor=self._draft_start,
+                             shown=self._draft_start)
         return self._draft
 
     def _show_draft(self, step: bool = False):
@@ -632,25 +646,38 @@ class App(QObject):
         self._draft_start = at
         self.listener.keep(at)
 
-    def _refine(self, start: int, anchor: int, settled: str, live: str, after: int, ctx):
-        """Main thread: a pause. The draft's open sentence (its audio from `anchor`) was decoded again: `settled` is
-        the part up to a ， or 。 that fell in a pause, fixed from now on (the open sentence starts at `after`), `live`
-        the rest. Typed in place of what was there."""
+    def _refine(self, start: int, anchor: int, settled: str, live: str, after: int, upto: int, ctx):
+        """Main thread: a pause. The draft's open sentence (its audio from `anchor` to `upto`) was decoded again:
+        `settled` is the part up to a ， or 。 that fell in a pause, fixed from now on (the open sentence starts at
+        `after`), `live` the rest. Typed in place of what was there."""
         d = self._draft
         if start != self._draft_start or (d is not None and d.anchor != anchor):
             return
-        d = d or self._new_draft(ctx)
+        if d is None and not settled and not live:   # a noise: no draft, so the next speech reads its own selection
+            return
+        if self._moved():
+            # the caret moved before this update was typed: what is typed stays, and the speech after it is decoded
+            # again where the caret is now (it was lost until 2026-10-15)
+            at = d.shown
+            self._freeze(at)
+            self._decoding(self._redo_job, at)
+            return
+        if d is None:
+            d = self._new_draft(ctx)
+        elif not d.placed:   # nothing typed yet: the latest speech's caret and selection
+            d.ctx, d.sel = ctx, ctx.selection
         d.settled = _joined(d.settled, settled)
         d.anchor = after
         d.final = _TRAILING.sub("", _joined(d.settled, live))
         # the recognizer's 。？！ at the end is shown; the next pause turns it into ， when the sentence goes on (the
         # user's request, 2026-10-15; until then drafts had none while speaking)
         end = _SENTENCE_END.search(_joined(d.settled, live))
-        caret = d.ctx.caret
-        if end and d.final and not (caret is not None and all(s.strip() for s in caret)):
+        if end and d.final and not _inside(d.ctx):
             d.final += end.group()
         self.listener.keep(after)
         self._show_draft(step=True)
+        if d.placed and d.typed == d.final:
+            d.shown = upto
 
     def _commit(self, text: str, start: int, anchor: int, at: int, ctx, command=None, final: bool = False):
         """Main thread: the draft's open sentence decoded again joins its settled text and the draft is done; then
@@ -663,16 +690,17 @@ class App(QObject):
         if start == self._draft_start and (d is None or d.anchor == anchor):
             if d is None and text:
                 d = self._new_draft(ctx)
+            elif d is not None and not d.placed:
+                d.ctx, d.sel = ctx, ctx.selection
             if d is not None:
                 d.final = _TRAILING.sub("", _joined(d.settled, text))
                 end = _SENTENCE_END.search(_joined(d.settled, text))
-                caret = d.ctx.caret
-                if final and d.final and not (caret is not None and all(s.strip() for s in caret)):
+                if final and d.final and not _inside(d.ctx):
                     # none from the recognizer (a short sentence often has none): 。 (the user's choice, 2026-10-15)
                     d.final += end.group() if end else "。" if _CJK_CHAR.search(d.final) else "."
                     marked = True
                 self._show_draft()
-                if d.final:
+                if d.final and d.typed == d.final:   # else left as typed (logged by _freeze)
                     self.record.emit({"time": time.strftime("%H:%M:%S"), "kind": "輸入", "main": d.final,
                                       "copy": d.final})
             self._draft = None
@@ -681,7 +709,7 @@ class App(QObject):
             if d is not None:
                 self._marked = self.session.buffer if marked else None
         if command is not None or d is not None and d.final:
-            self._listen_typed = True
+            self._listen_typed, self._listen_hwnd = True, foreground()
         if command is not None:
             self._run_command(command, ctx)
         self._overlay_idle()
@@ -780,14 +808,14 @@ class App(QObject):
                 if self._moved():
                     self._freeze(piece.lo)
                 d = self._draft
-                state.update(drafted=d is not None, alone=d is None or not d.final,
+                state.update(drafted=d is not None, alone=d is None or not d.final, start=self._draft_start,
                              anchor=d.anchor if d is not None else self._draft_start)
             self._on_main(check)
             if "anchor" not in state:   # the main thread did not answer in time
                 log.warning("piece dropped: the main thread is busy")
                 return
             ctx = probe.result() if probe is not None else Context()
-            start, anchor = self._draft_start, state["anchor"]
+            start, anchor = state["start"], state["anchor"]
             self._spans = [p for p in self._spans if p.start >= anchor] + [piece]
             audio = self.listener.audio(piece.lo, piece.hi)
             t0 = time.monotonic()
@@ -868,7 +896,18 @@ class App(QObject):
                 self.main.emit(lambda: self._commit(settled, start, anchor, piece.hi, ctx, command, not typed))
                 return
         log.info("draft %.2fs: %s | %s", time.monotonic() - t0, settled, live)
-        self.main.emit(lambda: self._refine(start, anchor, settled, live, after, ctx))
+        self.main.emit(lambda: self._refine(start, anchor, settled, live, after, piece.hi, ctx))
+
+    def _redo_job(self, at: int):
+        """A pause's update came after the caret moved: the speech since sample `at` (after what is typed) is
+        decoded again as a new draft at the caret and selection now."""
+        state = {}
+        self._on_main(lambda: state.update(go=self._draft is None and self._draft_start == at))
+        spans = [p for p in self._spans if p.hi > at]
+        if not state.get("go") or not spans:   # a later piece got there first
+            return
+        self._spans = spans
+        self._refine_job(at, at, spans[-1], ContextProbe().result())
 
     def _speech(self, anchor: int, end: int, spans: list):
         """The open sentence's audio [anchor, end) with the silence between its pieces (spans) cut down to their own
@@ -965,7 +1004,9 @@ class App(QObject):
             finally:
                 ev.set()
         self.main.emit(run)
-        ev.wait(10)
+        for _ in range(100):   # 10s; not when quitting: the main loop is gone and Python waits for this thread
+            if ev.wait(0.1) or self._quitting:
+                return
 
     def _backspaced(self):
         """Main thread: a Backspace step deleted the character before the caret."""
@@ -1242,6 +1283,8 @@ class App(QObject):
         can = rules.can_record(self.cfg.rules)
         if self._could_record and not can:
             self._notify(_NO_RECORD)
+        if not can and self._listening:   # nothing could turn it off any more
+            self._stop_listen(send=False)
         self._could_record = can
         self._set_autostart()
 
@@ -1253,8 +1296,11 @@ class App(QObject):
             self.settings.set_status(f"開機啟動設定失敗：{e}")
 
     def quit(self):
+        self._quitting = True
         if self._listening:
-            self.listener.stop()
+            self.listener.stop(discard=True)
+        self.worker.shutdown(wait=False, cancel_futures=True)
+        self.steps.shutdown(wait=False, cancel_futures=True)
         self.muter.restore()
         self.hotkeys.stop()
         if self._mouse:
@@ -1265,6 +1311,13 @@ class App(QObject):
 
 _CJK_CHAR = re.compile(r"[㐀-䶿一-鿿]")
 _TRAILING = re.compile(r"[\s，。、！？；：,.!?;:…]+$")
+
+
+def _inside(ctx) -> bool:
+    """The text goes between text on its line: the caret's, or a selection's (that one got a 。 until 2026-10-15)."""
+    sel = ctx.selection
+    sides = (sel.before, sel.after) if sel is not None else ctx.caret
+    return sides is not None and all(t.strip() for t in sides)
 
 
 def _sample_at(index: list, offset: int) -> int:
@@ -1292,6 +1345,7 @@ class _Draft:
     typed: str = ""            # what the document shows now (after lead)
     lead: str = ""             # a space typed before it
     placed: bool = False
+    shown: int = 0             # the sample its typed text was decoded up to
 
 
 class _Known:
@@ -1302,9 +1356,6 @@ class _Known:
 
     def result(self, timeout: float = 2.0):
         return self._ctx
-
-    def ready(self) -> bool:
-        return True
 
 
 def _space_between(a: str, b: str) -> bool:

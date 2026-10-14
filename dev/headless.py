@@ -6,12 +6,14 @@ place of the focused app, so nothing is typed into real windows. Audio comes fro
 Each step is a wav name in <dir>/wav (the hotkey held while it is spoken), sel:WORD (select the last WORD in the
 box), click (the user clicks: ends what the app knows about the text), tap (one tap of the hotkey), undo / tap2
 (double tap), toggle:WAV (tap, speak, tap),
-hotkey:NAME (the key or button the next steps press, default mouse_middle), rules:default (the default operations),
+hotkey:NAME (the key or button the next steps press, default mouse_middle), rules:default (the default operations), rules:norecord (every operation that records removed),
 rule:JSON (add an operation, rules.Rule.from_dict), at:WORD (put the caret right after the last WORD; at: puts it at
 the end), say:TEXT (dictate TEXT as if recognized), set:NAME=VALUE (change a setting in memory only; apply: as the settings window does after a change), packs:ID+ID (tick term packs, in memory only) or key:BACK (the
 user presses Backspace n times: key:BACK*3), dbl:MS (a double tap, each press MS ms long), dblbusy (a double tap whose release is handled 0.5s late), pick:N / pickw:WORD (click a row of the 選字 menu), feed:WAV (while
 continuous listening is on: WAV and 1s of silence reach the microphone; feed:WAV+WAV joins clips with 0.6s pauses),
-logshot:NAME (the 辨識紀錄 tab saved as <dir>/NAME.png), type:TEXT (type TEXT in the menu's input box and press Enter). Settings are never saved; hotwords and smart picks live in <dir> (hotwords.test.json,
+logshot:NAME (the 辨識紀錄 tab saved as <dir>/NAME.png), tap0 (a tap; the next step starts once it is known to be one,
+while queued work still runs), racemove:WORD (the caret moves after the last WORD, at the end when empty, right
+before the next draft update reaches the document), type:TEXT (type TEXT in the menu's input box and press Enter). Settings are never saved; hotwords and smart picks live in <dir> (hotwords.test.json,
 smart-picks.test.json, emptied at the start), never in the real files.
 """
 import json
@@ -131,9 +133,6 @@ class Probe:
 
     def result(self, timeout=2.0):
         return self._ctx
-
-    def ready(self):
-        return True
 
 
 appmod.ContextProbe = Probe
@@ -259,6 +258,22 @@ try:
             given += menu()
             print(f"[{step}] → 文字框：{box.text[:box.caret] + '|' + box.text[box.caret:]!r}{given}")
             continue
+        if step == "tap0":   # a tap, and the next step right when it is known to be one (queued work still runs)
+            down(), pump(0.05), up(), pump(A.cfg.gesture_time + 0.05)
+            print(f"[tap0] 聽寫中：{A._listening}")
+            continue
+        if step.startswith("racemove:"):   # the caret moves (to after WORD) right before the next draft update
+            w, refine = step[9:], A._refine
+
+            def moved_first(*args, w=w, refine=refine):
+                A._refine = refine
+                box.sel = None
+                box.caret = box.text.rfind(w) + len(w) if w else len(box.text)
+                A.session.on_input()
+                print(f"      [游標移到 {w!r} 後面] {box.text[:box.caret] + '|' + box.text[box.caret:]!r}")
+                refine(*args)
+            A._refine = moved_first
+            continue
         if step.startswith("hotkey:"):
             KEY = step[7:]
             print(f"[按鍵 {KEY}]")
@@ -267,6 +282,10 @@ try:
             A.cfg.rules = rules.defaults()
             A.hotkeys.set_keys(rules.bound_keys(A.cfg.rules))
             print("[預設操作]")
+            continue
+        if step == "rules:norecord":   # every operation that records removed (in memory)
+            A.cfg.rules = [r for r in A.cfg.rules if r.record_index() is None]
+            print("[移除所有錄音操作]")
             continue
         if step.startswith("rule:"):
             A.cfg.rules.append(rules.Rule.from_dict(json.loads(step[5:])))

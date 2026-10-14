@@ -22,7 +22,7 @@ import sherpa_onnx
 import sounddevice as sd
 
 from .asr import SAMPLE_RATE
-from .audio import _resolve_device
+from .audio import resolve_device
 
 log = logging.getLogger("voiceinput")
 
@@ -80,7 +80,7 @@ class Listener:
         cfg.silero_vad.max_speech_duration = MAX_PIECE
         cfg.sample_rate = SAMPLE_RATE
         stream = sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32",
-                                device=_resolve_device(device_name), callback=self._callback,
+                                device=resolve_device(device_name), callback=self._callback,
                                 blocksize=int(SAMPLE_RATE * 0.03))
         self._queue = queue.Queue()
         self._discard = False
