@@ -25,8 +25,14 @@ _PANES = {"accessibility": "Privacy_Accessibility", "input": "Privacy_ListenEven
 
 
 def setup(qapp) -> None:
-    """No Dock icon (the app lives in the menu bar), like LSUIElement in the bundle's Info.plist."""
+    """No Dock icon (the app lives in the menu bar), like LSUIElement in the bundle's Info.plist. Light colors: the
+    settings window's log draws its own light backgrounds, which dark mode's light text did not suit."""
     NSApplication.sharedApplication().setActivationPolicy_(NSApplicationActivationPolicyAccessory)
+    try:
+        from PySide6.QtCore import Qt
+        qapp.styleHints().setColorScheme(Qt.ColorScheme.Light)
+    except AttributeError:   # Qt before 6.8
+        pass
 
 
 def open_privacy(pane: str) -> None:

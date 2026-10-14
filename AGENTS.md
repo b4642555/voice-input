@@ -35,13 +35,40 @@ the 選字 menu (old look, `picker.py`), hotwords (a weighted word list) and pic
 
 ## Platform
 
-Windows only (decided 2026-10-03, after the macOS paths failed on the user's Mac: no hotkey worked). The partial
-macOS code was removed; don't add `sys.platform` branches back. What a port would need: `docs/macos-port.md`.
+Windows and macOS (the `mac` branch, 2026-10-15, the user's request; Windows only from 2026-10-03, after the first
+macOS paths failed on the user's Mac: no hotkey worked). The user's Mac is an iMac 2019 (Intel, x86_64).
+
+One code base (the user's choice): everything that talks to the OS lives in `voiceinput/win/` and `voiceinput/mac/`,
+behind the same functions, and a small module at the old name picks one with a single `sys.platform` check:
+`selection.py` (UI Automation / Accessibility), `hotkey.py` (low-level hooks / a Quartz event tap), `output.py`
+(shared paste logic; `keyboard.py` per platform: clipboard and keystrokes), `mute.py`, `autostart.py` and `system.py`
+(windows, focus, sounds, notifications, permissions). Don't spread `sys.platform` checks elsewhere; the few data
+tables that differ (`keys.py` trigger keys and modifier names, `paths.DATA_DIR`, the 貼上 default) check it once.
+Keys are Windows virtual-key codes on both: `mac/keyboard.py` translates them.
+
+macOS specifics (`mac/`, untested on a real Mac as of 2026-10-15; CI checks install, recognition, headless and that
+the app starts):
+- Install: `install.sh`, one command (`curl -fsSL https://raw.githubusercontent.com/weiwei84530/voice-input/mac/install.sh | bash`;
+  the repo was made public for it, 2026-10-15). Code, uv, Python 3.12, venv and models go in
+  `~/Library/Application Support/VoiceInput` (`source/`, `tools/`, `venv/`, `models/`); the app in /Applications.
+- `VoiceInput.app` is a small C launcher (`packaging/mac/launcher.c`, built universal by CI and committed as
+  `packaging/mac/VoiceInput`) that starts that Python as a child. macOS gives the microphone, Accessibility and
+  Input Monitoring to the app a process belongs to, a child counting as its parent app's, and the launcher's ad-hoc
+  signature is the same at every install (CI checks), so the user allows them once and updates keep them.
+  Packing all of VoiceInput into the bundle (PyInstaller) would change the signature at every update.
+- The event tap needs Accessibility; it is retried every 2s until allowed. CapsLock is remapped to F18 with hidutil
+  while bound (macOS reports CapsLock as a toggle). Default trigger stays the middle mouse button; 右 Option /
+  右 Command / 右 Control / F-keys can be picked.
+- Notices go through osascript (`display notification`): Qt's need the process to be a bundle of its own.
+- Terminals report their selection through Accessibility; replacing it moves the shell's cursor with Left / Right
+  only (Up / Down recall history) and gives up, deleting nothing, when the cursor cannot be read.
+- What a port needed and the first try's findings: `docs/macos-port.md`.
 
 ## File layout
 
 Decided 2026-09-26 (the user plans to share the app with other users): code and runtime tools (`.tools/`, `.venv/`)
-stay in the app folder; user data lives in `paths.DATA_DIR` (`%LOCALAPPDATA%\VoiceInput`): `config.json`, logs, lock
+stay in the app folder; user data lives in `paths.DATA_DIR` (`%LOCALAPPDATA%\VoiceInput`; macOS:
+`~/Library/Application Support/VoiceInput`, where the installer also puts the code): `config.json`, logs, lock
 and `models/`. The models folder is fixed (the setting to move it was removed 2026-09-29). `paths.migrate_legacy()` moves the old in-app-folder data on first launch. Autostart is
 re-registered on every launch so it follows the app if its folder moves. Next step, not started: package as an exe
 with an installer (PyInstaller + Inno Setup).

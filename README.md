@@ -1,11 +1,21 @@
 # VoiceInput
 
-Offline push-to-talk voice input for Windows (macOS is not supported; see [docs/macos-port.md](docs/macos-port.md)). Hold **CapsLock**, speak, release — text is pasted into the focused app.
+Offline voice input for Windows and macOS. Hold **CapsLock**, speak, release — text is pasted into the focused app.
 Single process: one tray icon, settings window, floating indicator. Speech recognition via [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx).
 
 ## Install / run
 
-Install with `install.bat`, run with `start.bat`.
+**macOS** (11 or later, Intel or Apple Silicon), one command in Terminal:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/weiwei84530/voice-input/mac/install.sh | bash
+```
+
+Run the same command to update; `... | bash -s -- --uninstall` removes it. On first use allow VoiceInput the
+microphone, 輔助使用 (Accessibility) and 輸入監控 (Input Monitoring) in System Settings › Privacy & Security; updates
+keep these permissions.
+
+**Windows**: install with `install.bat`, run with `start.bat`.
 
 The installer puts uv, Python and the venv inside this folder. Nothing is installed system-wide.
 If you move the folder, run the installer again (the venv records absolute paths).

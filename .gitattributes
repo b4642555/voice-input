@@ -1,3 +1,5 @@
-*.command text eol=lf
 *.sh text eol=lf
-*.bat text eol=crlf
+*.c text eol=lf
+*.plist text eol=lf
+packaging/mac/VoiceInput binary
+*.wav binary

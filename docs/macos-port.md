@@ -1,5 +1,8 @@
 # Porting VoiceInput to macOS
 
+Status (2026-10-15): ported on the `mac` branch (`voiceinput/mac/`, `install.sh`, `packaging/mac/`; see AGENTS.md
+"Platform"). Not yet tried on a real Mac. The rest of this file is the analysis the port followed.
+
 Status (2026-10-03): VoiceInput is Windows only. The half-done macOS paths were removed in the commit after
 `f6a7b83` (that commit still has them: `install.command`, `start.command`, the LaunchAgent in `autostart.py`, the
 `~/Library/Application Support` data folder, Cmd+V paste, a plain pynput listener in `hotkey.py`). This file lists
