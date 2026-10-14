@@ -176,7 +176,7 @@ last commit. The streaming X-ASR model (`asr.Streamer`, 480ms chunks, the user's
 ~165MB, downloaded at the first launch; biased by the same hotwords: Cloud Code -> Claude Code) runs on the
 listener thread and its text is typed in place (Backspace to the change + paste, `Session.retyped`). silero VAD
 (`models.vad_path()`) ends a piece at 0.3s of silence; each piece (0.5s of lead-in, 0.25s after) is decoded by the
-offline model, with commands boosted when short. Said alone, an operation's phrase, a punctuation name or a described
+offline model, with commands boosted when short (counting a Chinese character or an English word as one: by letters the user's 換行 heard as "Hangan" was too long, stayed in the draft as 換行 and was typed as text at the next command); a short piece that starts a draft and is no command alone is decoded again with the draft's audio before it. Said alone, an operation's phrase, a punctuation name or a described
 character commits the draft (its audio before the command decoded again as a whole) and then runs or is typed;
 otherwise the draft's audio so far is decoded again and its text, punctuation included, replaces the streaming text
 (`_refine`; streaming goes on after it). The 一般 tab's 辨識方式 (`live_model`) picks what shows the text: the streaming model as it is said (default) or the offline model at each pause (the streaming model is then not loaded, ~0.3GB less); 顯示方式 (`live_view`) where: typed in the document and updated in place (default) or in a box above the indicator (`overlay.Preview`), typed at the commit. The user wants to compare them. Its 定稿時機 (`commit_at`) picks when a draft is committed: on a

@@ -70,7 +70,7 @@ _SCREEN_TERM_SCORE = 1.5
 # With TTS the boost fixed 據點 -> 句點 and 珊姐好 -> 刪節號; alone, 問好 / 分好 became 問號 / 分號.
 _COMMAND_SCORE = 5.0
 _COMMAND_SLACK = 2
-_TEXT_CHARS = re.compile(r"[\s\W_]+")
+_WORDS = re.compile(r"[㐀-䶿一-鿿]|[A-Za-z0-9]+")   # a Chinese character or an English word counts one
 _SEL_LOST = "找不到選取的文字，沒有修改"   # a terminal selection that moved or the cursor could not reach
 _NO_RECORD = "目前沒有任何操作會錄音，無法語音輸入。請到「設定 → 自訂操作」加入「錄音」。"
 # from the call to PlaySound until the start sound has left the speakers: measured 0.17s on the user's machine
@@ -704,12 +704,35 @@ class App(QObject):
         words = self.hotwords.bias() + [(t, _SCREEN_TERM_SCORE) for t in ctx.terms]
         raw = self.recognizer.recognize(audio, _bias(words))
         names = self._command_words() if commands else []
-        if names and len(_TEXT_CHARS.sub("", raw)) <= max(map(len, names)) + _COMMAND_SLACK:
+        if names and self._short(raw, names):
             again = self.recognizer.recognize(audio, _bias([(w, _COMMAND_SCORE) for w in names] + words))
             if again != raw:
                 log.info("asr with commands boosted: %s -> %s", raw, again)
             raw = again
         return raw
+
+    @staticmethod
+    def _short(raw: str, names: list) -> bool:
+        """Short enough to be a command said alone, counting a Chinese character or an English word as one: by
+        letters, the user's 換行 heard as "Hangan" (6) was too long to be decoded again with commands boosted, and
+        typed as text (2026-10-14)."""
+        return len(_WORDS.findall(raw)) <= max(map(len, names)) + _COMMAND_SLACK
+
+    def _command(self, formatted: str, ctx, steps: list):
+        """(operation, text to type) when the utterance is a command said alone: an operation's phrase, a
+        punctuation name or a described character; (None, None) otherwise."""
+        op = rules.pick(rules.candidates(self.cfg.rules, rules.SPEECH, formatted), ctx.selection is not None,
+                        self.session.deletable() is not None)
+        typed = None
+        if op is None and self.cfg.punctuation_names:
+            typed = edit.symbol(formatted)
+            if typed:
+                steps.append(("標點名稱", formatted, typed))
+        if op is None and not typed and self.cfg.describe_char:
+            typed = edit.described(formatted)
+            if typed:
+                steps.append(("指定字", formatted, typed))
+        return op, typed
 
     def _text_of(self, raw: str, ctx, steps: list) -> str:
         """Dictated text from the recognizer's: formatted without sentence-final punctuation (the user says 句號),
@@ -733,7 +756,13 @@ class App(QObject):
         try:
             # what earlier pieces asked of the main thread is done; a draft the user moved away from stays as it
             # is, and this piece starts a new one (over the selection made meanwhile)
-            self._on_main(lambda: self._moved() and self._freeze(piece.lo))
+            alone = []
+
+            def check():
+                if self._moved():
+                    self._freeze(piece.lo)
+                alone.append(self._draft is None or not self._draft.final)   # nothing before it in the draft
+            self._on_main(check)
             ctx = probe.result() if probe is not None else Context()
             start = self._draft_start
             audio = self.listener.audio(piece.lo, piece.hi)
@@ -744,17 +773,20 @@ class App(QObject):
             steps = []
             formatted = format_text(raw, True, steps)
             entry = {"time": time.strftime("%H:%M:%S"), "asr": to_traditional(raw), "asr_s": t_asr, "steps": steps}
-            op = rules.pick(rules.candidates(self.cfg.rules, rules.SPEECH, formatted), ctx.selection is not None,
-                            self.session.deletable() is not None)
-            typed = None
-            if op is None and self.cfg.punctuation_names:
-                typed = edit.symbol(formatted)
-                if typed:
-                    steps.append(("標點名稱", formatted, typed))
-            if op is None and not typed and self.cfg.describe_char:
-                typed = edit.described(formatted)
-                if typed:
-                    steps.append(("指定字", formatted, typed))
+            op, typed = self._command(formatted, ctx, steps)
+            names = self._command_words()
+            if op is None and not typed and alone and alone[0] and names and self._short(raw, names) \
+                    and piece.lo > start:
+                # decoded with the draft's audio before it (as a commit would), a short piece may turn out to be a
+                # command it missed alone: the user's 換行 came out as Hangan, then as 換行 in the draft, and was
+                # typed as text at the next command (2026-10-14)
+                whole = self.listener.audio(start, piece.hi)
+                again = self._decode(whole, ctx, commands=True)
+                more = format_text(again, True)
+                op, typed = self._command(more, ctx, steps)
+                if op is not None or typed:
+                    log.info("piece with the draft before it: %s -> %s", raw, again)
+                    raw, formatted, audio = again, more, whole
             if op is not None or typed:
                 self._keep(audio, asr=raw, fmt=formatted, result=typed or "", op=op.phrase if op else None)
                 entry.update(kind="操作", main=op.phrase) if op else entry.update(kind="輸入", main=typed, copy=typed)
