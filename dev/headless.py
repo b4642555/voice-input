@@ -107,9 +107,11 @@ class Listener(appmod.Listener):
         cfg.silero_vad.min_silence_duration = listen.SILENCE
         cfg.silero_vad.max_speech_duration = listen.MAX_PIECE
         cfg.sample_rate = 16000
-        self._begin()
+        import queue
+        self._queue, self._discard = queue.Queue(), False
         self._thread = threading.Thread(target=self._run, daemon=True, args=(
-            lambda: sherpa_onnx.VoiceActivityDetector(cfg, buffer_size_in_seconds=40), cfg.silero_vad.window_size))
+            lambda: sherpa_onnx.VoiceActivityDetector(cfg, buffer_size_in_seconds=40), cfg.silero_vad.window_size,
+            self.now))
         self._thread.start()
         self._stream = True
 

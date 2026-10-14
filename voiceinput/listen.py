@@ -10,6 +10,7 @@ reaching into the previous piece): with 0.25s 換行 / 送出 said alone came ou
 with 0.5s none. The streaming X-ASR model (shown as it was said, then corrected) was tried the same day and dropped
 by the user, with a preview box for the draft.
 """
+import bisect
 import logging
 import queue
 import threading
@@ -34,14 +35,18 @@ _KEEP_IDLE = 1.0     # seconds of audio kept before the commit point while nobod
 
 @dataclass
 class Piece:
-    lo: int          # audio to decode: [lo, hi) in samples since listening started
+    lo: int          # audio to decode: [lo, hi), in samples (numbered on across listening sessions)
     start: int       # the speech: [start, end)
     end: int
     hi: int
 
 
 class Listener:
-    """on_speech(): speech started. on_piece(Piece): a piece ended. Both are called on the listener thread."""
+    """on_speech(): speech started. on_piece(Piece): a piece ended. Both are called on the listener thread.
+
+    Sample numbers go on from one listening session to the next (they started at 0 each time until 2026-10-15: a
+    piece or commit of the last session still queued then read the new session's audio at its old numbers). The
+    audio is kept as a list of the microphone's chunks: appending to one array copied all of it every 30ms."""
 
     def __init__(self, vad_model: str, on_speech, on_piece):
         self._vad_model = vad_model
@@ -53,8 +58,9 @@ class Listener:
         self._discard = False
         self._still_until = 0.0
         self._lock = threading.Lock()
-        self._buf = np.zeros(0, np.float32)
-        self._base = 0          # sample number of _buf[0]
+        self._chunks: list[np.ndarray] = []
+        self._starts: list[int] = []   # sample number of each chunk's first sample
+        self._end = 0           # sample number after the last chunk
         self._keep = 0          # audio from here on is kept (the app's draft)
         self.level = 0.0
 
@@ -65,7 +71,7 @@ class Listener:
     @property
     def now(self) -> int:
         with self._lock:
-            return self._base + len(self._buf)
+            return self._end
 
     def start(self, device_name: str = ""):
         cfg = sherpa_onnx.VadModelConfig()
@@ -73,22 +79,25 @@ class Listener:
         cfg.silero_vad.min_silence_duration = SILENCE
         cfg.silero_vad.max_speech_duration = MAX_PIECE
         cfg.sample_rate = SAMPLE_RATE
-        self._begin()
+        stream = sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32",
+                                device=_resolve_device(device_name), callback=self._callback,
+                                blocksize=int(SAMPLE_RATE * 0.03))
+        self._queue = queue.Queue()
+        self._discard = False
         self._thread = threading.Thread(
             target=self._run, daemon=True,
             args=(lambda: sherpa_onnx.VoiceActivityDetector(cfg, buffer_size_in_seconds=MAX_PIECE + 10),
-                  cfg.silero_vad.window_size))
+                  cfg.silero_vad.window_size, self.now))
         self._thread.start()
-        self._stream = sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32",
-                                      device=_resolve_device(device_name), callback=self._callback,
-                                      blocksize=int(SAMPLE_RATE * 0.03))
-        self._stream.start()
-
-    def _begin(self):
-        self._queue = queue.Queue()
-        self._discard = False
-        with self._lock:
-            self._buf, self._base, self._keep = np.zeros(0, np.float32), 0, 0
+        try:
+            stream.start()
+        except Exception:   # the thread would wait on its queue forever (one more at each press)
+            stream.close()
+            self._queue.put(None)
+            self._thread.join(5)
+            self._thread = None
+            raise
+        self._stream = stream
 
     def stop(self, discard: bool = False):
         """Stop the microphone; speech still going on is cut there and handed over as a last piece (unless
@@ -112,9 +121,14 @@ class Listener:
     def audio(self, lo: int, hi: int) -> np.ndarray:
         """The audio of samples [lo, hi), as far as it is still kept."""
         with self._lock:
-            a = max(lo, self._base) - self._base
-            b = min(hi, self._base + len(self._buf)) - self._base
-            return self._buf[a:b].copy() if b > a else np.zeros(0, np.float32)
+            lo, hi = max(lo, self._starts[0] if self._starts else self._end), min(hi, self._end)
+            if hi <= lo:
+                return np.zeros(0, np.float32)
+            i = max(0, bisect.bisect_right(self._starts, lo) - 1)
+            j = bisect.bisect_left(self._starts, hi)
+            joined = np.concatenate(self._chunks[i:j])
+            off = self._starts[i]
+            return joined[lo - off:hi - off].copy()
 
     def keep(self, at: int):
         """A commit: audio before sample `at` is not needed any more."""
@@ -130,17 +144,18 @@ class Listener:
             self.level = min(1.0, float(np.sqrt(np.mean(mono * mono))) * 12)
         self._queue.put(mono)
 
-    def _run(self, make_vad, win):
+    def _run(self, make_vad, win, offset: int):
+        """offset: the sample number this session starts at (the VAD counts from 0)."""
         vad = make_vad()
         rest = np.zeros(0, np.float32)
-        prev_end = 0
+        prev_end = offset
         speaking = False
 
         def emit():
             nonlocal prev_end
             while not vad.empty():
                 seg = vad.front
-                start, end = seg.start, seg.start + len(seg.samples)
+                start, end = offset + seg.start, offset + seg.start + len(seg.samples)
                 vad.pop()
                 piece = Piece(max(prev_end, start - int(LEAD * SAMPLE_RATE)), start, end,
                               end + int(TAIL * SAMPLE_RATE))
@@ -155,8 +170,10 @@ class Listener:
             if chunk is None:
                 break
             with self._lock:
-                self._buf = np.concatenate([self._buf, chunk])
-                total = self._base + len(self._buf)
+                self._chunks.append(chunk)
+                self._starts.append(self._end)
+                self._end += len(chunk)
+                total = self._end
             rest = np.concatenate([rest, chunk])
             while len(rest) >= win:
                 vad.accept_waveform(rest[:win])
@@ -169,11 +186,17 @@ class Listener:
                         log.exception("listen: speech handler failed")
                 speaking = now
                 emit()
-            if not speaking:   # forget audio nobody needs: before the commit point and the last piece
+            if not speaking:   # forget audio nobody needs
                 with self._lock:
-                    cut = min(self._keep, prev_end, total) - int(_KEEP_IDLE * SAMPLE_RATE)
-                    if cut > self._base:
-                        self._buf, self._base = self._buf[cut - self._base:], cut
+                    if prev_end <= self._keep:
+                        # nothing said since the commit point: only the lead-in of the next piece is needed (a
+                        # silent half hour used to be kept, 2026-10-15)
+                        cut = total - int((LEAD + _KEEP_IDLE) * SAMPLE_RATE)
+                    else:   # the draft's audio
+                        cut = min(self._keep, total) - int(_KEEP_IDLE * SAMPLE_RATE)
+                    n = bisect.bisect_right(self._starts, cut) - 1   # chunks wholly before the cut
+                    if n > 0:
+                        del self._chunks[:n], self._starts[:n]
         if not self._discard:
             vad.flush()
             emit()
