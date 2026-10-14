@@ -328,6 +328,10 @@ try:
             pump(1.0)
             print(f"[{step}] → 文字框：{box.text[:box.caret] + '|' + box.text[box.caret:]!r}")
             continue
+        if step.startswith("press:"):   # one press lasting MS milliseconds
+            down(), pump(int(step[6:]) / 1000), up(), pump(1.0)
+            print(f"[{step}] 聽寫中：{A._listening} → 文字框：{box.text[:box.caret] + '|' + box.text[box.caret:]!r}")
+            continue
         if step.startswith("dbl:"):   # a double tap whose presses last MS milliseconds each
             ms = int(step[4:]) / 1000
             down(), pump(ms), up(), pump(0.05), down(), pump(ms), up(), pump(1.0)

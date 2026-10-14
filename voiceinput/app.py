@@ -76,6 +76,7 @@ _NO_RECORD = "目前沒有任何操作會錄音，無法語音輸入。請到「
 _CUE_LATENCY = 0.25
 _STEP_GAP = 0.03           # seconds between the steps of an operation
 _MENU_ROWS = 8
+_TAP_MAX = 0.6             # seconds: a press no hold operation takes, released sooner, is a tap
 _SPACED = re.compile(r"[A-Za-z0-9]")
 
 
@@ -412,6 +413,13 @@ class App(QObject):
     def _finish(self, press: _Press):
         """Main thread: the press is released and its operation known."""
         if press.finished:
+            return
+        if press.rule is None and press.gesture == HOLD and press.up_at - press.down_at < _TAP_MAX:
+            # a press a little past gesture_time that no hold operation takes is a tap: the user's taps last
+            # 0.11-0.19s against their gesture_time of 0.15s, and turning listening off took three presses
+            # (2026-10-14)
+            press.decided = False
+            self._decide(press, TAP)
             return
         press.finished = True
         if press.rule is None:
