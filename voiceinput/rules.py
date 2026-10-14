@@ -2,8 +2,8 @@
 
 A rule is a trigger (a mouse button or keyboard key with a gesture: tap, double tap or hold; or an utterance that is
 exactly a phrase), a situation (any, right after a dictation, text selected) and a list of steps run in order:
-a command (錄音 record, 結束錄音 stop listening, 刪除選取的文字, 刪除剛輸入的文字, 選字), a key combination, text
-to type, or a wait.
+a command (錄音 record, 結束錄音 stop listening, 復原 take back VoiceInput's last change (up to three, see
+session.py), 刪除選取的文字, 刪除剛輸入的文字, 選字), a key combination, text to type, or a wait.
 錄音 is continuous listening (listen.py; on the continuous-mic branch since 2026-10-14): every pause ends a piece
 that is typed at once or run as a command. Hold + 錄音 listens while held; tap or double tap + 錄音 turns it on and
 the next tap or double tap that records turns it off (other gestures work meanwhile). A rule's steps before 錄音 run
@@ -24,11 +24,12 @@ COMMAND, KEYS, TEXT, WAIT = "command", "keys", "text", "wait"
 RECORD, DELETE_SELECTION, DELETE_DICTATION = "record", "delete_selection", "delete_dictation"
 PICK = "pick"
 STOP = "stop"        # 結束錄音: listening off (送出 does it by default, the user's request 2026-10-14)
+UNDO = "undo"        # 復原: double tap and the spoken 復原 by default (the user's request 2026-10-14)
 _LISTEN = "listen"   # 連續聽寫, a command for a few hours on 2026-10-14 until 錄音 itself became continuous
 _ADD_HOTWORD = "add_hotword"   # 加入熱詞, removed 2026-10-11: hotwords are typed in the 選字 menu instead
 # config rules_version: 2 added the tap on a selection that opens 選字, 3 a tap that listens, 4 dropped 連續聽寫,
-# 5 makes 送出 stop listening
-VERSION = 5
+# 5 makes 送出 stop listening, 6 turns the double-tap deletes into 復原 and adds the spoken 復原
+VERSION = 6
 
 _PUNCT = re.compile(r"[\s，。、！？；：,.!?;:…]+")
 
@@ -62,19 +63,19 @@ class Rule:
 
 
 def defaults(key: str = "mouse_middle", newline: bool = True, send: bool = True) -> list[Rule]:
-    """The user's own setup (2026-10-14, their request): tap to listen until the next tap; double tap to delete the
-    selection, or what was just dictated; hold on a selection for 選字; spoken 換行 / 送出 press Shift+Enter / Enter,
-    標點 types "- ", 括號 types （） with the caret inside, 貼上 presses Alt+V, 空白 presses Space."""
+    """The user's own setup (2026-10-14, their request): tap to listen until the next tap; double tap (or say 復原)
+    to take back the last change; hold on a selection for 選字; spoken 換行 / 送出 press Shift+Enter / Enter (送出 then
+    stops listening), 標點 types "- ", 括號 types （） with the caret inside, 貼上 presses Alt+V, 空白 presses Space."""
     source = MOUSE if key.startswith("mouse") else KEY
     out = [Rule(source, key, gesture=TAP, steps=[Step(COMMAND, RECORD)]),
-           Rule(source, key, gesture=DOUBLE, when=SELECTION, steps=[Step(COMMAND, DELETE_SELECTION)]),
-           Rule(source, key, gesture=DOUBLE, when=DICTATED, steps=[Step(COMMAND, DELETE_DICTATION)]),
+           Rule(source, key, gesture=DOUBLE, steps=[Step(COMMAND, UNDO)]),
            Rule(source, key, gesture=HOLD, when=SELECTION, steps=[Step(COMMAND, PICK)])]
     if newline:
         out.append(Rule(SPEECH, phrase="換行", steps=[Step(KEYS, "Shift+Enter")]))
     if send:
         out.append(Rule(SPEECH, phrase="送出", steps=[Step(KEYS, "Enter"), Step(COMMAND, STOP)]))
-    out += [Rule(SPEECH, phrase="標點", steps=[Step(TEXT, "- ")]),
+    out += [Rule(SPEECH, phrase="復原", steps=[Step(COMMAND, UNDO)]),
+            Rule(SPEECH, phrase="標點", steps=[Step(TEXT, "- ")]),
             Rule(SPEECH, phrase="括號", steps=[Step(TEXT, "（）"), Step(KEYS, "Left")]),
             Rule(SPEECH, phrase="貼上", steps=[Step(KEYS, "Alt+V")]),
             Rule(SPEECH, phrase="空白", steps=[Step(KEYS, "Space")])]
@@ -120,6 +121,19 @@ def upgrade(rules: list[Rule], version: int) -> list[Rule]:
             if r.source == SPEECH and normalize(r.phrase) == "送出" and not any(
                     st.type == COMMAND and st.value == STOP for st in r.steps):
                 r.steps.append(Step(COMMAND, STOP))
+    if version < 6:
+        deletes = [r for r in rules if r.source != SPEECH and r.gesture == DOUBLE
+                   and [(st.type, st.value) for st in r.steps] in ([(COMMAND, DELETE_SELECTION)],
+                                                                   [(COMMAND, DELETE_DICTATION)])]
+        for key in dict.fromkeys(r.key for r in deletes):
+            first = next(i for i, r in enumerate(rules) if r in deletes and r.key == key)
+            mine = [r for r in deletes if r.key == key]
+            if not any(r.key == key and r.gesture == DOUBLE and r.when == ANY and r not in mine for r in rules):
+                rules.insert(first, Rule(mine[0].source, key, gesture=DOUBLE, steps=[Step(COMMAND, UNDO)]))
+            for r in mine:
+                rules.remove(r)
+        if not any(r.source == SPEECH and normalize(r.phrase) == "復原" for r in rules):
+            rules.append(Rule(SPEECH, phrase="復原", steps=[Step(COMMAND, UNDO)]))
     return rules
 
 

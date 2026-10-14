@@ -190,10 +190,18 @@ spelled over a selected English word, punctuation trimmed when replacing a selec
 `listen.py` and the experiment in `dev/streaming` (not committed; report "連續麥克風實驗報告" in the user's Claude
 docs). `dev/headless.py` feed:WAV prints the document as the audio arrives.
 
+復原 (the command; a double tap and the spoken 復原 by default, the user's request 2026-10-14, replacing the
+double-tap deletes: rules_version 6 turns them into it) takes back VoiceInput's last change, up to three
+(`session.UNDO_DEPTH`, `Session.history`), one per use, while they are still right before the caret: typed text or a
+draft (dropped, so it is not typed again at the commit), a punctuation mark, a new line (Shift+Enter is recorded as
+"
+"), text spoken over a selection (the selection comes back), a deleted selection. Typing or clicking ends the
+history: what the user changed is unknown. Logged as 復原 on the 辨識紀錄 tab.
+
 Defaults are the user's own setup (their request, 2026-10-14): the rules in `rules.defaults` (tap middle = 錄音,
-double middle on a selection / after a dictation = delete, hold middle on a selection = 選字, spoken 換行 / 送出 /
-標點 / 括號 / 貼上 / 空白; 送出 presses Enter, then the 結束錄音 command turns listening off: the user's request,
-rules_version 5 adds it to saved configs), `gesture_time` 0.15s, mute while listening, the AI pack ticked, word list by date.
+double middle = 復原, hold middle on a selection = 選字, spoken 換行 / 送出 / 復原 / 標點 / 括號 / 貼上 / 空白;
+送出 presses Enter, then the 結束錄音 command turns listening off: the user's request, rules_version 5 adds it to
+saved configs), `gesture_time` 0.15s, mute while listening, the AI pack ticked, word list by date.
 
 ## 選字, smart picks and hotwords (2026-10-11, reworked the same day)
 

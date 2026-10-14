@@ -6,13 +6,16 @@ dictation is done by pressing Backspace up to the edit point and pasting the new
 terminals included (Claude Code), because it needs neither UI Automation nor a selection. Any key press or mouse
 click from the user ends the buffer: the caret may have moved.
 
-A double tap of the hotkey deletes the last dictation, only while it is the last change and only that one
-(decided 2026-10-04: no multi-step undo). Text spoken over a selection counts as a dictation too (2026-10-07): a
-double tap deletes it, leaving the selected text gone as typing over it would.
+復原 (a double tap or saying it) takes back the last change VoiceInput made, up to UNDO_DEPTH of them, while they
+are still right before the caret (the user's request, 2026-10-14; one, the last dictation, from 2026-10-04): typed
+text, a punctuation mark, a new line, text spoken over a selection (the selection comes back), a deleted
+selection.
 """
 import threading
 import time
 from dataclasses import dataclass, field
+
+UNDO_DEPTH = 3
 
 
 def foreground() -> int:
@@ -44,7 +47,7 @@ class Session:
         self.hwnd = 0
         self.dirty = True
         self.utterances: list[Utterance] = []
-        self.step: Step | None = None          # the last change, while it can still be deleted
+        self.history: list[Step] = []          # the last changes, oldest first, while they can be taken back
 
     def on_input(self):
         """The user pressed a key or clicked (hook threads): the caret may have moved."""
@@ -59,30 +62,33 @@ class Session:
         """Record a paste of text at the caret."""
         with self._lock:
             if self.dirty or hwnd != self.hwnd:
-                self.buffer, self.utterances = "", []
+                self.buffer, self.utterances, self.history = "", [], []
             before, prior = self.buffer, list(self.utterances)
             start = len(self.buffer)
             self.buffer += text
             u = Utterance(start, len(self.buffer), text, audio)
             self.utterances.append(u)
-            self.step = Step(before, self.buffer, prior)
+            self._push(Step(before, self.buffer, prior))
             self.hwnd, self.dirty = hwnd, False
             return u
 
+    def _push(self, step: Step):
+        self.history = (self.history + [step])[-UNDO_DEPTH:]
+
     def replaced_selection(self, before: str, new: str, hwnd: int, undo_to: str | None = None):
         """Record an edit of a selection: the caret now follows new, with before (rest of the line) ahead.
-        undo_to: what a double tap turns before + new back into (spoken text), None when it cannot be deleted."""
+        undo_to: what 復原 turns before + new back into (before + the selected text), None when it cannot be."""
         with self._lock:
             self.buffer, self.utterances = before + new, []
-            self.step = Step(undo_to, self.buffer, []) if undo_to is not None else None
+            self.history = [Step(undo_to, self.buffer, [])] if undo_to is not None else []
             self.hwnd, self.dirty = hwnd, False
 
     def retyped(self, new: str):
         """The caller turned the buffer into new (Backspace + paste): a draft shown while listening changed. The
         last change, when it was the draft, now ends with it."""
         with self._lock:
-            if self.step is not None and self.step.after == self.buffer:
-                self.step.after = new
+            if self.history and self.history[-1].after == self.buffer:
+                self.history[-1].after = new
             self.buffer = new
             self.dirty = False
 
@@ -97,13 +103,14 @@ class Session:
     def deletable(self) -> Step | None:
         """The last change if it is still right before the caret."""
         with self._lock:
-            if not self.clean() or self.step is None or self.step.after != self.buffer:
+            if self.dirty or self.hwnd != foreground() or not self.history or self.history[-1].after != self.buffer:
                 return None
-            return self.step
+            return self.history[-1]
 
     def deleted_last(self, step: Step):
         with self._lock:
-            self.step = None
+            if self.history and self.history[-1] is step:
+                self.history.pop()
             self.buffer = step.before
             self.utterances = step.utterances
             self.dirty = False

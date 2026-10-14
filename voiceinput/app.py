@@ -28,6 +28,7 @@ takes a typed word, which replaces the selection and becomes a hotword. The seco
 commented out below.
 """
 import logging
+import os
 import re
 import sys
 import threading
@@ -780,14 +781,17 @@ class App(QObject):
                     vks = combo_vks(step.value)
                     if vks:
                         press_chord(*vks)
-                        self.session.on_input()     # the caret may have moved
+                        if step.value == "Shift+Enter":   # a new line, which 復原 can take back
+                            self._on_main(lambda: self.session.dictated("\n", None, foreground()))
+                        else:
+                            self.session.on_input()     # the caret may have moved
                 elif step.type == rules.TEXT:
                     self._on_main(lambda t=step.value: self._type_text(t))
                 elif step.type == rules.COMMAND and step.value == rules.DELETE_SELECTION:
                     ctx = press.probe.result()
                     self._on_main(lambda: self._delete_selection(press, ctx))
-                elif step.type == rules.COMMAND and step.value == rules.DELETE_DICTATION:
-                    self._on_main(self.delete_last)
+                elif step.type == rules.COMMAND and step.value in (rules.UNDO, rules.DELETE_DICTATION):
+                    self._on_main(self.undo)
                 elif step.type == rules.COMMAND and step.value == rules.STOP:
                     self._on_main(lambda: self._stop_listen() if self._listening else None)
                 elif step.type == rules.COMMAND and step.value == rules.PICK:
@@ -833,24 +837,36 @@ class App(QObject):
             self._notify(_SEL_LOST)
             return
         press.deleted = sel
-        self.session.replaced_selection(sel.before, "", foreground())
+        self.session.replaced_selection(sel.before, "", foreground(), sel.before + sel.text)
         self.record.emit({"time": time.strftime("%H:%M:%S"), "kind": "刪除", "main": sel.text})
 
-    def delete_last(self):
-        """Main thread, 刪除剛輸入的文字: delete the last dictation (or text spoken over a selection) while it is
-        still the last change before the caret. Nothing else is undone."""
+    def undo(self):
+        """Main thread, 復原 (and 刪除剛輸入的文字): take back VoiceInput's last change while it is still right before
+        the caret: up to session.UNDO_DEPTH of them, one each time. A draft taken back is dropped, so what was said
+        in it is not typed again at the commit."""
         s = self.session
         step = s.deletable()
         if step is None:
-            log.info("delete: nothing to delete")
+            log.info("undo: nothing to take back")
             return
         n, tail = s.plan_to(step.before)
-        log.info("delete last: %d backspaces + %r", n, tail)
+        log.info("undo: %d backspaces + %r", n, tail)
         if self.cfg.save_recordings:
             recordings.note("delete_last")
         backspace(n)
-        paste_text(tail)
+        if tail:
+            paste_text(tail)
         s.deleted_last(step)
+        d = self._draft
+        if d is not None and d.placed and step.after.endswith(d.typed):   # the draft was the change taken back
+            self._draft = None
+            self._draft_start = self.listener.now if self._listening else 0
+            if self._listening:
+                self.listener.keep(self._draft_start)
+        p = len(os.path.commonprefix([step.before, step.after]))
+        gone, back = step.after[p:], step.before[p:]
+        self.record.emit({"time": time.strftime("%H:%M:%S"), "kind": "復原",
+                          "main": f"{gone or '（無）'}" + (f" → {back}" if back else "")})
 
     @staticmethod
     def _after_steps(press: _Press) -> list:
