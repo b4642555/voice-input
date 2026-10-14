@@ -14,11 +14,11 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDia
                                QPushButton, QScrollArea, QSizePolicy, QSpinBox, QTabWidget, QTextBrowser, QToolButton,
                                QToolTip, QVBoxLayout, QWidget)
 
-from . import audio, cues, hotwords, packs, recordings, rules
+from . import audio, cues, hotwords, packs, recordings, rules, system
 from . import glow as glowmod
 from .config import GESTURE_TIME_RANGE
 from .memory import BOUNDARY
-from .keys import KEY_TRIGGERS, MOUSE_TRIGGERS, combo_text, is_modifier
+from .keys import KEY_TRIGGERS, MOUSE_TRIGGERS, QT_MODIFIERS, combo_text, is_modifier
 from .rules import Rule, Step
 
 SOURCES = [(rules.MOUSE, "滑鼠鍵"), (rules.KEY, "鍵盤鍵"), (rules.SPEECH, "說出")]
@@ -181,12 +181,11 @@ class KeyCapture(QLineEdit):
         return super().event(e)
 
     def _key(self, e):
-        vk = e.nativeVirtualKey()
-        if is_modifier(vk):
+        vk = system.key_of(e)
+        if not vk or is_modifier(vk):
             return
         mods = e.modifiers()
-        names = [n for n, flag in (("Ctrl", Qt.ControlModifier), ("Shift", Qt.ShiftModifier),
-                                   ("Alt", Qt.AltModifier), ("Win", Qt.MetaModifier)) if mods & flag]
+        names = [n for n, flag in QT_MODIFIERS if mods & getattr(Qt, flag)]
         text = combo_text(names, vk)
         if text:
             self.setText(text)

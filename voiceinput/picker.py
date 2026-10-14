@@ -7,11 +7,11 @@ focus goes back to the app the menu was opened in. Rows are answered with the mo
 spoken answers like 對 / 第二個 were often misheard). There is no timeout any more: the app closes the menu when
 the user's next click or key is somewhere else, and an activated menu closes when it loses focus.
 """
-import ctypes
-
 from PySide6.QtCore import QEvent, QPoint, Qt, QTimer, Signal
 from PySide6.QtGui import QCursor, QGuiApplication
 from PySide6.QtWidgets import QLineEdit, QPushButton, QVBoxLayout, QWidget
+
+from . import system
 
 _STYLE = """
 QWidget#picker { background: #202024; border: 1px solid #3a3a40; border-radius: 8px; }
@@ -24,7 +24,6 @@ QLineEdit:focus { border-color: #6a6a78; }
 """
 _MAX_WIDTH = 360
 _MIN_WIDTH = 150
-_GWL_EXSTYLE, _WS_EX_NOACTIVATE, _WS_EX_TOPMOST = -20, 0x08000000, 0x8
 
 
 class _Input(QLineEdit):
@@ -44,6 +43,7 @@ class Picker(QWidget):
         super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_MacAlwaysShowToolWindow)   # macOS hides tool windows of an inactive app
         self.candidates: list[str] = []
         self._anchor = None         # (top-left, bottom y) of the selection the menu belongs to, logical pixels
         self._prev = 0              # the window that was in front when the input box took focus
@@ -86,9 +86,6 @@ class Picker(QWidget):
         """The input box has focus (keys typed now are meant for it)."""
         return self.isVisible() and self.isActiveWindow()
 
-    def owns(self, hwnd: int) -> bool:
-        return bool(hwnd) and ctypes.windll.user32.GetAncestor(hwnd, 2) == int(self.winId())   # GA_ROOT
-
     def dismiss(self):
         """Close without an answer, giving focus back if the menu had taken it."""
         if self.isVisible():
@@ -99,18 +96,13 @@ class Picker(QWidget):
         """A click in the input box: take focus so an input method works."""
         if self.isActiveWindow():
             return
-        user32 = ctypes.windll.user32
-        hwnd = int(self.winId())
-        self._prev = user32.GetForegroundWindow()
-        user32.SetWindowLongW(hwnd, _GWL_EXSTYLE, user32.GetWindowLongW(hwnd, _GWL_EXSTYLE) & ~_WS_EX_NOACTIVATE)
-        user32.SetForegroundWindow(hwnd)
+        self._prev = system.take_focus(self)
         self.activateWindow()
         self.input.setFocus()
 
     def _restore_focus(self):
         prev, self._prev = self._prev, 0
-        if prev:
-            ctypes.windll.user32.SetForegroundWindow(prev)
+        system.give_focus(prev)
 
     def _submit(self):
         text = self.input.text().strip()
@@ -150,13 +142,13 @@ class Picker(QWidget):
         self._shrink()
 
     def _place(self, rect):
-        """rect: selection bounds in physical screen pixels (x, y, w, h) from UI Automation, or None (then next
-        to the mouse)."""
+        """rect: selection bounds in screen coordinates (x, y, w, h) from UI Automation or Accessibility, or None
+        (then next to the mouse)."""
         self._anchor = None
         if rect:
             x, y, w, h = rect
-            top = self._to_logical(QPoint(int(x), int(y)))
-            self._anchor = (top, self._to_logical(QPoint(int(x), int(y + h))).y())
+            top = system.to_logical(x, y)
+            self._anchor = (top, system.to_logical(x, y + h).y())
             pos = QPoint(top.x(), self._anchor[1] + 6)
         else:
             pos = QCursor.pos() + QPoint(0, 6)
@@ -166,15 +158,6 @@ class Picker(QWidget):
         self._no_activate()
         self._clamp()
         QTimer.singleShot(0, self._refit)   # rows added while an earlier menu was still open are sized later
-
-    @staticmethod
-    def _to_logical(p: QPoint) -> QPoint:
-        # Qt keeps each screen's origin in device pixels and scales only within the screen
-        for s in QGuiApplication.screens():
-            g, r = s.geometry(), s.devicePixelRatio()
-            if g.x() <= p.x() < g.x() + g.width() * r and g.y() <= p.y() < g.y() + g.height() * r:
-                return QPoint(g.x() + int((p.x() - g.x()) / r), g.y() + int((p.y() - g.y()) / r))
-        return p
 
     def _clamp(self):
         """Keep the menu on screen. Under a selection too close to the bottom it opens above it instead, like an
@@ -192,10 +175,7 @@ class Picker(QWidget):
         self.move(x, y)
 
     def _no_activate(self):
-        hwnd = int(self.winId())
-        user32 = ctypes.windll.user32
-        user32.SetWindowLongW(hwnd, _GWL_EXSTYLE, user32.GetWindowLongW(hwnd, _GWL_EXSTYLE)
-                              | _WS_EX_NOACTIVATE | _WS_EX_TOPMOST)
+        system.no_activate(self)
 
     def keyPressEvent(self, e):
         if e.key() == Qt.Key_Escape:

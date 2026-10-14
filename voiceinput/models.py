@@ -52,7 +52,7 @@ def fetch(url: str, dest: Path, progress=None) -> None:
     """Download url to dest via a .part file. progress(done_bytes, total_bytes) is optional."""
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_name(dest.name + ".part")
-    with urllib.request.urlopen(url) as resp, open(tmp, "wb") as f:
+    with urllib.request.urlopen(url, context=_ssl_context()) as resp, open(tmp, "wb") as f:
         total = int(resp.headers.get("Content-Length", 0))
         done = 0
         while chunk := resp.read(1 << 20):
@@ -61,6 +61,16 @@ def fetch(url: str, dest: Path, progress=None) -> None:
             if progress:
                 progress(done, total)
     tmp.replace(dest)
+
+
+def _ssl_context():
+    """certifi's certificates when installed: the Python uv installs on macOS has none of its own."""
+    import ssl
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        return ssl.create_default_context()
 
 
 def download(key: str, progress=None) -> None:

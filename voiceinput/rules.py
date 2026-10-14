@@ -15,6 +15,7 @@ For one trigger and gesture the most specific situation wins: selected text, the
 any. Unbound gestures are given back to the key (a keyboard key is replayed, a mouse button clicked).
 """
 import re
+import sys
 from dataclasses import asdict, dataclass, field
 
 MOUSE, KEY, SPEECH = "mouse", "key", "speech"
@@ -83,7 +84,7 @@ def defaults(key: str = "mouse_middle", newline: bool = True, send: bool = True)
             Rule(SPEECH, phrase="刪除", steps=[Step(KEYS, "Backspace")]),
             Rule(SPEECH, phrase="標點", steps=[Step(TEXT, "- ")]),
             Rule(SPEECH, phrase="括號", steps=[Step(TEXT, "（）"), Step(KEYS, "Left")]),
-            Rule(SPEECH, phrase="貼上", steps=[Step(KEYS, "Alt+V")]),
+            Rule(SPEECH, phrase="貼上", steps=[Step(KEYS, "Cmd+V" if sys.platform == "darwin" else "Alt+V")]),
             Rule(SPEECH, phrase="空白", steps=[Step(KEYS, "Space")])]
     return out
 

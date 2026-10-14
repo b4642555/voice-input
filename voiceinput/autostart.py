@@ -1,27 +1,7 @@
-"""Launch at login: HKCU Run key."""
+"""autostart: win/autostart.py or mac/autostart.py."""
 import sys
-import winreg
-from pathlib import Path
 
-from .paths import APP_DIR
-
-APP_ID = "VoiceInput"
-LAUNCHER = APP_DIR / "run.pyw"
-
-
-def _python() -> str:
-    exe = Path(sys.executable)
-    pyw = exe.with_name("pythonw.exe")
-    return str(pyw if pyw.exists() else exe)
-
-
-def set_enabled(enabled: bool) -> None:
-    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run",
-                        0, winreg.KEY_SET_VALUE) as k:
-        if enabled:
-            winreg.SetValueEx(k, APP_ID, 0, winreg.REG_SZ, f'"{_python()}" "{LAUNCHER}"')
-        else:
-            try:
-                winreg.DeleteValue(k, APP_ID)
-            except FileNotFoundError:
-                pass
+if sys.platform == "darwin":
+    from .mac.autostart import *  # noqa: F401,F403
+else:
+    from .win.autostart import *  # noqa: F401,F403

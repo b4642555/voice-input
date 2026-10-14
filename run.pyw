@@ -1,7 +1,7 @@
 import sys
 
-if sys.platform != "win32":
-    sys.exit("VoiceInput runs on Windows only (see docs/macos-port.md).")
+if sys.platform not in ("win32", "darwin"):
+    sys.exit("VoiceInput runs on Windows and macOS only.")
 
 from voiceinput.app import main
 

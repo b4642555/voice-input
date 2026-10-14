@@ -17,6 +17,8 @@ from PySide6.QtCore import QPointF, QPropertyAnimation, QRect, Qt, QTimer
 from PySide6.QtGui import QColor, QConicalGradient, QGuiApplication, QImage, QPainter
 from PySide6.QtWidgets import QWidget
 
+from . import system
+
 DEPTH = 72          # px of the screen each strip covers, the glow's widest
 _SCALE = 3          # strips are drawn at 1/_SCALE and scaled up
 _LEVELS = 12        # falloff masks from quiet to loud
@@ -95,12 +97,7 @@ def render(style: Style, screen: QRect, rect: QRect, masks: list, t: float, leve
 
 
 def _click_through(widget):
-    import ctypes
-    hwnd = int(widget.winId())
-    GWL_EXSTYLE, WS_EX_NOACTIVATE, WS_EX_TRANSPARENT, WS_EX_TOPMOST = -20, 0x08000000, 0x20, 0x8
-    user32 = ctypes.windll.user32
-    style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-    user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT | WS_EX_TOPMOST)
+    system.click_through(widget)
 
 
 class _Strip(QWidget):
@@ -111,6 +108,7 @@ class _Strip(QWidget):
                          | Qt.WindowDoesNotAcceptFocus | Qt.WindowTransparentForInput)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
+        self.setAttribute(Qt.WA_MacAlwaysShowToolWindow)   # macOS hides tool windows of an inactive app
         self.image: QImage | None = None
         self.masks: list = []
 

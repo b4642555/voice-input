@@ -150,6 +150,7 @@ appmod.EdgeGlow.show = lambda self, screen=None: None   # nor the glow around it
 A = appmod.App(qapp)
 A.tray.hide()
 A.tray.showMessage = lambda title, text, *a: print(f"      [通知] {title}: {text}")
+appmod.system.notify = lambda text: print(f"      [通知] VoiceInput: {text}") or True   # macOS
 
 
 class Muter:

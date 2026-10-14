@@ -1,5 +1,10 @@
 """Key names: the mouse buttons and keyboard keys a custom operation can be triggered by, and the names used in
-key combinations (Ctrl+Shift+Enter) that a step presses."""
+key combinations (Ctrl+Shift+Enter) that a step presses. Keys are Windows virtual-key codes on macOS too
+(mac/keyboard.py translates them), so rules read the same on both; macOS has its own trigger keys and modifier
+names (Cmd, Option)."""
+import sys
+
+MAC = sys.platform == "darwin"
 
 MOUSE_TRIGGERS = {"mouse_middle": "中鍵", "mouse_x2": "側鍵（上）", "mouse_x1": "側鍵（下）"}
 
@@ -7,8 +12,20 @@ MOUSE_TRIGGERS = {"mouse_middle": "中鍵", "mouse_x2": "側鍵（上）", "mous
 KEY_TRIGGERS = {"caps_lock": ("CapsLock", 0x14), "alt_r": ("右 Alt", 0xA5), "ctrl_r": ("右 Ctrl", 0xA3),
                 "insert": ("Insert", 0x2D), "scroll_lock": ("ScrollLock", 0x91), "pause": ("Pause", 0x13)}
 KEY_TRIGGERS.update({f"f{i}": (f"F{i}", 0x6F + i) for i in range(1, 25)})
+if MAC:
+    # CapsLock is remapped to F18 while it is bound (mac/hotkey.py: macOS reports it as a toggle, not down / up)
+    KEY_TRIGGERS = {"caps_lock": ("CapsLock", 0x14), "alt_r": ("右 Option", 0xA5), "cmd_r": ("右 Command", 0x5C),
+                    "ctrl_r": ("右 Control", 0xA3)}
+    KEY_TRIGGERS.update({f"f{i}": (f"F{i}", 0x6F + i) for i in range(1, 21) if i != 18})
 
 MODIFIERS = {"Ctrl": 0x11, "Shift": 0x10, "Alt": 0x12, "Win": 0x5B}
+# (name, Qt modifier) in the order a captured combination is written; Qt calls Command "Control" on macOS
+QT_MODIFIERS = [("Ctrl", "ControlModifier"), ("Shift", "ShiftModifier"), ("Alt", "AltModifier"),
+                ("Win", "MetaModifier")]
+if MAC:
+    MODIFIERS = {"Cmd": 0x5B, "Ctrl": 0x11, "Option": 0x12, "Shift": 0x10, "Alt": 0x12, "Win": 0x5B}
+    QT_MODIFIERS = [("Cmd", "ControlModifier"), ("Ctrl", "MetaModifier"), ("Option", "AltModifier"),
+                    ("Shift", "ShiftModifier")]
 _MODIFIER_VKS = {0x10, 0x11, 0x12, 0x5B, 0x5C, 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5}
 
 NAMES = {"Enter": 0x0D, "Tab": 0x09, "Esc": 0x1B, "Space": 0x20, "Backspace": 0x08, "Delete": 0x2E,
@@ -17,7 +34,7 @@ NAMES = {"Enter": 0x0D, "Tab": 0x09, "Esc": 0x1B, "Space": 0x20, "Backspace": 0x
          "[": 0xDB, "\\": 0xDC, "]": 0xDD, "'": 0xDE}
 NAMES.update({chr(c): c for c in range(ord("A"), ord("Z") + 1)})
 NAMES.update({str(d): 0x30 + d for d in range(10)})
-NAMES.update({f"F{i}": 0x6F + i for i in range(1, 25)})
+NAMES.update({f"F{i}": 0x6F + i for i in range(1, 21 if MAC else 25)})
 _VK_NAMES = {vk: name for name, vk in NAMES.items()}
 
 # Keys sent with KEYEVENTF_EXTENDEDKEY (otherwise Windows takes them for the keypad's)

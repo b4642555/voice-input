@@ -2,7 +2,12 @@ sherpa-onnx>=1.13.8
 PySide6-Essentials>=6.8
 sounddevice>=0.5
 numpy>=1.26
-pynput>=1.8
 opencc>=1.1.9
 pypinyin>=0.51
-comtypes>=1.4
+certifi
+pynput>=1.8; sys_platform == "win32"
+comtypes>=1.4; sys_platform == "win32"
+pyobjc-framework-Quartz>=10.3; sys_platform == "darwin"
+pyobjc-framework-ApplicationServices>=10.3; sys_platform == "darwin"
+pyobjc-framework-Cocoa>=10.3; sys_platform == "darwin"
+pyobjc-framework-AVFoundation>=10.3; sys_platform == "darwin"

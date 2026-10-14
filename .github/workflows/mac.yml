@@ -1,0 +1,99 @@
+name: macOS
+
+on:
+  push:
+    branches: [mac]
+    paths-ignore: ["**.md"]
+  workflow_dispatch:
+
+jobs:
+  launcher:
+    # packaging/mac/VoiceInput is this program, built universal; the build is uploaded so it can be committed
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the launcher
+        run: |
+          clang -O2 -mmacosx-version-min=11.0 -arch x86_64 -arch arm64 \
+            -o VoiceInput packaging/mac/launcher.c
+          lipo -info VoiceInput
+          if [ -f packaging/mac/VoiceInput ]; then lipo -info packaging/mac/VoiceInput; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: launcher
+          path: VoiceInput
+
+  test:
+    needs: launcher
+    strategy:
+      fail-fast: false
+      matrix:
+        # the user's iMac 2019 is Intel
+        os: [macos-15-intel, macos-14]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    env:
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: launcher
+          path: built
+      - name: Use the launcher just built when none is committed
+        run: |
+          if [ ! -f packaging/mac/VoiceInput ]; then cp built/VoiceInput packaging/mac/VoiceInput; fi
+      - name: Install with install.sh
+        run: |
+          sw_vers; uname -m
+          VOICEINPUT_SOURCE="$PWD" VOICEINPUT_NO_OPEN=1 VOICEINPUT_APPS_DIR="$HOME/Applications" bash install.sh
+      - name: The app bundle
+        run: |
+          APP="$HOME/Applications/VoiceInput.app"
+          ls -la "$APP/Contents" "$APP/Contents/MacOS"
+          plutil -lint "$APP/Contents/Info.plist"
+          codesign --verify --verbose "$APP"
+          codesign -dvvv "$APP" 2>&1 | grep -E "Identifier|CDHash|Signature"
+          lipo -info "$APP/Contents/MacOS/VoiceInput"
+      - name: Install again keeps the app (same signature)
+        run: |
+          before=$(codesign -dvvv "$HOME/Applications/VoiceInput.app" 2>&1 | grep CDHash=)
+          VOICEINPUT_SOURCE="$PWD" VOICEINPUT_NO_OPEN=1 VOICEINPUT_APPS_DIR="$HOME/Applications" bash install.sh
+          after=$(codesign -dvvv "$HOME/Applications/VoiceInput.app" 2>&1 | grep CDHash=)
+          echo "$before / $after"; [ "$before" = "$after" ]
+      - name: Smoke test
+        run: |
+          R="$HOME/Library/Application Support/VoiceInput"
+          cd "$R/source" && "$R/venv/bin/python3" dev/mac_smoke.py
+      - name: Headless end-to-end
+        run: |
+          R="$HOME/Library/Application Support/VoiceInput"
+          T="$RUNNER_TEMP/hl"; mkdir -p "$T"; cp -R "$R/source/dev/testdata/wav" "$T/wav"
+          cd "$R/source"
+          "$R/venv/bin/python3" dev/headless.py "$T" "tap0,feed:a,feed:nl,feed:b,feed:dot,undo,tap,logshot:log" | tee "$T/out.txt"
+          grep -q "今天天氣很好" "$T/out.txt"
+          grep -q "我們下午去公園散步" "$T/out.txt"
+      - name: Start the app from its bundle
+        run: |
+          APP="$HOME/Applications/VoiceInput.app"
+          LOG="$HOME/Library/Application Support/VoiceInput/voiceinput.log"
+          rm -f "$LOG"
+          "$APP/Contents/MacOS/VoiceInput" &
+          pid=$!
+          for i in $(seq 1 60); do
+            if grep -q "就緒" "$LOG" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          kill $pid || true
+          sleep 2
+          cat "$LOG"
+          grep -q "就緒" "$LOG"
+          ! grep -q "Traceback" "$LOG"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: logs-${{ matrix.os }}
+          path: |
+            ~/Library/Application Support/VoiceInput/voiceinput.log
+            ${{ runner.temp }}/hl/*.png
+            ${{ runner.temp }}/hl/out.txt

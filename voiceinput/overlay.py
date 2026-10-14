@@ -6,17 +6,14 @@ from PySide6.QtCore import QAbstractAnimation, QEasingCurve, QPoint, QPropertyAn
 from PySide6.QtGui import QColor, QCursor, QGuiApplication, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QWidget
 
+from . import system
+
 W, H = 132, 40
 BARS = 9
 
 
 def _click_through(widget):
-    import ctypes
-    hwnd = int(widget.winId())
-    GWL_EXSTYLE, WS_EX_NOACTIVATE, WS_EX_TRANSPARENT, WS_EX_TOPMOST = -20, 0x08000000, 0x20, 0x8
-    user32 = ctypes.windll.user32
-    style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-    user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT | WS_EX_TOPMOST)
+    system.click_through(widget)
 
 
 class Overlay(QWidget):
@@ -27,6 +24,7 @@ class Overlay(QWidget):
                          | Qt.WindowDoesNotAcceptFocus | Qt.WindowTransparentForInput)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
+        self.setAttribute(Qt.WA_MacAlwaysShowToolWindow)   # macOS hides tool windows of an inactive app
         self.setFixedSize(W, H)
         self._level_source = level_source   # callable -> float 0..1
         self._busy_source = busy_source     # callable -> bool: speech is being decoded (the dot spins)

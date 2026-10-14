@@ -2,11 +2,15 @@
 lives in a per-user data folder so it survives moving, reinstalling or updating the app."""
 import os
 import shutil
+import sys
 from pathlib import Path
 
 APP_DIR = Path(__file__).resolve().parent.parent
 
-DATA_DIR = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "VoiceInput"
+if sys.platform == "darwin":
+    DATA_DIR = Path.home() / "Library" / "Application Support" / "VoiceInput"
+else:
+    DATA_DIR = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "VoiceInput"
 
 CONFIG_PATH = DATA_DIR / "config.json"
 LOG_PATH = DATA_DIR / "voiceinput.log"

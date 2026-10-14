@@ -43,7 +43,7 @@ from PySide6.QtCore import QLockFile, QObject, QPointF, QRectF, Qt, QTimer, Sign
 from PySide6.QtGui import QAction, QColor, QGuiApplication, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
-from . import autostart, candidates, cues, edit, models, packs, paths, recordings, rules, sounds, spelling
+from . import autostart, candidates, cues, edit, models, packs, paths, recordings, rules, sounds, spelling, system
 from .asr import SAMPLE_RATE, Recognizer
 from .config import Config
 from .glow import EdgeGlow
@@ -170,7 +170,9 @@ class App(QObject):
         self.memory = Memory()
         self._menu = None                        # ("pick", Selection) while the 選字 menu is up
 
-        self.icon_idle = make_icon(QColor(235, 235, 235) if self._dark_taskbar() else QColor(40, 40, 40))
+        self.icon_idle = make_icon(QColor(235, 235, 235) if system.dark_menu_bar() else QColor(40, 40, 40))
+        if sys.platform == "darwin":
+            self.icon_idle.setIsMask(True)   # a template image: the menu bar draws it in its own color
         self.icon_rec = make_icon(QColor(255, 69, 58))
 
         self._busy, self._busy_lock = 0, threading.Lock()   # decoding jobs queued or running
@@ -183,7 +185,7 @@ class App(QObject):
         self.picker.picked.connect(self.on_menu_pick)
         self.picker.typed.connect(self.on_menu_typed)
         self.picker.closed.connect(self._forget_menu)
-        self._picker_hwnd = int(self.picker.winId())
+        self._picker_hwnd = system.window_handle(self.picker)
         self.settings = SettingsDialog(self.cfg, self.hotwords, self.memory)
         self.settings.applied.connect(self.apply_settings)
         self.book = LogBook(self._log_changed)   # the 辨識紀錄 tab, kept for this session only
@@ -198,8 +200,9 @@ class App(QObject):
         menu.addSeparator()
         menu.addAction(QAction("結束", menu, triggered=self.quit))
         self.tray.setContextMenu(menu)
-        self.tray.activated.connect(
-            lambda reason: self.open_settings() if reason == QSystemTrayIcon.Trigger else None)
+        if sys.platform != "darwin":   # a click on a macOS menu bar icon opens its menu
+            self.tray.activated.connect(
+                lambda reason: self.open_settings() if reason == QSystemTrayIcon.Trigger else None)
         self.tray.show()
 
         self.key_down.connect(self.on_key_down)
@@ -221,63 +224,32 @@ class App(QObject):
         if not self._could_record:
             self._notify(_NO_RECORD)
 
-    @staticmethod
-    def _dark_taskbar() -> bool:
-        try:
-            import winreg
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
-                                r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize") as k:
-                return winreg.QueryValueEx(k, "SystemUsesLightTheme")[0] == 0
-        except OSError:
-            return True
-
     def _on_other_key(self, vk: int):
         """Keyboard hook thread: a key the user pressed (injected keys never get here). Typing in the 選字 menu's
         input box leaves the target app alone; any other key closes the menu."""
-        import ctypes
-        if ctypes.windll.user32.GetForegroundWindow() == self._picker_hwnd:
+        if system.foreground_is(self._picker_hwnd):
             return
         self.session.on_input()
         term_watcher.forget()
         self.main.emit(self.picker.dismiss)
         self.main.emit(self._caret_left)
 
-    def _on_picker(self, pt) -> bool:
-        """Mouse hook thread: the point is on the 選字 menu."""
-        import ctypes.wintypes
-        u32 = ctypes.windll.user32
-        u32.WindowFromPoint.argtypes = [ctypes.wintypes.POINT]
-        hwnd = u32.WindowFromPoint(pt)
-        return bool(hwnd) and u32.GetAncestor(hwnd, 2) == self._picker_hwnd   # GA_ROOT
-
     def _watch_mouse(self):
         """Any click may move the caret, which ends what session.py knows about the text before it. Left button
         drags may select text in a terminal (selection.TermWatcher). Our own clicks (injected) are skipped."""
-        from pynput import mouse
-        downs = {0x201, 0x204, 0x207, 0x20B}   # left / right / middle / x button down
+        return self.hotkeys.watch_clicks(self._on_click, term_watcher.mouse_up)
 
-        def on_event(msg, data):
-            if data.flags & 1:   # LLMHF_INJECTED
-                return False
-            if self.hotkeys.is_bound_mouse(msg, data.mouseData):
-                return False   # a button an operation uses is not a click
-            if msg in downs:
-                if self._on_picker(data.pt):
-                    return False   # a click in the 選字 menu leaves the caret and the selection where they are
-                self.main.emit(self.picker.dismiss)   # a click anywhere else closes it
-                self.session.on_input()
-                self.main.emit(self._caret_left)
-                if msg == 0x201:
-                    term_watcher.mouse_down(data.pt.x, data.pt.y)
-                else:
-                    term_watcher.forget()
-            elif msg == 0x202:
-                term_watcher.mouse_up(data.pt.x, data.pt.y)
-            return False   # never passed on to pynput's (unused) callbacks: keeps the hook cheap
-        listener = mouse.Listener(win32_event_filter=on_event)
-        listener.daemon = True
-        listener.start()
-        return listener
+    def _on_click(self, x, y, left: bool):
+        """Mouse hook thread: a button went down at the screen point (x, y)."""
+        if system.point_on(self._picker_hwnd, x, y):
+            return   # a click in the 選字 menu leaves the caret and the selection where they are
+        self.main.emit(self.picker.dismiss)   # a click anywhere else closes it
+        self.session.on_input()
+        self.main.emit(self._caret_left)
+        if left:
+            term_watcher.mouse_down(x, y)
+        else:
+            term_watcher.forget()
 
     # --- models ---
     def _load_model_job(self):
@@ -1286,7 +1258,8 @@ class App(QObject):
     #         log.exception("suspect check failed")
 
     def _notify(self, text: str):
-        self.tray.showMessage("VoiceInput", text, self.icon_idle, 4000)
+        if not system.notify(text):
+            self.tray.showMessage("VoiceInput", text, self.icon_idle, 4000)
 
     # --- popups: 選字 and the hotword notice ---
     def _close_menu(self):
@@ -1423,8 +1396,7 @@ class App(QObject):
         self.settings.set_log(self.book.sessions)
         self.settings.set_status(self._status_text)
         self.settings.show()
-        self.settings.raise_()
-        self.settings.activateWindow()
+        system.bring_to_front(self.settings)
 
     def apply_settings(self):
         self.hotkeys.set_keys(rules.bound_keys(self.cfg.rules))
@@ -1609,6 +1581,7 @@ def main():
     packs.install()
     qapp = QApplication(sys.argv)
     qapp.setQuitOnLastWindowClosed(False)
+    system.setup(qapp)
 
     lock = QLockFile(str(paths.LOCK_PATH))
     if not lock.tryLock(100):
@@ -1616,4 +1589,5 @@ def main():
         return 0
 
     app = App(qapp)  # noqa: F841 (keep reference alive)
+    system.permissions(app._notify)
     return qapp.exec()

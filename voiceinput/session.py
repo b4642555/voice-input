@@ -16,12 +16,9 @@ import threading
 import time
 from dataclasses import dataclass, field
 
+from .system import foreground
+
 UNDO_DEPTH = 3
-
-
-def foreground() -> int:
-    import ctypes
-    return ctypes.windll.user32.GetForegroundWindow()
 
 
 @dataclass
