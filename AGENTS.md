@@ -110,8 +110,8 @@ starts with what happened in normal size: 【輸入】 the typed text, 【操作
 【選字】, 【刪除】; then smaller: ASR time and text, and every step that changed the text as its changed fragments,
 those of `format_text` and the app's: 英文拼寫, 標點名稱, 指定字, 選字記憶, 拼字, 取代標點, 選取句號, 刪除後重講; the
 same evening the user picked, among three mockups, a framed block per entry: a darker first row with the kind in its
-color, the main text at 15px and the time on the right, the details at 13px below with the ASR time next to its
-label), 自訂操作 (custom operations, below) and 詞庫 (hotwords; the UI
+color, the main text at 14px (15px felt loose) wrapping indented right of the kind and the time on the right, the
+details at 12px below with the ASR time next to its label), 自訂操作 (custom operations, below) and 詞庫 (hotwords; the UI
 says 詞庫 and 優先度 instead of 熱詞 and weight since 2026-10-13, the code keeps "hotwords"). Since 2026-10-14 the
 詞庫 tab has four collapsible sections, one open at a time (the user's design): the open one fills the tab and
 scrolls inside, the other headers stay in view; the open one is remembered (`hotword_section`). 詞包: one row per

@@ -587,7 +587,7 @@ class SettingsDialog(QDialog):
         gray = "#5F6670"
 
         def row(label, text):
-            return (f"<tr><td style='color:{gray}; padding-right:8px' width=90>{label}</td>"
+            return (f"<tr><td style='color:{gray}; padding-right:8px; white-space:nowrap' width=80>{label}</td>"
                     f"<td style='color:#3D434B'>{text}</td></tr>")
 
         def step(name, before, after):
@@ -605,15 +605,17 @@ class SettingsDialog(QDialog):
             if e.get("asr_s") is not None:
                 rows += row(f"ASR {e['asr_s']:.2f}s", html.escape(e.get("asr") or ""))
             rows += "".join(step(*s) for s in e.get("steps", []))
-            details = (f"<tr><td style='padding:4px 10px 6px 10px'>"
-                       f"<table cellspacing=0 cellpadding=1 style='font-size:13px'>{rows}</table></td></tr>"
+            details = (f"<tr><td style='padding:3px 8px 4px 8px'>"
+                       f"<table cellspacing=0 cellpadding=0 style='font-size:12px'>{rows}</table></td></tr>"
                        if rows else "")
+            # the kind in a cell of its own, so a wrapped main text stays indented right of it
             return (f"<table width='100%' cellspacing=0 cellpadding=0 border=1 style='border-collapse:collapse; "
-                    f"border-color:#D5DAE1; border-style:solid; margin-bottom:10px'>"
-                    f"<tr><td bgcolor='#E6EAF0' style='padding:6px 10px'>"
-                    f"<table width='100%' cellspacing=0 cellpadding=0 border=0><tr><td style='font-size:15px'>"
-                    f"<b style='color:{_KIND_COLORS.get(kind, '#1F2328')}'>{html.escape(kind)}</b>&nbsp;&nbsp;{main}</td>"
-                    f"<td align=right valign=top width=64 style='padding-top:2px; font-size:12px; color:{gray}'>"
+                    f"border-color:#D5DAE1; border-style:solid; margin-bottom:6px'>"
+                    f"<tr><td bgcolor='#E6EAF0' style='padding:4px 8px'>"
+                    f"<table width='100%' cellspacing=0 cellpadding=0 border=0 style='font-size:14px'><tr>"
+                    f"<td valign=top width=38 style='white-space:nowrap'>"
+                    f"<b style='color:{_KIND_COLORS.get(kind, '#1F2328')}'>{html.escape(kind)}</b></td><td>{main}</td>"
+                    f"<td align=right valign=top width=60 style='padding-top:2px; font-size:12px; color:{gray}'>"
                     f"{e['time']}</td></tr></table></td></tr>{details}</table>")
 
         self.log.setHtml("".join(block(e) for e in reversed(entries)))
