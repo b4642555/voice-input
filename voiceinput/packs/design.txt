@@ -1,20 +1,22 @@
 # 設計與影音
 # One term per line (packs.py). Design, photo, video and audio tools and their vocabulary.
 
+# the best known first: the 詞庫 tab shows the first few terms
 Figma
+Photoshop
+Canva
+Illustrator
+Premiere
+
 Sketch
 Adobe
-Photoshop
-Illustrator
 InDesign
 Lightroom
-Premiere
 Premiere Pro
 After Effects
 Audition
 Adobe XD
 Acrobat
-Canva
 Framer
 Webflow
 Procreate

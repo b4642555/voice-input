@@ -1,7 +1,13 @@
 # 雲端服務
 # One term per line (packs.py). Cloud platforms, hosting, databases and their vocabulary.
 
+# the best known first: the 詞庫 tab shows the first few terms
 AWS
+Google Cloud
+Azure
+Firebase
+Cloudflare
+
 Amazon Web Services
 EC2
 S3
@@ -9,13 +15,9 @@ Lambda
 CloudFront
 RDS
 DynamoDB
-Azure
-Google Cloud
 GCP
-Firebase
 Cloud Run
 BigQuery
-Cloudflare
 Cloudflare Workers
 Vercel
 Netlify

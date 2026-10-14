@@ -1,19 +1,22 @@
 # 辦公與協作
 # One term per line (packs.py). Office suites, chat, project tools and the English said around them at work.
 
+# the best known first: the 詞庫 tab shows the first few terms
+Excel
+Word
+PowerPoint
+Gmail
+Notion
+
 # office suites and documents
 Microsoft 365
 Office
-Word
-Excel
-PowerPoint
 Outlook
 OneNote
 OneDrive
 SharePoint
 Teams
 Google Workspace
-Gmail
 Google Docs
 Google Sheets
 Google Slides
@@ -42,7 +45,6 @@ DingTalk
 WeChat
 
 # notes, wikis and project tools
-Notion
 Obsidian
 Evernote
 Confluence

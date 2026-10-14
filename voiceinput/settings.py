@@ -120,6 +120,9 @@ def _card() -> tuple[QFrame, QHBoxLayout]:
     return card, row
 
 
+_PACK_SHOWN = 5   # terms shown after a pack's name
+
+
 def _date_label(date: str) -> QLabel:
     label = QLabel(date, toolTip="加入的日期")
     label.setStyleSheet("color: gray")
@@ -359,18 +362,9 @@ class SettingsDialog(QDialog):
     def _hotwords_page(self) -> QWidget:
         """Four sections, one open at a time (2026-10-14, the user's design): the open one fills the page and
         scrolls inside, the other headers stay in view; the open one is remembered (hotword_section)."""
-        pack_grid = QGridLayout()
-        for n, pack in enumerate(packs.available()):
-            box = QCheckBox(f"{pack.name}（{len(pack.words)}）", checked=pack.id in self.cfg.packs)
-            box.setToolTip(f"整包的詞以優先度 {_shown(packs.PCT)} 辨識；選字選過或被換掉的詞會列在詞庫列表，以那裡的優先度為準")
-            box.toggled.connect(lambda on, i=pack.id: self._toggle_pack(i, on))
-            pack_grid.addWidget(box, n // 3, n % 3)
-        pack_grid.setColumnStretch(3, 1)
-        pack_body = QWidget()
-        v = QVBoxLayout(pack_body)
-        v.setContentsMargins(0, 0, 0, 0)
-        v.addLayout(pack_grid)
-        v.addStretch(1)
+        self.pack_list, no_packs, pack_body = _card_list("")
+        no_packs.hide()
+        self._pack_stamp = None
 
         self.hw_list, self.hw_empty, hw_body = _card_list(
             "詞庫裡還沒有詞。選字時選了詞語（被換掉的詞也會列出，優先度較低），或在選字選單的輸入框輸入文字，就會加到這裡。",
@@ -435,11 +429,47 @@ class SettingsDialog(QDialog):
             header.setText(texts[k])
 
     def refresh_hotwords(self):
-        """The whole 詞庫 tab: hotwords, 選字記憶 (smart picks), English replacements and the section headers."""
+        """The whole 詞庫 tab: term packs, hotwords, 選字記憶 (smart picks), English replacements and the section
+        headers."""
+        self._refresh_packs()
         self._refresh_words()
         self._refresh_picks()
         self._refresh_aliases()
         self._set_headers()
+
+    def _refresh_packs(self):
+        """One row per pack (2026-10-14, the user's design): check box with the count, its first terms (the files
+        list the best known first), and 編輯, which opens the pack's own file in DATA_DIR/packs."""
+        self._pack_stamp = packs.stamp()
+        _clear(self.pack_list)
+        for pack in packs.available():
+            card, row = _card()
+            box = QCheckBox(f"{pack.name}（{len(pack.words)}）", checked=pack.id in self.cfg.packs)
+            box.setToolTip(f"整包的詞以優先度 {_shown(packs.PCT)} 辨識；選字選過或被換掉的詞會列在詞庫列表，以那裡的優先度為準")
+            box.toggled.connect(lambda on, i=pack.id: self._toggle_pack(i, on))
+            box.setMinimumWidth(150)
+            row.addWidget(box)
+            terms = QLabel("、".join(pack.words[:_PACK_SHOWN]) + ("…" if len(pack.words) > _PACK_SHOWN else ""))
+            terms.setStyleSheet("color: gray")
+            terms.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)   # cut, never widening the window
+            terms.setToolTip("、".join(pack.words))
+            row.addWidget(terms, 1)
+            edit = QPushButton("編輯", toolTip="用記事本開啟這個詞包的文字檔：一行一個詞，存檔後下次說話就生效",
+                               clicked=lambda _=False, i=pack.id: self._edit_pack(i))
+            row.addWidget(edit)
+            self.pack_list.addWidget(card)
+
+    def _edit_pack(self, pack_id: str):
+        path = packs.path(pack_id)
+        if not path.exists():
+            packs.install()
+        os.startfile(path)
+
+    def changeEvent(self, e):
+        """Back from editing a pack file: show its new terms."""
+        super().changeEvent(e)
+        if e.type() == QEvent.ActivationChange and self.isActiveWindow() and packs.stamp() != self._pack_stamp:
+            self.refresh_hotwords()
 
     def _refresh_words(self):
         """Each word: date added, its 優先度 (read only since 2026-10-14) and ✕, which puts it back where it would be
@@ -527,7 +557,8 @@ class SettingsDialog(QDialog):
         self.cfg.packs = ids
         self.cfg.save()
         self.hotwords.set_packs(packs.words_for(ids), packs.PCT)
-        self.refresh_hotwords()   # a listed word now at its pack's percentage leaves the list
+        self._refresh_words()   # a listed word now at its pack's percentage leaves the list
+        self._set_headers()
 
     def _remove_alias(self, word: str, alias: str):
         self.hotwords.remove_alias(word, alias)

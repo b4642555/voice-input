@@ -1,7 +1,13 @@
 # 硬體與系統
 # One term per line (packs.py). Computers, parts, operating systems and their vocabulary.
 
+# the best known first: the 詞庫 tab shows the first few terms
 Windows
+iPhone
+MacBook
+NVIDIA
+USB
+
 Windows 11
 macOS
 iOS
@@ -10,12 +16,10 @@ Android
 Linux
 ChromeOS
 Apple
-MacBook
 MacBook Pro
 MacBook Air
 iMac
 Mac mini
-iPhone
 iPad
 AirPods
 Apple Watch
@@ -32,7 +36,6 @@ Logitech
 Razer
 Samsung
 Sony
-NVIDIA
 AMD
 Intel
 Qualcomm
@@ -50,7 +53,6 @@ ROM
 SSD
 HDD
 NVMe
-USB
 USB-C
 Thunderbolt
 HDMI

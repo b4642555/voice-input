@@ -1,11 +1,16 @@
 # 行銷與數據
 # One term per line (packs.py). Marketing, analytics and business data vocabulary.
 
+# the best known first: the 詞庫 tab shows the first few terms
 SEO
+Google Analytics
+KPI
+ROI
+CTR
+
 SEM
 SEA
 GA4
-Google Analytics
 Google Ads
 Google Tag Manager
 Search Console
@@ -29,14 +34,11 @@ Ahrefs
 CRM
 ERP
 CDP
-KPI
 OKR
-ROI
 ROAS
 CPC
 CPM
 CPA
-CTR
 CVR
 LTV
 CAC

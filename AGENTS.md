@@ -104,8 +104,8 @@ Four tabs, sized for the log: 一般 (microphone, "mute the speakers while recor
 2026-10-11), 辨識紀錄 (the transcript log), 自訂操作 (custom operations, below) and 詞庫 (hotwords; the UI
 says 詞庫 and 優先度 instead of 熱詞 and weight since 2026-10-13, the code keeps "hotwords"). Since 2026-10-14 the
 詞庫 tab has four collapsible sections, one open at a time (the user's design): the open one fills the tab and
-scrolls inside, the other headers stay in view; the open one is remembered (`hotword_section`). 詞包: term pack
-check boxes. 詞庫列表: date added, the 優先度 (shown as stored − 100: 0% does nothing, −30% in red is lowered, +100%
+scrolls inside, the other headers stay in view; the open one is remembered (`hotword_section`). 詞包: one row per
+pack: check box with the count, its first 5 terms, 編輯 (opens the user's copy of the file; see Term packs). 詞庫列表: date added, the 優先度 (shown as stored − 100: 0% does nothing, −30% in red is lowered, +100%
 is the top; the user found 70% did not read as lowered, 2026-10-13), ✕; the source is not shown. Since 2026-10-14
 the 優先度 is read only (the −/+ buttons were removed, the user's choice) and ✕ puts a word back where it would be
 unlisted (100%, or its ticked pack's), keeping its aliases; only words away from that level are listed. 選字記憶 (the
@@ -203,7 +203,7 @@ lived a few hours: the user wants hotwords added quietly (they come from deliber
 - **Hotword volume** (TTS, 2026-10-13): random dictionary words at score 2 cost nothing up to 5k (0.50s → 0.54s for
   9.5s of audio), 20k 0.73s, 50k 1.12s (the hotword graph is rebuilt per stream), but from 20k on 熱詞 came out as
   熱刺: large term lists hurt accuracy before speed.
-- **Term packs** (詞包, `packs.py`, `voiceinput/packs/<id>.txt`, ticked on the 詞庫 tab in a grid, `packs` in
+- **Term packs** (詞包, `packs.py`, `voiceinput/packs/<id>.txt`, ticked on the 詞庫 tab, `packs` in
   config.json; 2026-10-13): seven curated lists in `packs.ORDER` (AI 工具與模型, 辦公與協作, 程式開發, 雲端服務,
   設計與影音, 行銷與數據, 硬體與系統; 723 words), no version numbers (textfmt writes spoken numbers), no common words
   as capitalized products (Box, Go, Pages, Numbers, Render, Railway, Linear were dropped), nothing hotword_spec cannot
@@ -213,6 +213,13 @@ lived a few hours: the user wants hotwords added quietly (they come from deliber
   120%, 10/14 at 150%, 12/14 at 170% but Cloud → Claude). Until 2026-10-13 evening `_bias` dropped any word another
   one starts with, English too, so pack words like Gemini (Gemini CLI) and Claude (Claude Code) were never boosted;
   now only Chinese (剪貼 / 剪貼簿).
+  User copies (2026-10-14, the user's request): each launch copies shipped packs missing from DATA_DIR/packs there
+  (`packs.install`; the installer should do it once there is one) and only those are read; the user edits them
+  (one file per pack, the best known terms first since the tab shows the first five) and an edit applies at the
+  next dictation (`packs.stamp`). An app update merges (the user's choice): DATA_DIR/packs/shipped keeps each pack
+  as last shipped, and terms a new version adds are appended to the user's copy under a dated comment; the user's
+  additions stay, deletions are not undone (unless a new version adds the term again), dropped terms stay. Curate
+  the shipped files in `voiceinput/packs`; `dev/pack_candidates.py` compares against those.
 - **Why Chinese biasing works now** (dev experiment by a subagent, 2026-10-11, Windows TTS, 16 target words + 4
   counter-examples; the scripts were deleted): sherpa-onnx's modified beam search keeps the top max_active_paths
   tokens by the model's own score and only then adds the hotword boost (offline-transducer-modified-beam-search-

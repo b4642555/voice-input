@@ -1,9 +1,14 @@
 # 程式開發
 # One term per line (packs.py). Languages, frameworks, tools and the English developers say inside Chinese.
 
-# languages
+# the best known first: the 詞庫 tab shows the first few terms
 Python
 JavaScript
+GitHub
+VS Code
+Docker
+
+# languages
 TypeScript
 Java
 Kotlin
@@ -65,10 +70,8 @@ Bootstrap
 
 # tools
 Git
-GitHub
 GitLab
 Bitbucket
-VS Code
 Visual Studio
 IntelliJ
 PyCharm
@@ -84,7 +87,6 @@ pip
 uv
 conda
 Homebrew
-Docker
 Kubernetes
 Postman
 ESLint

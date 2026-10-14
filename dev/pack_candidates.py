@@ -35,7 +35,7 @@ def main():
     req = urllib.request.Request(url, headers={"Accept": "text/csv", "User-Agent": "VoiceInput-dev/0.1 (term packs)"})
     with urllib.request.urlopen(req, timeout=120) as r:
         rows = list(csv.DictReader(io.StringIO(r.read().decode("utf-8"))))
-    have = {w.casefold() for w in packs.words_for([pack_id])}
+    have = {w.casefold() for w in packs._load(packs.SHIPPED / f"{pack_id}.txt").words}   # the curated list
     for row in rows:
         if int(row["sites"]) >= least and row["label"].casefold() not in have:
             print(f"{row['sites']:>4}  {row['label']}")

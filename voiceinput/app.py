@@ -148,7 +148,8 @@ class App(QObject):
         self._ignored: set[str] = set()          # keys pressed while another was held
         self._could_record = rules.can_record(self.cfg.rules)
         self.hotwords = Hotwords()
-        self.hotwords.set_packs(packs.words_for(self.cfg.packs), packs.PCT)
+        self._pack_stamp = None
+        self._load_packs()
         self.memory = Memory()
         self._menu = None                        # ("pick", Selection) while the 選字 menu is up
 
@@ -628,6 +629,7 @@ class App(QObject):
             press.resolved.wait(3.0)
             t0 = time.monotonic()
             heard = cues.remove(audio, press.cue, SAMPLE_RATE, press.cue_at) if press.cue else audio
+            self._load_packs()
             words = self.hotwords.bias() + [(t, _SCREEN_TERM_SCORE) for t in ctx.terms]
             raw = rec.recognize(heard, _bias(words))
             commands = self._command_words()
@@ -698,6 +700,13 @@ class App(QObject):
         self.hotwords.picked(old, new)
         self.settings.refresh_hotwords()
         self._suggest_pack(new)
+
+    def _load_packs(self):
+        """The ticked packs' words, read again when a pack file was edited (checked before each decode)."""
+        stamp = packs.stamp()
+        if stamp != self._pack_stamp:
+            self._pack_stamp = stamp
+            self.hotwords.set_packs(packs.words_for(self.cfg.packs), packs.PCT)
 
     def _suggest_pack(self, word: str):
         """A word picked, typed or spelled that an unticked term pack lists: a notice suggests the pack, once per
@@ -1010,6 +1019,7 @@ def main():
         handlers=[logging.FileHandler(paths.LOG_PATH, encoding="utf-8"),
                   logging.StreamHandler()],
     )
+    packs.install()
     qapp = QApplication(sys.argv)
     qapp.setQuitOnLastWindowClosed(False)
 

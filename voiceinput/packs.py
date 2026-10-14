@@ -1,5 +1,11 @@
 """Term packs (詞包, 2026-10-13): curated word lists shipped with the app (voiceinput/packs/<id>.txt), ticked on the
-詞庫 tab. Every word of a ticked pack biases X-ASR at PCT, the same percentage scale as the user's list (hotwords.py);
+詞庫 tab. Since 2026-10-14 the user edits them (the user's request): every launch copies the shipped packs missing from
+DATA_DIR/packs there (the installer's job, once there is one), and only those copies are read. An app update merges
+(the user's choice): the version last shipped is kept in DATA_DIR/packs/shipped, and terms a new version adds are
+appended to the user's file under a comment; what the user added stays, what the user deleted is not brought back
+(unless a new version adds it again), and terms a new version drops stay in the user's file. Each pack is its own file; the 詞庫 tab opens it, and an
+edit applies at the next dictation (`stamp`). The first terms of a file are shown on the tab, so the best known come
+first. Every word of a ticked pack biases X-ASR at PCT, the same percentage scale as the user's list (hotwords.py);
 a word is listed there only once the user picks it, has it replaced or moves it, and from then on the user's
 percentage wins.
 
@@ -16,12 +22,18 @@ picks raise a word from there (Gemini picked once: 180%).
 File format: the first line is "# <name>", other lines starting with # are comments, one term per line.
 """
 import logging
+import shutil
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from .paths import DATA_DIR
+
 log = logging.getLogger("voiceinput")
 
-DIR = Path(__file__).resolve().parent / "packs"
+SHIPPED = Path(__file__).resolve().parent / "packs"
+DIR = DATA_DIR / "packs"
+_BASE = DIR / "shipped"   # each pack as last shipped, to tell a new version's terms from the user's deletions
 PCT = 150
 ORDER = ["ai", "office", "dev", "cloud", "design", "marketing", "hardware"]   # as shown on the 詞庫 tab
 
@@ -40,10 +52,60 @@ def _load(path: Path) -> Pack:
     return Pack(path.stem, name, words)
 
 
+def install():
+    """Copy the shipped packs missing from DIR there (a pack the user deleted comes back as shipped) and merge new
+    terms of a newer shipped version into the user's copy."""
+    try:
+        _BASE.mkdir(parents=True, exist_ok=True)
+        for src in SHIPPED.glob("*.txt"):
+            dst, base = DIR / src.name, _BASE / src.name
+            if not dst.exists():
+                shutil.copyfile(src, dst)
+                log.info("term pack installed: %s", src.name)
+            elif base.exists() and base.read_bytes() != src.read_bytes():
+                _merge(src, base, dst)
+            if not base.exists() or base.read_bytes() != src.read_bytes():
+                shutil.copyfile(src, base)
+    except OSError:
+        log.exception("installing term packs")
+
+
+def _merge(src: Path, base: Path, dst: Path):
+    """Append to dst the terms src has that base (the version shipped before) had not."""
+    known = set(_load(base).words) | set(_load(dst).words)
+    new = [w for w in _load(src).words if w not in known]
+    if not new:
+        return
+    text = dst.read_text(encoding="utf-8")
+    text += ("" if text.endswith("\n") or not text else "\n") + f"\n# added by an app update, {time.strftime('%Y-%m-%d')}\n"
+    dst.write_text(text + "\n".join(new) + "\n", encoding="utf-8")
+    log.info("term pack %s: %d new terms merged", src.name, len(new))
+
+
+def path(pack_id: str) -> Path:
+    return DIR / f"{pack_id}.txt"
+
+
+def _files() -> list[Path]:
+    rank = {pack_id: i for i, pack_id in enumerate(ORDER)}
+    files = list(DIR.glob("*.txt")) or list(SHIPPED.glob("*.txt"))   # the shipped ones if the copy failed
+    return sorted(files, key=lambda p: (rank.get(p.stem, len(ORDER)), p.stem))
+
+
+def stamp() -> tuple:
+    """Changes when a pack file is edited, added or removed."""
+    out = []
+    for p in _files():
+        try:
+            out.append((p.name, p.stat().st_mtime_ns))
+        except OSError:
+            pass
+    return tuple(out)
+
+
 def available() -> list[Pack]:
     out = []
-    rank = {pack_id: i for i, pack_id in enumerate(ORDER)}
-    for path in sorted(DIR.glob("*.txt"), key=lambda p: (rank.get(p.stem, len(ORDER)), p.stem)):
+    for path in _files():
         try:
             out.append(_load(path))
         except (OSError, UnicodeDecodeError):

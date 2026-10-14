@@ -2,6 +2,13 @@
 # One term per line: products, companies and models without version numbers (GPT 四 -> GPT 4 is left to textfmt),
 # then English terms said inside Chinese. Curated by hand; dev/pack_candidates.py lists Wikidata items not here yet.
 
+# the best known first: the 詞庫 tab shows the first few terms
+ChatGPT
+Claude
+Gemini
+DeepSeek
+Copilot
+
 # companies and labs
 Anthropic
 OpenAI
@@ -24,13 +31,8 @@ Cohere
 NVIDIA
 
 # assistants and chat apps
-Claude
-ChatGPT
-Gemini
-Copilot
 Grok
 Le Chat
-DeepSeek
 Qwen
 Kimi
 Doubao
