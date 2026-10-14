@@ -855,17 +855,25 @@ class App(QObject):
                 spans, self._spans = self._spans, []
                 self._commit_job(start, anchor, piece.hi, piece.hi, ctx, spans=spans)
             else:
-                self._refine_job(start, anchor, piece, ctx)
+                self._refine_job(start, anchor, piece, ctx, short=bool(names) and self._short(raw, names))
         except Exception:
             log.exception("piece failed")
 
-    def _refine_job(self, start: int, anchor: int, piece, ctx):
+    def _refine_job(self, start: int, anchor: int, piece, ctx, short: bool = False):
         """The draft's open sentence (audio from `anchor`) decoded again up to this pause. Text up to the last ，
         or 。 the recognizer put in an earlier pause is settled: it is not decoded again, so a pause costs one
-        sentence, not the whole draft (the user's request, 2026-10-14: a commit of a long draft took 3.25s)."""
+        sentence, not the whole draft (the user's request, 2026-10-14: a commit of a long draft took 3.25s).
+        short: the piece is short enough to be a command."""
         t0 = time.monotonic()
         audio, index = self._speech(anchor, piece.hi, self._spans)
-        text, tokens, times = self.recognizer.recognize_timed(audio, self._bias_words(ctx))
+        words = self._bias_words(ctx)
+        names = self._command_words() if short else []
+        # a short piece is decoded with the speech before it and commands boosted first: plain, the user's 換行 at
+        # the end was often left out, then turned up inside the sentence at the next pause (2026-10-15)
+        for bias in ([_bias([(w, _COMMAND_SCORE) for w in names] + words)] if names else []) + [words]:
+            text, tokens, times = self.recognizer.recognize_timed(audio, bias)
+            if self._ran_tail(text, tokens, times, index, piece, ctx, start, anchor, t0):
+                return
         settled, live, after = "", text, anchor
         # a blank token (between English letters) is no mark: "" in _MARKS is True, and counting it settled a whole
         # sentence that was then typed again (2026-10-15)
@@ -882,23 +890,30 @@ class App(QObject):
                 break
         settled = self._text_of(settled, ctx, [], keep_end=True) if settled else ""
         live = self._text_of(live, ctx, [], keep_end=True)
-        if live and after == piece.lo:
-            # the open sentence is this piece alone, and decoded after the sentence before it, it is a command it
-            # was not alone: the user's 換行 came out as "Hang Hung," alone, as 換行 here, and was typed as text
-            # (2026-10-15). The sentence before it is committed and the command runs.
-            steps = []
-            op, typed = self._command(live, ctx, steps)
-            if op is not None or typed:
-                log.info("piece with the sentence before it: %s", live)
-                entry = {"time": time.strftime("%H:%M:%S"), "asr": live, "asr_s": time.monotonic() - t0,
-                         "steps": steps}
-                entry.update(kind="操作", main=op.phrase) if op else entry.update(kind="輸入", main=typed, copy=typed)
-                self._spans = []
-                command = (op, typed, entry)
-                self.main.emit(lambda: self._commit(settled, start, anchor, piece.hi, ctx, command, not typed))
-                return
         log.info("draft %.2fs: %s | %s", time.monotonic() - t0, settled, live)
         self.main.emit(lambda: self._refine(start, anchor, settled, live, after, piece.hi, ctx))
+
+    def _ran_tail(self, text, tokens, times, index, piece, ctx, start, anchor, t0) -> bool:
+        """The last piece, decoded after the speech before it, may be a command it was not alone: the user's 換行
+        came out as "Hang Hung," alone and 送出 as "Contral.", as themselves after it, and were typed as text
+        (2026-10-15). Then the speech before it is committed and the command runs (True)."""
+        head, tail = _split_at(text, tokens, times, index, piece.start - _MARK_SLACK)
+        if not tail:
+            return False
+        steps = []
+        said = format_text(tail, True, steps)
+        op, typed = self._command(said, ctx, steps)
+        if op is not None or typed:
+            log.info("piece with the speech before it: %s | %s", head, said)
+            entry = {"time": time.strftime("%H:%M:%S"), "asr": to_traditional(tail),
+                     "asr_s": time.monotonic() - t0, "steps": steps}
+            entry.update(kind="操作", main=op.phrase) if op else entry.update(kind="輸入", main=typed, copy=typed)
+            self._spans = []
+            head = self._text_of(head, ctx, []) if head.strip() else ""
+            command = (op, typed, entry)
+            self.main.emit(lambda: self._commit(head, start, anchor, piece.hi, ctx, command, not typed))
+            return True
+        return False
 
     def _redo_job(self, at: int):
         """A pause's update came after the caret moved: the speech since sample `at` (after what is typed) is
@@ -1323,6 +1338,22 @@ def _inside(ctx) -> bool:
     sel = ctx.selection
     sides = (sel.before, sel.after) if sel is not None else ctx.caret
     return sides is not None and all(t.strip() for t in sides)
+
+
+def _split_at(text: str, tokens: list, times: list, index: list, at: int) -> tuple[str, str]:
+    """The recognizer's text split before the first token emitted at sample `at` or later (times in App._speech's
+    audio, index its map): (before, from there on); ("", "") when no token is that late."""
+    i = next((k for k, t in enumerate(times) if _sample_at(index, int(t * SAMPLE_RATE)) >= at), None)
+    if i is None:
+        return "", ""
+    n = sum(len(re.sub(r"[\s▁]", "", t)) for t in tokens[i:])
+    cut = len(text)
+    while cut > 0 and n > 0:
+        cut -= 1
+        n -= not text[cut].isspace()
+    while cut < len(text) and (text[cut].isspace() or text[cut] in _MARKS):   # the sentence's own mark
+        cut += 1
+    return text[:cut], text[cut:]
 
 
 def _sample_at(index: list, offset: int) -> int:
