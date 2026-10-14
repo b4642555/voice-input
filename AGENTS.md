@@ -105,12 +105,16 @@ Four tabs, sized for the log: 一般 (microphone, "mute the speakers while recor
 says 詞庫 and 優先度 instead of 熱詞 and weight since 2026-10-13, the code keeps "hotwords"). Since 2026-10-14 the
 詞庫 tab has four collapsible sections, one open at a time (the user's design): the open one fills the tab and
 scrolls inside, the other headers stay in view; the open one is remembered (`hotword_section`). 詞包: term pack
-check boxes. 詞庫列表: date added, the 優先度 between −/+ buttons (shown as stored − 100: 0% does nothing, −30% in
-red is lowered, +100% is the top; the user found 70% did not read as lowered, 2026-10-13) (10% a click; the row is updated in place,
-re-sorting made it jump away), remove; the source is not shown; a 排序 drop-down: 優先度, name A→Z / Z→A by pinyin,
-date; remembered). 智慧選字: every smart pick as its context with the character in bold and the reading; the
-character can be typed over (one Chinese character) or the example removed (it replaced the 一般 tab's button that
-opened smart-picks.json). 英文強制替換: the aliases (Dipsick → DeepSeek), each removable. Mute (2026-10-06, `mute.py`): Core Audio via
+check boxes. 詞庫列表: date added, the 優先度 (shown as stored − 100: 0% does nothing, −30% in red is lowered, +100%
+is the top; the user found 70% did not read as lowered, 2026-10-13), ✕; the source is not shown. Since 2026-10-14
+the 優先度 is read only (the −/+ buttons were removed, the user's choice) and ✕ puts a word back where it would be
+unlisted (100%, or its ticked pack's), keeping its aliases; only words away from that level are listed. 選字記憶 (the
+UI name of the smart picks since 2026-10-14; 智慧選字 did not fit something this mechanical): each example as
+這個ying3片是 → 這個影片是 (context with the reading, then with the pick; the user's design), date, ✕ (it replaced the
+一般 tab's button that opened smart-picks.json; editing the character was there for a few hours). 英文強制替換: the
+aliases (Dipsick → DeepSeek), date (`alias_added`; older ones show the word's date), ✕. Every list has its own 排序
+drop-down, remembered (`hotword_sort`: 優先度, name A→Z / Z→A by pinyin, date; `pick_sort`: date, reading;
+`alias_sort`: date, name). Mute (2026-10-06, `mute.py`): Core Audio via
 comtypes; muted when the recording indicator shows, unmuted once the text is pasted or the press ends in nothing; a
 mute the user set is left alone. Selection edits and on-screen terms are always on.
 
@@ -179,14 +183,18 @@ lived a few hours: the user wants hotwords added quietly (they come from deliber
   formatting when at least one token agrees, most agreement wins, left alone on a tie. Since 2026-10-14 a change that breaks
   a raised hotword or makes a lowered one is not made (`Hotwords.levels`; 一 -> 依 learned in 右的依序 turned
   一瞬間 into 依瞬間 through the agreeing shun, though the user had 依瞬間 at −100%), and a pick that puts back
-  characters a smart pick changed (依瞬間 -> 一瞬間, or 依 -> 一) deletes the examples that made the change there. Phrases and English were
+  characters a smart pick changed (依瞬間 -> 一瞬間, or 景 -> 影) learns "keep it here" under the reading the
+  recognizer wrote (an example with the heard character as value), so the example that changed it stays for its own
+  context. Until the same evening such a pick deleted every example agreeing by a token: the user's 這段影片是 -> 景
+  and 這個影片是 -> 影 kept deleting each other, and the second was learned under 景's reading, which never applies
+  since X-ASR writes 影. Phrases and English were
   learned for a few hours the same day and are ignored on load.
 - **Hotwords** (`hotwords.py`, DATA_DIR/hotword-list.json, one list on the 熱詞 tab; the old key -> value
   hotwords.json is not read). Percentages since 2026-10-13 (the user's design; the scores behind them are not
   shown): 100% does nothing, 200% pulls hardest (score +5 Chinese, +3 English), 0% pushes away (−3). A word typed in
   the menu (source "manual") is 200% and picks never move it; a 選字 pick (2+ characters or English) raises the
   picked word 30% and lowers the replaced one 30%, so swapping 程式 / 城市 back and forth returns both to 100%, where
-  they leave the list. The −/+ buttons move any word 10%. English never goes below 100%: a negative English word only
+  they leave the list. The −/+ buttons that moved a word 10% were removed 2026-10-14. English never goes below 100%: a negative English word only
   changed its case (clock -> Clock). Measured with TTS: 程式 130% / 城市 70% already turns 寫了一個新的城市 into 程式;
   up to 200% / 0% 台北是一個美麗的城市 is left alone; −5 made it 城池, and lowering 城市 alone gave 程序, not 程式. Old
   weights were converted (typed 200%, picked 100% + weight / cap). Single characters never become hotwords. No

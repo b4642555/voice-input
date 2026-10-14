@@ -1,4 +1,4 @@
-"""Smart picks (智慧選字, 2026-10-11): single characters picked in the candidate menu, learned like an input method.
+"""Smart picks (選字記憶 in the UI since 2026-10-14, 智慧選字 before; 2026-10-11): single characters picked in the candidate menu, learned like an input method.
 
 Only single Chinese characters (在 / 再) since the same day (the user's choice): a word of two or more characters
 picked in 選字 raises its X-ASR hotword weight instead (hotwords.py), and nothing is replaced after recognition.
@@ -29,6 +29,7 @@ import json
 import logging
 import re
 import threading
+import time
 
 from .paths import DATA_DIR
 from .reading import Token, reading_key, tokens
@@ -138,7 +139,7 @@ class Memory:
                     continue          # phrases and English were learned before the change to single characters
                 self.examples.setdefault(ex["key"], []).append(
                     {"value": ex["value"], "left": list(ex["left"]), "right": list(ex["right"]),
-                     "serial": int(ex["serial"])})
+                     "serial": int(ex["serial"]), "added": ex.get("added") or _today()})
             self.styles = {k: int(v) for k, v in data.get("styles", {}).items()}
             if old:
                 self.save()
@@ -150,8 +151,8 @@ class Memory:
 
     def save(self):
         with self._lock:
-            rows = [{"key": k, "value": e["value"], "left": e["left"], "right": e["right"], "serial": e["serial"]}
-                    for k, exs in sorted(self.examples.items()) for e in exs]
+            rows = [{"key": k, "value": e["value"], "left": e["left"], "right": e["right"], "serial": e["serial"],
+                     "added": e["added"]} for k, exs in sorted(self.examples.items()) for e in exs]
             # one example per line, so the file reads as a list
             lines = ",\n".join("  " + json.dumps(r, ensure_ascii=False) for r in rows)
             text = ('{\n"version": ' + str(VERSION) + ',\n"examples": [\n' + lines + '\n],\n"styles": '
@@ -161,7 +162,7 @@ class Memory:
 
     # --- examples ---
     def listed(self) -> list[dict]:
-        """Every example as {key, value, left, right, serial}, newest first (the 詞庫 tab)."""
+        """Every example as {key, value, left, right, serial, added}, newest first (the 詞庫 tab)."""
         with self._lock:
             rows = [dict(e, key=k) for k, exs in self.examples.items() for e in exs]
         return sorted(rows, key=lambda e: -e["serial"])
@@ -174,18 +175,6 @@ class Memory:
             else:
                 self.examples.pop(key, None)
         self.save()
-
-    def change(self, key: str, serial: int, value: str) -> bool:
-        """Give an example another character (edited on the 詞庫 tab); False if value is not one Chinese
-        character."""
-        if not _single(value):
-            return False
-        with self._lock:
-            for e in self.examples.get(key, []):
-                if e["serial"] == serial:
-                    e["value"] = value
-        self.save()
-        return True
 
     def lookup(self, key: str, left, right, single: bool) -> str | None:
         with self._lock:
@@ -213,47 +202,38 @@ class Memory:
             return out
 
     def record(self, text: str, start: int, end: int, value: str):
-        """The user picked value for text[start:end] (the selection, with its line around it)."""
+        """The user picked value for text[start:end] (the selection, with its line around it). A character a smart
+        pick changed and the pick puts back (景 -> 影, or 依瞬間 -> 一瞬間) is learned under the reading the
+        recognizer wrote, as "keep it here": the example that changed it stays for its own context (2026-10-14: the
+        examples that agreed were deleted instead, so 這段影片是 -> 景 and 這個影片是 -> 影 kept deleting each other,
+        and the one learned under 景's reading never applied, since the recognizer writes 影)."""
         old = text[start:end]
-        key = reading_key(old)
-        self._forget(text, start, old, value)
-        if not key or not (_single(old) and _single(value)):
+        if len(old) == len(value) and len(old) > 1:
+            for i, (o, n) in enumerate(zip(old, value)):
+                if o != n and _single(o) and _single(n) and self._changed(text, start + i, o, n):
+                    self._learn(reading_key(n), n, text, start + i, start + i + 1)
+        if _single(old) and _single(value):
+            changed = self._changed(text, start, old, value)
+            self._learn(reading_key(value if changed else old), value, text, start, end)
+        with self._lock:
             self._learn_style(old, value)
-            self.save()
-            return
+        self.save()
+
+    def _changed(self, text: str, pos: int, shown: str, heard: str) -> bool:
+        """The examples turn heard into shown at text[pos]: a smart pick probably wrote it."""
+        left, right = situation(text, pos, pos + 1)
+        return self.lookup(reading_key(heard), left, right, single=True) == shown
+
+    def _learn(self, key: str, value: str, text: str, start: int, end: int):
         left, right = situation(text, start, end)
-        new = {"value": value, "left": left, "right": right, "serial": self._serial}
+        new = {"value": value, "left": left, "right": right, "serial": self._serial, "added": _today()}
         with self._lock:
             self._serial += 1
             exs = [e for e in self.examples.get(key, [])
                    if not ((e["value"] != value and not _conflict(e, new))
                            or (e["value"] == value and e["left"] == left and e["right"] == right))]
             self.examples[key] = [new] + exs
-            self._learn_style(old, value)
-        log.info("smart pick: %s -> %s (%s %s / %s)", old, value, key, "".join(left), "-".join(right))
-        self.save()
-
-    def _forget(self, text: str, start: int, old: str, new: str):
-        """A pick that puts back characters a smart pick changed (依瞬間 -> 一瞬間, or 依 -> 一) deletes the examples
-        that made the change here (2026-10-14: 一 -> 依 learned in 右的依序 kept turning 一瞬間 into 依瞬間, as the
-        right side's shun agreed, and picking the word back only moved hotwords)."""
-        if len(old) != len(new):
-            return
-        with self._lock:
-            for i, (o, n) in enumerate(zip(old, new)):
-                if o == n or not (_single(o) and _single(n)):
-                    continue
-                key = reading_key(n)
-                exs = self.examples.get(key, [])
-                left, right = situation(text, start + i, start + i + 1)
-                gone = [e for e in exs if e["value"] == o and sum(_agreement(e["left"], e["right"], left, right)[:2])]
-                if gone:
-                    self.examples[key] = [e for e in exs if e not in gone]
-                    if not self.examples[key]:
-                        del self.examples[key]
-                    for e in gone:
-                        log.info("smart pick forgotten: %s -> %s (%s %s / %s)", n, o, key, "".join(e["left"]),
-                                 "-".join(e["right"]))
+        log.info("smart pick: %s -> %s (%s %s / %s)", text[start:end], value, key, "".join(left), "-".join(right))
 
     def apply(self, text: str, prefix: str = "", levels: dict[str, int] | None = None) -> str:
         """Replace every span of text that the examples decide otherwise. prefix: the line before it (context).
@@ -330,6 +310,10 @@ def _blocked(full: str, a: int, b: int, value: str, levels: dict[str, int]) -> s
         if pct < 100 and _covers(new, word, a, a + len(value)) and not _covers(full, word, a, b):
             return f"would make {word} {pct - 100:+d}%"
     return ""
+
+
+def _today() -> str:
+    return time.strftime("%Y-%m-%d")
 
 
 def _single(text: str) -> bool:

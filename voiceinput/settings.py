@@ -1,8 +1,8 @@
 """Settings window in four tabs: 一般 (general), 辨識紀錄 (live transcript log), 自訂操作 (custom operations,
 rules.py) and 詞庫 (hotwords.py, the UI name for hotwords since 2026-10-13), in four sections one open at a time:
 term packs to tick (packs.py), every listed word with its 優先度 (−100% .. +100%, 0 does nothing; stored as 0 ..
-200%), −/+ by 10%, removable; smart picks (memory.py), each character editable or removable; English replacements
-(hotword aliases), removable. Every change is applied and saved immediately."""
+200%; read only); 選字記憶 (the smart picks, memory.py); English replacements (hotword aliases). Each list is dated,
+sortable, and its entries removable. Every change is applied and saved immediately."""
 import html
 import os
 
@@ -30,6 +30,9 @@ _STEP_DEFAULTS = {rules.COMMAND: rules.DELETE_SELECTION, rules.KEYS: "", rules.T
 
 HOTWORD_SORTS = [("weight", "優先度（高→低）"), ("name", "名稱 A→Z"), ("name_desc", "名稱 Z→A"),
                  ("date", "日期（新→舊）"), ("date_old", "日期（舊→新）")]
+PICK_SORTS = [("date", "日期（新→舊）"), ("date_old", "日期（舊→新）"), ("reading", "讀音 A→Z"),
+              ("reading_desc", "讀音 Z→A")]
+ALIAS_SORTS = [("date", "日期（新→舊）"), ("date_old", "日期（舊→新）"), ("name", "名稱 A→Z"), ("name_desc", "名稱 Z→A")]
 def _shown(pct: int) -> str:
     """The 優先度 as the user sees it (2026-10-13, the user's choice): 0 does nothing, lowered words are negative."""
     d = pct - hotwords.NEUTRAL
@@ -115,6 +118,12 @@ def _card() -> tuple[QFrame, QHBoxLayout]:
     row = QHBoxLayout(card)
     row.setContentsMargins(8, 4, 4, 4)
     return card, row
+
+
+def _date_label(date: str) -> QLabel:
+    label = QLabel(date, toolTip="加入的日期")
+    label.setStyleSheet("color: gray")
+    return label
 
 
 def _remove_button(tip: str, slot) -> QPushButton:
@@ -363,18 +372,15 @@ class SettingsDialog(QDialog):
         v.addLayout(pack_grid)
         v.addStretch(1)
 
-        self.hw_sort = _combo(HOTWORD_SORTS, self.cfg.hotword_sort)
-        self.hw_sort.currentIndexChanged.connect(self._sort_hotwords)
-        top = QHBoxLayout()
-        top.addWidget(QLabel("排序"))
-        top.addWidget(self.hw_sort)
-        top.addStretch()
         self.hw_list, self.hw_empty, hw_body = _card_list(
-            "詞庫裡還沒有詞。選字時選了詞語（被換掉的詞也會列出，優先度較低），或在選字選單的輸入框輸入文字，就會加到這裡。", top)
+            "詞庫裡還沒有詞。選字時選了詞語（被換掉的詞也會列出，優先度較低），或在選字選單的輸入框輸入文字，就會加到這裡。",
+            self._sort_row(HOTWORD_SORTS, "hotword_sort"))
         self.pick_list, self.pick_empty, pick_body = _card_list(
-            "還沒有學到的字。用選字換掉單一個中文字，就會記下它前後的字，之後在同樣的前後文自動換成那個字。")
+            "還沒有記下的字。用選字換掉單一個中文字，就會記下它前後的字，之後在同樣的前後文自動換成那個字。",
+            self._sort_row(PICK_SORTS, "pick_sort"))
         self.alias_list, self.alias_empty, alias_body = _card_list(
-            "還沒有強制替換。選字或打字把英文換成另一種拼法的詞（例如 Dipsick 換成 DeepSeek），之後辨識出舊拼法就一律改成新的。")
+            "還沒有強制替換。選字或打字把英文換成另一種拼法的詞（例如 Dipsick 換成 DeepSeek），之後辨識出舊拼法就一律改成新的。",
+            self._sort_row(ALIAS_SORTS, "alias_sort"))
 
         self._sections = {}
         page = QWidget()
@@ -406,92 +412,79 @@ class SettingsDialog(QDialog):
             self.cfg.hotword_section = key
             self.cfg.save()
 
+    def _sort_row(self, sorts, setting: str) -> QHBoxLayout:
+        """排序 and its drop-down; the choice is saved as cfg.<setting>."""
+        combo = _combo(sorts, getattr(self.cfg, setting))
+        combo.currentIndexChanged.connect(lambda: self._sort_changed(setting, combo.currentData()))
+        row = QHBoxLayout()
+        row.addWidget(QLabel("排序"))
+        row.addWidget(combo)
+        row.addStretch()
+        return row
+
+    def _sort_changed(self, setting: str, value: str):
+        setattr(self.cfg, setting, value)
+        self.cfg.save()
+        self.refresh_hotwords()
+
     def _set_headers(self):
-        texts = {"packs": f"詞包（已勾選 {len(self.cfg.packs)}）", "words": f"詞庫列表（{len(self.hotwords.items)}）",
-                 "picks": f"智慧選字（{len(self.memory.listed())}）",
+        texts = {"packs": f"詞包（已勾選 {len(self.cfg.packs)}）", "words": f"詞庫列表（{len(self.hotwords.listed())}）",
+                 "picks": f"選字記憶（{len(self.memory.listed())}）",
                  "aliases": f"英文強制替換（{len(self.hotwords.aliases())}）"}
         for k, (header, _) in self._sections.items():
             header.setText(texts[k])
 
     def refresh_hotwords(self):
-        """The whole 詞庫 tab: hotwords, smart picks, English replacements and the section headers."""
+        """The whole 詞庫 tab: hotwords, 選字記憶 (smart picks), English replacements and the section headers."""
         self._refresh_words()
         self._refresh_picks()
         self._refresh_aliases()
         self._set_headers()
 
     def _refresh_words(self):
-        self._hw_rows = {}
+        """Each word: date added, its 優先度 (read only since 2026-10-14) and ✕, which puts it back where it would be
+        unlisted."""
         _clear(self.hw_list)
-        for h in self._sorted_hotwords():
+        items = self._sorted_hotwords()
+        for h in items:
             card, row = _card()
             row.addWidget(QLabel(h.word))
             row.addStretch(1)
-            added = QLabel(h.added)
-            added.setStyleSheet("color: gray")
-            added.setToolTip("加入的日期")
-            row.addWidget(added)
-            low = hotwords.floor(h.word)
-            down = QPushButton("−", toolTip="降低 10%", clicked=lambda _=False, w=h.word: self._adjust_hotword(w, -1))
-            down.setFixedWidth(28)
-            down.setEnabled(h.pct > low)
-            row.addWidget(down)
+            row.addWidget(_date_label(h.added))
             percent = QLabel()
             _show_pct(percent, h.pct)
-            percent.setToolTip("優先度：0% 不影響辨識；正的越容易辨識成這個詞，負的越不容易"
-                               + ("" if low == 0 else "（英文最低 0%）"))
-            percent.setMinimumWidth(40)
+            percent.setToolTip("優先度：0% 不影響辨識；正的越容易辨識成這個詞，負的越不容易。選字選到會提高，被換掉會降低")
+            percent.setMinimumWidth(48)
             percent.setAlignment(Qt.AlignCenter)
             row.addWidget(percent)
-            up = QPushButton("+", toolTip="提高 10%", clicked=lambda _=False, w=h.word: self._adjust_hotword(w, 1))
-            up.setFixedWidth(28)
-            up.setEnabled(h.pct < hotwords.TOP)
-            row.addWidget(up)
-            self._hw_rows[h.word] = (down, percent, up)
-            row.addWidget(_remove_button("從詞庫刪除", lambda _=False, w=h.word: self._remove_hotword(w)))
+            row.addWidget(_remove_button("移除，優先度回到預設", lambda _=False, w=h.word: self._remove_hotword(w)))
             self.hw_list.addWidget(card)
-        self.hw_empty.setVisible(not self.hotwords.items)
+        self.hw_empty.setVisible(not items)
 
     def _refresh_picks(self):
-        """Each example: the context with the picked character in bold (｜ where nothing usable came before) and the
-        reading it was heard as; the character can be typed over or the example removed."""
+        """Each example as heard -> as picked, the character shown by its reading on the left: 這個ying3片是 ->
+        這個影片是 (the user's design, 2026-10-14)."""
         _clear(self.pick_list)
         rows = self.memory.listed()
+        order = self.cfg.pick_sort
+        if order in ("reading", "reading_desc"):
+            rows.sort(key=lambda e: (e["key"], e["value"]), reverse=order == "reading_desc")
+        else:
+            rows.sort(key=lambda e: (e["added"], e["serial"]), reverse=order != "date_old")
         for e in rows:
             card, row = _card()
             left = "".join(c for c in e["left"] if c != BOUNDARY)
-            start = "<span style='color:gray'>｜</span>" if BOUNDARY in e["left"] else ""
-            context = QLabel()
-            context.setToolTip("聽成這個讀音、前後是這些字時，自動換成粗體的字；｜表示前面是句首、標點或英文")
-            row.addWidget(context)
-            reading = QLabel(e["key"])
-            reading.setStyleSheet("color: gray")
-            row.addWidget(reading)
+            right = "".join(e["right"])
+            label = QLabel(f"{html.escape(left + e['key'] + right)} <span style='color:gray'>→</span> "
+                           f"{html.escape(left + e['value'] + right)}")
+            label.setToolTip(f"聽成 {e['key']}、前後是這些字時，換成「{e['value']}」")
+            row.addWidget(label)
             row.addStretch(1)
-
-            def show(value, label=context, start=start, left=left, right="".join(e["right"])):
-                label.setText(f"{start}{html.escape(left)}<b>{html.escape(value)}</b>{html.escape(right)}")
-            show(e["value"])
-            value = QLineEdit(e["value"], toolTip="換成的字（一個中文字）")
-            value.setFixedWidth(40)
-            value.setAlignment(Qt.AlignCenter)
-            value.editingFinished.connect(lambda box=value, k=e["key"], n=e["serial"], show=show:
-                                          self._change_pick(box, k, n, show))
-            row.addWidget(value)
-            row.addWidget(_remove_button("刪除這筆", lambda _=False, k=e["key"], n=e["serial"]:
+            row.addWidget(_date_label(e["added"]))
+            row.addWidget(_remove_button("移除這筆", lambda _=False, k=e["key"], n=e["serial"]:
                                          self._remove_pick(k, n)))
             self.pick_list.addWidget(card)
         self.pick_empty.setVisible(not rows)
-
-    def _change_pick(self, box: QLineEdit, key: str, serial: int, show):
-        text = box.text().strip()
-        old = next((e["value"] for e in self.memory.listed() if e["key"] == key and e["serial"] == serial), "")
-        if text == old:
-            return
-        if self.memory.change(key, serial, text):
-            show(text)
-        else:
-            box.setText(old)
 
     def _remove_pick(self, key: str, serial: int):
         self.memory.remove(key, serial)
@@ -499,23 +492,29 @@ class SettingsDialog(QDialog):
 
     def _refresh_aliases(self):
         _clear(self.alias_list)
-        pairs = sorted(self.hotwords.aliases(), key=lambda p: (p[1].casefold(), p[0].casefold()))
-        for alias, word in pairs:
+        rows = [(a, w, self.hotwords.alias_date(w, a)) for a, w in self.hotwords.aliases()]
+        order = self.cfg.alias_sort
+        if order in ("name", "name_desc"):
+            rows.sort(key=lambda r: (r[0].casefold(), r[1].casefold()), reverse=order == "name_desc")
+        else:
+            rows.sort(key=lambda r: r[2], reverse=order != "date_old")
+        for alias, word, added in rows:
             card, row = _card()
             label = QLabel(f"{html.escape(alias)} <span style='color:gray'>→</span> {html.escape(word)}")
             label.setToolTip(f"辨識出「{alias}」時一律改成「{word}」")
             row.addWidget(label)
             row.addStretch(1)
+            row.addWidget(_date_label(added))
             row.addWidget(_remove_button("不再替換", lambda _=False, w=word, a=alias: self._remove_alias(w, a)))
             self.alias_list.addWidget(card)
-        self.alias_empty.setVisible(not pairs)
+        self.alias_empty.setVisible(not rows)
 
     def _sorted_hotwords(self) -> list:
         """The list in the chosen order; ties by percentage, then name. Names sort by their pinyin, so Chinese words
         sit among the English ones by sound (程式 near Claude)."""
         def name(h):
             return "".join(lazy_pinyin(h.word)).casefold()
-        items = sorted(self.hotwords.items, key=lambda h: (-h.pct, name(h)))
+        items = sorted(self.hotwords.listed(), key=lambda h: (-h.pct, name(h)))
         order = self.cfg.hotword_sort
         if order in ("name", "name_desc"):
             items.sort(key=name, reverse=order == "name_desc")
@@ -523,29 +522,12 @@ class SettingsDialog(QDialog):
             items.sort(key=lambda h: h.added, reverse=order == "date")
         return items
 
-    def _sort_hotwords(self):
-        self.cfg.hotword_sort = self.hw_sort.currentData()
-        self.cfg.save()
-        self.refresh_hotwords()
-
-    def _adjust_hotword(self, word: str, steps: int):
-        """Updates the row in place: re-sorting made the row jump away after a click (the user's report)."""
-        self.hotwords.adjust(word, steps)
-        h = self.hotwords.find(word)
-        if h is None or word not in self._hw_rows:
-            self.refresh_hotwords()
-            return
-        down, percent, up = self._hw_rows[word]
-        _show_pct(percent, h.pct)
-        down.setEnabled(h.pct > hotwords.floor(word))
-        up.setEnabled(h.pct < hotwords.TOP)
-
     def _toggle_pack(self, pack_id: str, on: bool):
         ids = [i for i in self.cfg.packs if i != pack_id] + ([pack_id] if on else [])
         self.cfg.packs = ids
         self.cfg.save()
         self.hotwords.set_packs(packs.words_for(ids), packs.PCT)
-        self._set_headers()
+        self.refresh_hotwords()   # a listed word now at its pack's percentage leaves the list
 
     def _remove_alias(self, word: str, alias: str):
         self.hotwords.remove_alias(word, alias)

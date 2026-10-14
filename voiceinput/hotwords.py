@@ -5,7 +5,8 @@ toward the word, 0% pushes hardest away from it; the scores behind the percentag
 - typed (source "manual"): a word typed in the 選字 menu's input box; 200%, never changed by picks.
 - 選字: picking a word of two or more characters (or English) in the menu raises it by 30% and lowers the word it
   replaced by 30%, so swapping 程式 and 城市 back and forth returns both to 100% (where they leave the list).
-- the −/+ buttons on the 詞庫 tab move any word by 10%.
+- ✕ on the 詞庫 tab puts a word back where it would be unlisted; the −/+ buttons that moved a word by 10% were
+  removed 2026-10-14 (the user's choice: priority comes from picks and typing only).
 - words of ticked term packs (packs.py) count as being at the pack's percentage without being listed; a pick or a
   replacement lists one, moved from there, and the listed percentage wins (back at the pack's, it leaves the list).
 Scores: 200% is +5 for Chinese (+3 for English), 0% is −3. Measured with TTS (dev experiments): with
@@ -34,7 +35,7 @@ MANUAL, PICKED = "manual", "picked"
 _CJK = re.compile(r"[㐀-䶿一-鿿]")
 _LATIN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 .'+#&_-]*$")
 NEUTRAL, TOP = 100, 200
-PICK_STEP, BUTTON_STEP = 30, 10
+PICK_STEP = 30
 _TOP_ZH, _TOP_EN, _BOTTOM = 5.0, 3.0, -3.0
 
 
@@ -67,6 +68,7 @@ class Hotword:
     source: str = MANUAL
     added: str = ""          # date it was first added, YYYY-MM-DD
     aliases: list = field(default_factory=list)   # misheard English spellings rewritten as this word (spelling.py)
+    alias_added: dict = field(default_factory=dict)   # alias -> date it was learned (2026-10-14; before: the word's)
 
 
 def _today() -> str:
@@ -97,7 +99,7 @@ class Hotwords:
                 pct = d["pct"] if "pct" in d else _from_weight(word, float(d.get("weight", 0)), source)
                 # entries from before dates were kept (2026-10-11) were all added that day
                 self.items.append(Hotword(word, int(pct), source, d.get("added") or "2026-10-11",
-                                          list(d.get("aliases", []))))
+                                          list(d.get("aliases", [])), dict(d.get("alias_added", {}))))
         except (OSError, ValueError, TypeError, KeyError):
             pass
 
@@ -189,12 +191,14 @@ class Hotwords:
             self.items.append(h)
         if all(letters(a) != letters(old) for a in h.aliases):
             h.aliases.append(old)
+            h.alias_added[old] = _today()
             log.info("alias %s of %s learned", old, new)
 
     def remove_alias(self, word: str, alias: str):
         h = self.find(word)
         if h is not None and alias in h.aliases:
             h.aliases.remove(alias)
+            h.alias_added.pop(alias, None)
             if h.pct == self.base(word) and h.source == PICKED and not h.aliases:
                 self.items.remove(h)
             self.save()
@@ -202,19 +206,26 @@ class Hotwords:
     def aliases(self) -> list[tuple[str, str]]:
         return [(a, h.word) for h in self.items for a in h.aliases]
 
-    def adjust(self, word: str, steps: int):
-        """The −/+ buttons on the 詞庫 tab: steps of 10%, within 0% (100% for English) .. 200%. A word set to
-        100% stays listed (it does nothing) so the next click can go on."""
+    def alias_date(self, word: str, alias: str) -> str:
         h = self.find(word)
-        if h is not None:
-            h.pct = max(floor(word), min(TOP, h.pct + steps * BUTTON_STEP))
-            self.save()
+        return (h.alias_added.get(alias) or h.added) if h is not None else ""
+
+    def listed(self) -> list[Hotword]:
+        """The words the 詞庫 list shows: those whose 優先度 differs from where they would be unlisted (one kept only
+        for its aliases is not shown)."""
+        return [h for h in self.items if h.pct != self.base(h.word)]
 
     def remove(self, word: str):
+        """✕ on the 詞庫 tab: the word goes back to where it would be unlisted (100%, or its term pack's); its
+        aliases stay, removed only under 英文強制替換 (the user's choice, 2026-10-14)."""
         h = self.find(word)
-        if h is not None:
+        if h is None:
+            return
+        if h.aliases:
+            h.pct, h.source = self.base(word), PICKED
+        else:
             self.items.remove(h)
-            self.save()
+        self.save()
 
     def bias(self) -> list[tuple[str, float]]:
         """(word, score) pairs for X-ASR: the list, then the term packs' words not in it; words at 100% are left
