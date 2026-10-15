@@ -865,14 +865,9 @@ class SettingsDialog(QDialog):
         self._today_line = _label("", "heroLine", wrap=True)
         left.addWidget(self._today_line)
         left.addStretch(1)
-        keys = QHBoxLayout()
-        keys.setSpacing(6)
-        self._hint = _label("", "heroLine")
-        keys.addWidget(_label("按住", "heroLine"))
-        keys.addWidget(_label("滑鼠中鍵", "keycap"))
-        keys.addWidget(self._hint)
-        keys.addStretch(1)
-        left.addLayout(keys)
+        self._how = QVBoxLayout()           # how to record, from the custom operations (refilled by _refresh_how)
+        self._how.setSpacing(6)
+        left.addLayout(self._how)
         hh.addLayout(left, 5)
         self.ribbon = VoiceRibbon()
         hh.addWidget(self.ribbon, 4)
@@ -968,7 +963,6 @@ class SettingsDialog(QDialog):
             today_words = last14[-1]
             self._today_line.setText(f"今天說了 {today_words:,} 字。" if today_words else
                                      "今天還沒開口。想到什麼，直接說出來就好。")
-            self._hint.setText("說話，放開就打好字")
             count = getattr(self, "_count_next", True)
             self._count_next = False
 
@@ -1003,9 +997,54 @@ class SettingsDialog(QDialog):
             n.setText(f"最長 {st['longest_streak']} 天 · 共用了 {st['active_days']} 天")
             self.week_dots.set_active([bool(x) for x in last14[-7:]])
         on = self.cfg.ai_enabled and self._llm_settings().ready()
+        self._refresh_how()
         self._ai_banner.setVisible(not on)
         self._ai_banner_text.setText("開啟 AI 潤稿：自動去掉贅字、修正改口，整理成好讀的文字。")
         self._fill_timeline(self._latest(6))
+
+    def _refresh_how(self):
+        """The home card says how to record with the keys the user has set (自訂操作): one line per way."""
+        while self._how.count():
+            item = self._how.takeAt(0)
+            lay, w = item.layout(), item.widget()
+            if w is not None:
+                w.setParent(None)
+                w.deleteLater()
+            elif lay is not None:
+                while lay.count():
+                    sub = lay.takeAt(0).widget()
+                    if sub is not None:
+                        sub.setParent(None)
+                        sub.deleteLater()
+        lines = []
+        for r in self.cfg.rules:
+            if not r.enabled or r.source == rules.SPEECH or r.record_index() is None or r.instructs()                     or rules.problems(r, self.cfg.rules):
+                continue
+            name = MOUSE_TRIGGERS.get(r.key) or KEY_TRIGGERS.get(r.key, (r.key,))[0]
+            if r.source == rules.MOUSE and not name.endswith("鍵"):
+                name = "滑鼠" + name
+            if r.gesture == rules.HOLD:
+                line = ("按住", name, "說話，放開就打好字")
+            elif r.gesture == rules.TAP:
+                line = ("按一下", name, "開始說話，再按一下結束")
+            else:
+                line = ("連按兩下", name, "開始說話，再按一下結束")
+            if line not in lines:
+                lines.append(line)
+        if not lines:
+            row = QHBoxLayout()
+            row.addWidget(_label("還沒有錄音的按鍵：到「自訂操作」新增一個。", "heroLine"))
+            row.addStretch(1)
+            self._how.addLayout(row)
+            return
+        for before, key, after in lines[:2]:
+            row = QHBoxLayout()
+            row.setSpacing(6)
+            row.addWidget(_label(before, "heroLine"))
+            row.addWidget(_label(key, "keycap"))
+            row.addWidget(_label(after, "heroLine"))
+            row.addStretch(1)
+            self._how.addLayout(row)
 
     def _fill_timeline(self, entries):
         lay = self._recent
