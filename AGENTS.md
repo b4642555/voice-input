@@ -33,6 +33,150 @@ selection lost) stay. Sections below describe
 the branch; history of the removed features is in git (main, up to 71e5516). Brought back 2026-10-11 in a new form:
 the 選字 menu (old look, `picker.py`), hotwords (a weighted word list) and pick memory (`memory.py`); see below.
 
+## Typeless-style redesign (2026-10-13)
+
+The user asked for Typeless's experience without its cost. Their choices (asked 2026-10-13): free cloud LLM with a
+local option, pill + main window + 選字 menu restyled, a sync folder, context = app name + text near the caret.
+- **AI 潤稿** (`llm.py`, off by default, AI 潤稿 page): after formatting and smart picks, the text goes to any
+  OpenAI-compatible endpoint (presets: Groq, Gemini, OpenRouter, Ollama, custom; plain urllib). The prompt removes
+  fillers and false starts, keeps the last version of a self-correction, numbers spoken lists, splits topics into
+  paragraphs, and must never answer the text. Tone by app kind (chat / mail / terminal / code). Glossary = hotwords +
+  on-screen terms. Guards: `plausible()` rejects an answer much longer or much shorter than the input; any failure
+  pastes the formatted text and a tray notice says so once per run. Terminals get one line (a newline would be Enter);
+  inserting mid-line and inputs without final punctuation get none. ≤4 content characters are not sent.
+  The API key is saved DPAPI-encrypted in config.json (`config._protect`).
+- **Claude Code as the AI** (2026-10-14, the user: 一堆規則修不完，要更強的辦法；設定要足夠簡單，一般人能用；用我付費的額度):
+  provider `claude_cli` (the default): a long-running `claude -p --input-format stream-json` (no tools, no saved
+  session, an empty working folder, CLAUDE_* / ANTHROPIC_* variables removed so it uses the user's own login),
+  Haiku 5.5. Starting it takes ~6s, a request to the running one 1-4s (average 1.7s on 12 cases), so it is warmed
+  up at startup and replaced after 8 requests (its conversation grows). Needs `claude auth login` (the stored token
+  from April had expired: 401 OAuth access token is invalid). Gets the screen names (en 20, zh 40, the draft left
+  out) as the glossary: 林若晨，曾冠偉 -> 林又宸，曾冠維, 嚴肅紀東海總店 -> 鹽酥紀東海總店, clock code -> Claude Code;
+  a screen spelling survives the Traditional conversion (佳怜). Settings page: the service list starts with it, key /
+  url / model rows hidden, one line says whether Claude Code was found. The rule-based fixes still run first and are
+  the fallback when it fails or times out (15s).
+- **Sign-in with Google, no CLI** (2026-10-14, the user: most people have only Chrome; one key / one login): a real
+  "Sign in with Google" would need our own Google Cloud OAuth app (the quota and cost would be ours, and Google's
+  verification past 100 users), and Gemini CLI's built-in login must not be borrowed. So: the button 「登入 Google 並取得
+  金鑰」 opens https://aistudio.google.com/apikey in the default browser; the user signs in (Chrome, Google account),
+  presses 建立 API 金鑰 (in a NEW project: a billing project without credit gave 402 and no free tier) and copies; the
+  settings page watches the clipboard for a NEW copy that looks like the key (`llm.KEY_PATTERNS`: AIza… / gsk_… / sk-or-…,
+  5 minutes), fills it in, turns the AI on and runs the test. Gemini API is a direct HTTPS call (~0.3-1s, nothing to
+  start). First run without Claude Code installed: provider gemini. Untested with a real Gemini key (the user's has no
+  credit); the Codex route (`codex exec` / `codex login`) is not built.
+- **AI mode checks meaning and punctuation** (the user, 2026-10-14: in AI mode be smart, without it the program rules are
+  fine): the prompt asks the model to fix words the recognizer wrote as homophones when they make no sense in the
+  sentence (隻友 -> 只有, 隻要 -> 只要, 在見 -> 再見; names, nicknames and acronyms stay) and to make the punctuation
+  right (？ ！ ， 、 。, no confetti, no fragments); the chat tone only drops the final 。 (it used spaces instead of
+  punctuation). `Config.ai_scope`: "all" (default, every dictation of 3+ characters goes to the AI) or "saver" (the
+  rules of the least-quota entry below). The AI's end punctuation stays except 。，at the end when inserting mid-line;
+  `drop_casual_period` takes 。 off chat-length messages afterwards. Real Claude, 10 cases: 隻友 / 隻要 / 隻是 / 在見 / 在這裡
+  all right. The correction watch survives a field that cannot be read for up to 5s (注音 composing in Claude's own
+  box: its focused element was a Group for a moment).
+- **The AI reads the screen text** (the user, 2026-10-14: tell it this is what is on my screen, the topic is probably related):
+  `read_context` keeps the window's text (UIA + OCR, draft removed, blank/duplicate lines dropped, the newest 1500
+  characters) in `Context.screen` and `app._polish` sends it as 【畫面文字】 (only with the 參考畫面上下文 switch on);
+  prompt rule 11: use it to understand the original meaning, never copy or answer it. Memory only, emptied by
+  `_forget_screen`, never logged. Costs more input characters per request (the quota trade-off the user accepted).
+- **Frameless window and the Typeless home** (the user, 2026-10-14, a Typeless screenshot): the main window has no system
+  title bar (`FramelessWindowHint` passed to `QDialog.__init__`: `setWindowFlags` afterwards hung); own — □ ✕ buttons,
+  `nativeEvent` answers WM_NCHITTEST (edges resize, the top strip drags and double-click maximizes), DWM rounded
+  corners / shadow on Windows 11. 首頁: big headline, 洞察 cards (words, time saved, speed, total spoken time), active /
+  current / longest streak days and a 26-week heat map (`HeatMap`, `History.per_day`).
+- **Laughter, experiment** (`laugh.py`, the user's request 2026-10-14): setting 聽到笑聲時自動加字 (off) loads SenseVoice
+  (+150MB, only while on) and asks `Recognizer.sound_event` about the whole clip and its last 1.5s; on
+  `<|Laughter|>` the chosen text (哈哈 / XD / 😂) is typed alone or after the sentence. TTS cannot laugh, so only the
+  plumbing is tested (fake recognizer, SenseVoice answers <|Speech|> on real speech); accuracy on real laughter is unknown.
+- **Least quota** (the user, 2026-10-14: 越省越好，不想浪費額度; 要自動設定好，也要有關掉 AI 額度的選項):
+  `worth_polishing` sends only a dictation of 14+ content characters, or 5+ with a filler / self-correction / list
+  (嗯、那個、不對、第一…); short clean ones are left to the rules. The rules sit in the Claude Code process as its fixed
+  system prompt (one process per model + system text), so a request is the dictation, the tone line and the glossary
+  (~100-150 characters, was ~900); the same dictation with the same context is answered from a cache (32). On 8
+  inputs: 4 requests. First run: AI turns on by itself when Claude Code is found (`Config.load`); off switches: the
+  AI page and the tray menu 「AI 潤稿（會用掉 AI 額度）」; the AI page shows today's count (`History.ai_today`). With
+  the AI on, the 開會 -> 凱慧 "screen first" rule is left to the model (`fix(common_wins=False)`: the rule had
+  turned 在輕井澤鍋物開會 into 輕井澤鍋物凱慧).
+- **AI 指令** (`rules.INSTRUCT`, a command that records like 錄音): what is said is an instruction; on a selection the
+  LLM rewrites it, without one it writes the text and it is pasted. Not bound by default; the AI page adds "hold the
+  upper side button".
+- **History** (`history.py`): every dictation, history-<COMPUTERNAME>.jsonl in the shared folder; 首頁 shows words,
+  time saved (typing at 40 字/min vs the recording length), speed. The old 辨識紀錄 log is 除錯紀錄 on the history page.
+- **Sync** (`sync.py`): `sync_dir` holds hotword-list.json, smart-picks.json and the history files; config stays per
+  computer. Changing it copies missing files over; mtimes are checked at each key-down and the files reloaded.
+- **UI**: `settings.py` is a sidebar window (首頁 / 歷史紀錄 / 字典 / AI 潤稿 / 自訂操作 / 設定), light theme, one
+  style sheet, `Switch` widgets. The pill (`overlay.py`) has a symmetric smoothed waveform and a POLISHING state.
+- **Screen terms without AI** (`screen_terms.py`, 2026-10-13, the user's request; always on): at key-down the whole
+  foreground window's element names are read (`selection.window_text`, one cached UIA FindAll, 1.2s budget, ~0.1s in
+  practice) besides the focused control. Chinese terms: runs of characters that make no dictionary word in any split
+  (names: 張雨薇), rare dictionary words, and two two-character words that are not a word together (薔薇計畫), each
+  seen twice or in the title; split by fewest pieces then frequency (left-longest mis-split 先打開設定頁). They bias
+  X-ASR at 3.0 and, after formatting, a span that sounds the same (all pypinyin heteronyms: 柏 is bai and bo) and
+  is not a common word is replaced by the screen's spelling (張玉薇 / 陳博瀚 -> 張雨薇 / 陳柏翰; 城市 never becomes
+  程式). The user's condition: screen text is never stored or logged; only the terms leave read_context and they
+  are emptied when the dictation is done (`_forget_screen`); the log has counts only. TTS check: 3/3 fixed, no change
+  without the screen text. Tests: `dev/test_screen_terms.py`; headless step `screen:TEXT`.
+  OCR (`ocr.py`, same day): LINE draws its messages itself (UIA FindAll on its window: 156 elements, no names),
+  so when the readable text is under 300 characters the foreground window is drawn into memory (PrintWindow) and read
+  by Windows.Media.Ocr (zh-Hant-TW is installed on the user's PC; winrt-* packages, installed with uv
+  `--system-certs`). ~0.4s, +~25MB once loaded, imported only on first need (the user wants it light). A name seen
+  once on screen (平偉本色 under one Reel) is not a term, but `fix_candidates` (3-4 characters, not a dictionary
+  word, no function character) feed `fix` only: the TTS dictation 評委本色 became 平偉本色 with the OCR'd text.
+  Recent pieces (`screen_terms.recent`, same day): 平丁天花板 under one LINE message biased recognition only while
+  the input box repeated it; the last 15 name-like pieces on screen (between function characters, not a dictionary
+  word, newest first) now bias too, and two-character pieces (包樑) join the fix candidates (包糧 -> 包樑).
+  Pieces split only at grammar characters, not numerals (文心南二店 was cut at 二). A span of 4+ characters may differ
+  from the screen in one character by zh/z, ch/c, sh/s or the nasal ending (文西南二殿 -> 文心南二店); shorter ones
+  must sound the same. Checked on the 51 logged dictations (7 changes, all wanted) and 118 unrelated doc sentences
+  (no false change). A dropped character (鍋物 heard as 鍋) is not recovered.
+  OCR runs a line together (輕井澤鍋物文心南二店向心里): pieces over 6 characters give 4-6 character windows as fix
+  candidates. A span of 5+ characters may have one character of a different sound (清景澤波物 -> 輕井澤鍋物), never
+  in a span holding a grammar character. `fix` collects every match, then applies the longest / closest without
+  overlap, and never touches text already written as on screen. ~3ms per dictation.
+  The user's rule (2 個以上的跡象, after 頭尾對上): against names only (terms + recent, never the loose OCR windows: they
+  turned 單一中文字 into 單澤鍋物文字), a span within one character of a name's length that shares all its sounds but one
+  (exact toneless, in order; the fuzzy readings made 靜 / 機 / 今 alike) and, if its length differs, the name's first
+  and last sounds, becomes the name: 清引影澤 / 清引澤 -> 輕井澤. Last in priority; not for spans with a grammar
+  character or made of common words (請你選擇, 情況選擇). Rare dictionary words of 3+ characters (frequency < 200,
+  輕井澤 is 45) count as names, also inside a longer phrase.
+  Hardening for the user's goal 「超級準，奇葩情境都過關，英文也要」 (same day), with `dev/test_screen_scenarios.py`
+  (screen, heard, expected / must-not-change, ~90 cases) as the spec:
+  - Screen text is normalized (`normalize_screen`): a simplified line becomes Traditional, a Traditional line only
+    臺 -> 台 (s2tw on it turned 向心里 into 向心裡, 包樑 into 包梁).
+  - Given names: a 3-character name with a common surname also matches its last two characters (雨威 -> 雨薇).
+  - An ambiguous span (張宇薇: 張雨薇 or 章宇威) blocks every fix inside it. A 2-3 character span that cuts a common
+    word with its neighbour is not touched (下雨威力 keeps 雨威). Pieces split at grammar characters standing alone
+    only (會 inside 會議室 made 議室 a name). The loose rule skips spans holding a common word or a given name
+    (情境裡, 問雨薇), and needs the shared sounds in place when the length is the same (上面爆 vs 上爆紅).
+  - English (`screen_en.py`): names are CamelCase / digits / acronyms / capitalized non-words and whole runs of 2-3
+    capitalized words; a run of heard words becomes a name when the letters match (voice input, chat GPT, GPT 4o,
+    you tube) or the sounds do (Soundex or the same first two letters per part, one part spelled the same: cloud /
+    clock code -> Claude Code, get hub -> GitHub; several plain words into one long name: cover nets ->
+    Kubernetes; one long non-word: covernet -> Kubernetes). Never: an ordinary English word by sound (Windows'
+    own spell checker, `spell.py`, en-US: instead / installed had become Instagram), plain words inside an English
+    sentence (We use voice input every day, I phone you later), what OCR misread on screen (lnstagram).
+  - Checked: real X-ASR on TTS audio with a chat + map + English screen, 16/16 right where the screen matters;
+    2,690 doc / code / log sentences against all scenario screens: no false change. ~9ms per dictation.
+  - Chinese transliterations of English names on screen (`screen_en.fix_transliterated`): a span made only of
+    transliteration characters, holding no common word, whose pinyin consonants (K L T P S F M N classes) equal
+    the name's (one off for 5+): 克勞德 -> Claude, 吉特哈布 -> GitHub, 庫伯內提斯 -> Kubernetes, 因斯塔格拉姆 ->
+    Instagram. Names of one word, 4+ letters, not ordinary English, 3+ consonants. 吉隆坡 / 克服 / 可樂的 / 雷克雅維克
+    stay. English names are collected bottom up (a long window filled the list before reaching the newest lines).
+  - From 36 TTS sentences through real X-ASR: a character different in sound may not be at a span's edge
+    (文心南二店好 matched the window 文心南二店向: 好吃 became 向吃), and a name already written as on screen blocks only
+    matches that cut into it, not ones holding all of it (輕井澤國物 -> 輕井澤鍋物). After that every screen-related
+    sentence was right; the rest were recognizer errors with no screen evidence (程式碼 heard as 城市碼, Claude as
+    Club, code as cold, 下雨 as 夏雨, a dropped issue), which no screen rule can or should touch.
+  - The user's rule (2026-10-14, 「畫面上有的字要優先套用」, 一瓶 typed where the screen had 一萍): a heard common word
+    under frequency 100 (一瓶 is 61) gives way to a name on screen that sounds exactly the same; everyday words at
+    100 or more (城市 1902, 程式 1551, 陳列 217) never do, and the looser rules still skip common words.
+    Only with support: another screen name of 2+ characters in the same dictation (一瓶的平丁天花板 -> 一萍;
+    我買了一瓶水 stays). English the same way (`screen_en._supported_hits`): an ordinary word not in the everyday
+    list that starts like a one-word name, is at least half its letters and within two letters of its length becomes
+    it when a different screen name is in the dictation (Anthropic 的 club 很強 -> Claude; Club 很聰明, cloud 服務,
+    OpenAI-compatible chat, installed ... Instagram stay). 50 TTS sentences: every screen-related word right.
+- `dev/headless.py` patches History too; AI follows the real config unless `set:ai_enabled=0`. A fake
+  OpenAI-compatible server was used to test (no key was available): real model quality is untested.
+
 ## Platform
 
 Windows only (decided 2026-10-03, after the macOS paths failed on the user's Mac: no hotkey worked). The partial
@@ -73,6 +217,48 @@ CJK/ASCII spacing → trailing punctuation.
   `selection.read_caret` reads that at key-down with the selection probe: UIA in normal apps, the input box row the
   Windows Terminal cursor is on in terminals (same behaviour everywhere, the user's requirement). Unknown → kept.
 
+- Chat-length messages (2026-10-14, the user's rule, setting 聊天短句不加句號, on by default): with Chinese, fewer
+  than five commas / line breaks; pure English, two commas at most: the final 。 / . is dropped after formatting,
+  smart picks and AI 潤稿 (`textfmt.drop_casual_period`); ？！… keep their tone, inner full stops stay.
+- Manual correction learning, Typeless-style (2026-10-14): a learned correction shows a notice 「林又宸」 已加入關鍵字
+  (`overlay.Toast`). In LINE nothing was ever learned (64 captures): every read was dropped while 注音 was composing
+  (caret and text disagree: now the text is kept, caret unknown), a field emptied mid-edit stopped the watch (now
+  it keeps watching), and the send came before two settled reads (now the latest read begun 0.1s after the last
+  key, under 1s old, stands in). Edits a character or two apart in one Chinese run are one word (醉夜狂喜 ->
+  罪夜狂襲). One corrected character of a name learns the whole name (`screen_terms.name_around`: single
+  characters that make no word, up to a stop character, from a surname: 林又成 -> 林又宸, the user had retyped
+  all three). Why a watch stopped / a field was unreadable is logged, never the text.
+- Screen reading, from the user's LINE roster (2026-10-14): the focused field under 1000 characters is the draft
+  being written and is not screen evidence; its lines are removed from the OCR text too, also when OCR misread them
+  (宋家雅婷 read as 餐家雅婷 protected / "fixed" 宋家). OCR reads the window enlarged 1.5x (GDI StretchBlt, HALFTONE;
+  17 names: 12 read as is, 15 enlarged). GDI calls declare 64-bit handle types (ctypes' int cut them: crashes).
+  Simplified vs Traditional is decided for the whole screen (佳怜 alone became 佳憐). Up to 30 recent names; pieces
+  with a grammar character are never names (明天的); rare dictionary names under frequency 80 (會議室 is 102).
+  The loose rule needs the first and last sounds to match at any length (明天見 is not 明天的). English support
+  rule only for words of 3-5 letters. The 除錯紀錄 page shows what each dictation took from the screen (row 畫面),
+  in memory only: the log file never has it.
+- Screen first for names (2026-10-14, the user's example 開會 / 凱慧): any common word, however frequent (開會 is 495),
+  gives way to a screen name that sounds exactly the same when another screen name is in the same dictation
+  (佳怜開會阿嵐 -> 佳怜凱慧阿嵐); alone (我們明天開會) it stays, and dictionary words on screen never win (城市 stays).
+  A time or number on screen is no supporting name (下午三點 made 跟客戶開會 into 凱慧).
+- OCR is not stable: one read of LINE's chat list missed the bold 曾冠維 that the next read found. Two reads (1x and
+  2x, joined; ~1.2s in the background). The grammar characters that split pieces are only those (almost) never in a
+  name (又 cut 林又宸). The draft is matched by overall similarity (陸寶瓦 for 陸寶寶 kept the draft's 曾冠偉).
+- Near sounds (the user's rule): tones never count (偉 / 位 / 微 -> 維), and a three-character name on screen may also
+  have one character only close in sound, also at an edge (鄭冠維 -> 曾冠維, 林又成 -> 林又宸); loose OCR windows
+  still need four characters for that.
+- The screen wins over smart picks: the screen fix runs again after `memory.apply` (成 -> 宸, a smart pick learned for
+  林又宸 by the earlier single-character learning, turned 吳宇澄 from the screen into 吳宇宸). A correction that
+  learns a name no longer also records the single character as a smart pick. ㄥ/ㄣ (eng/en, ing/in) count as
+  close sounds (`_fuzzy`).
+- Smart picks need real context (the user: 「跟為啥要改成宸，這邏輯不對」): a single character is changed only when the
+  character right before it agrees (or the text starts there, as when learned) and two positions agree in all, or
+  as many as the example was learned with (在 said alone). One shared neighbour on the right (跟) was enough before.
+- Correction learning, 2026-10-14 (the user: 想記住包你發娛樂城): the whole chat box (under 1000 characters) is compared,
+  not only the last dictation (an earlier one still in the box stopped the watch as "text around changed"); a
+  corrected word is learned with the phrase it sits in (貓米 -> 包你 learns 包你發娛樂城: Chinese characters around it
+  up to punctuation, a stop character or 8 characters). Screen fixes may overlap a name already on screen when they
+  keep its characters (嚴肅紀東海總店 -> 鹽酥紀東海總店 next to 東海總店).
 - OpenCC `s2tw` only (glyph conversion). `s2twp` was dropped because it rewrites vocabulary (程序 → 程式).
 - After s2tw, 臺 is mapped back to 台 (s2tw turns 台北 into 臺北; the user wants 台), and 熒幕 / 熒光 to 螢幕 / 螢光
   (X-ASR writes 荧幕, which s2tw turns into 熒幕; 2026-10-11).
@@ -102,7 +288,7 @@ CJK/ASCII spacing → trailing punctuation.
 Four tabs, sized for the log: 一般 (microphone, "mute the speakers while recording", punctuation names, "selected 。 →
 ，", "節日的節" (described characters), autostart, a button that opens smart-picks.json; the menu timeout was
 removed 2026-10-11), 辨識紀錄 (the transcript log), 自訂操作 (custom operations, below) and 熱詞 (the hotword list:
-date added, weight / cap and its percentage; remove only; the source is not shown since 2026-10-11; a 排序
+date added, weight / cap and its percentage; add/edit/remove since 2026-10-12; the source is not shown since 2026-10-11; a 排序
 drop-down: weight percentage (the caps differ), name A→Z / Z→A by pinyin, date; remembered). Mute (2026-10-06, `mute.py`): Core Audio via
 comtypes; muted when the recording indicator shows, unmuted once the text is pasted or the press ends in nothing; a
 mute the user set is left alone. Selection edits and on-screen terms are always on.
@@ -265,3 +451,9 @@ removed the same day they were built: the user corrects by selecting with the mo
   user's real data files while their VoiceInput is running.
   `dev/e2e.py` types into a real Notepad / Windows Terminal window: only when the user is away from the machine
   (Win11 Notepad opens new windows as tabs, and a run once typed into the user's own Notepad document).
+
+## Manual correction learning (2026-10-12)
+
+The mouse-Alt repair branch adds scoped correction learning; see `docs/manual-correction-learning.md` for the user-visible boundaries. `correction.py` owns an independent monitor and optional UIA worker; do not reuse Session.dirty as its scope. A confirmed insertion is tracked by field identity and exact outer text. Only a cached small replacement followed by Enter/Ctrl+Enter and the same field clearing may be learned. Unsupported fields and stale snapshots skip learning without blocking paste. Terminal history must never be used as a correction source.
+
+Tests must inject synthetic snapshot readers or a no-op CorrectionWatcher; the headless harness must never inspect the user's current input fields. Stores stay in temporary files. Learning UI updates are marshalled to the Qt main thread.

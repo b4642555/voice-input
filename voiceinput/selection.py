@@ -22,6 +22,8 @@ import time
 from collections import Counter
 from dataclasses import dataclass, field
 
+from . import screen_terms
+
 log = logging.getLogger("voiceinput")
 
 _TERMINALS = {"windowsterminal.exe", "conhost.exe", "openconsole.exe", "wezterm-gui.exe", "alacritty.exe",
@@ -486,17 +488,109 @@ class Context:
     selection: Selection | None = None
     terms: list[str] = field(default_factory=list)
     caret: tuple[str, str] | None = None   # without a selection: the line's text before and after the caret
+    zh_terms: list[str] = field(default_factory=list)   # Chinese names / topic words on screen (screen_terms)
+    zh_fix: list[str] = field(default_factory=list)     # every name-like span on screen, for same-sound fixes only
+    en_names: list[str] = field(default_factory=list)   # English names on screen (screen_en), for fixes
+    app: str = ""        # foreground process name (AI 潤稿 picks its tone by it)
+    title: str = ""      # foreground window title
+    screen: str = ""     # the window's text for the AI (memory only; emptied by _forget_screen)
 
 
-def read_context() -> Context:
-    """The focused app's selection (see read_selection), else the text around its caret, and the English terms
-    visible in it."""
-    ctx = Context()
+def read_context(ctx: Context | None = None) -> Context:
+    """The focused app's selection (see read_selection), else the text around its caret, and the terms on screen:
+    the focused control's visible text and the whole foreground window (UI Automation), or OCR when the window
+    shows UI Automation (almost) nothing, as LINE's messages do. ctx is filled in place, selection first, so a
+    caller that stops waiting still gets what was read."""
+    ctx = ctx if ctx is not None else Context()
+    ctx.app, ctx.title = foreground_app()
     ctx.selection = read_selection()
     if ctx.selection is None:
         ctx.caret = read_caret()
-    ctx.terms = terms_in(visible_text())
+    window = _with_timeout(window_text, _WINDOW_BUDGET)    # the whole window: chat history, page, mail
+    focus = visible_text()
+    # a small focused field is the message being written: what the user dictated there, maybe misheard, is not
+    # screen evidence (宋家 in LINE's input box protected itself from 宋嘉 on screen, 2026-10-14)
+    draft = focus if len(focus) < _DRAFT_MAX else ""
+    text = ("" if draft else focus) + "\n" + window
+    if len(text.strip()) < _OCR_BELOW:
+        from . import ocr          # imported on first need: the OCR runtime costs ~25MB once loaded
+        text += "\n" + ocr.window_text()
+    text = screen_terms.without_draft(text, draft)
+    text = screen_terms.normalize_screen(text)   # a simplified page, 臺 -> 台
+    ctx.screen = _for_ai(text)     # memory only, handed to the AI as the topic (the user's request); cleared after use
+    ctx.terms = terms_in(text)
+    ctx.en_names = screen_terms.english_names(text)
+    ctx.zh_fix = screen_terms.fix_candidates(text)
+    strong = screen_terms.terms(text, ctx.title)
+    ctx.zh_terms = strong + [w for w in screen_terms.recent(text) if w not in strong]
+    del text, window          # never kept: only the terms leave this function (the user's condition)
     return ctx
+
+
+_SCREEN_AI_MAX = 1500     # characters of screen text sent to the AI: the tail (newest lines), blank lines dropped
+
+
+def _for_ai(text: str) -> str:
+    lines = [ln.strip() for ln in text.splitlines()]
+    out, seen = [], set()
+    for ln in lines:
+        if len(ln) < 2 or ln in seen:
+            continue
+        seen.add(ln)
+        out.append(ln)
+    return "\n".join(out)[-_SCREEN_AI_MAX:]
+
+
+_OCR_BELOW = 300         # characters of readable text under which the window is read by OCR
+_DRAFT_MAX = 1000         # a focused field shorter than this is an input box (its text is the draft)
+_WINDOW_BUDGET = 1.2      # seconds; a window that takes longer to read is skipped (the dictation must not wait)
+_WINDOW_ELEMENTS = 4000
+
+
+def _with_timeout(fn, seconds: float) -> str:
+    box = [""]
+
+    def run():
+        try:
+            box[0] = fn()
+        except Exception:
+            log.exception("reading the window failed")
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    t.join(seconds)
+    return box[0] if not t.is_alive() else ""
+
+
+def window_text() -> str:
+    """The names of the foreground window's elements (UI Automation, one cached FindAll): the text a user sees in a
+    chat history, a web page or a mail. Password fields expose no value, only their label."""
+    uia, U = _uia()
+    hwnd = ctypes.windll.user32.GetForegroundWindow()
+    if not hwnd:
+        return ""
+    root = uia.ElementFromHandle(hwnd)
+    req = uia.CreateCacheRequest()
+    req.AddProperty(U.UIA_NamePropertyId)
+    found = root.FindAllBuildCache(U.TreeScope_Descendants, uia.CreateTrueCondition(), req)
+    names = []
+    for i in range(min(found.Length, _WINDOW_ELEMENTS)):
+        name = found.GetElement(i).CachedName
+        if name:
+            names.append(name)
+    return "\n".join(names)
+
+
+def foreground_app() -> tuple[str, str]:
+    """The foreground window's process name and title."""
+    try:
+        user32 = ctypes.windll.user32
+        hwnd = user32.GetForegroundWindow()
+        buf = ctypes.create_unicode_buffer(256)
+        user32.GetWindowTextW(hwnd, buf, 256)
+        return _proc_name(_window_pid(hwnd)), buf.value
+    except Exception:
+        log.exception("reading the foreground window failed")
+        return "", ""
 
 
 def read_caret() -> tuple[str, str] | None:
@@ -559,8 +653,157 @@ class ContextProbe:
         self._thread.start()
 
     def _run(self):
-        self._result = read_context()
+        read_context(self._result)
 
     def result(self, timeout: float = 2.0) -> Context:
         self._thread.join(timeout)
         return self._result
+
+
+def initialize_input_snapshot_reader():
+    """Warm this worker's COM/type library without inspecting any field."""
+    _uia()
+
+
+def no_input_focused(timeout: float = 0.6) -> bool:
+    """True only when the focus is surely not a place text can go (2026-10-14): a desktop, a file list, a button, a
+    web page without a field. A terminal, an editable field, a control UI Automation tells nothing about (Electron,
+    a game) or a slow answer all count as "maybe": the dictation is pasted as before."""
+    box = [False]
+
+    def run():
+        try:
+            hwnd = ctypes.windll.user32.GetForegroundWindow()
+            if not hwnd:
+                return
+            uia, U = _uia()
+            el = uia.GetFocusedElement()
+            if _proc_name(el.CurrentProcessId) in _TERMINALS or el.CurrentClassName == "TermControl"                     or el.CurrentIsPassword:
+                return
+            kind = el.CurrentControlType
+
+            def pattern(pid, interface):
+                try:
+                    value = el.GetCurrentPattern(pid)
+                    return value.QueryInterface(interface) if value else None
+                except Exception:
+                    return None
+
+            value = pattern(U.UIA_ValuePatternId, U.IUIAutomationValuePattern)
+            text = pattern(U.UIA_TextPatternId, U.IUIAutomationTextPattern)
+            read_only = []
+            if value is not None:
+                read_only.append(bool(value.CurrentIsReadOnly))
+            if text is not None:
+                flag = text.DocumentRange.GetAttributeValue(U.UIA_IsReadOnlyAttributeId)
+                read_only.append(bool(flag) if isinstance(flag, (bool, int)) else None)
+            verdict = "maybe"
+            if kind in (U.UIA_EditControlTypeId, U.UIA_ComboBoxControlTypeId):
+                pass                        # a field, writable or not known to be read-only
+            elif read_only and (False in read_only or None in read_only):
+                pass                        # something writable, or a flag it did not answer
+            elif kind in _NOT_INPUT_TYPES(U):
+                verdict = "none"
+            log.info("focus check: %s (control type %s, class %s, read-only %s)", verdict, kind,
+                     el.CurrentClassName, read_only)
+            box[0] = verdict == "none"
+        except Exception:
+            log.debug("no_input_focused failed", exc_info=True)
+
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    t.join(timeout)
+    return box[0] and not t.is_alive()
+
+
+def _NOT_INPUT_TYPES(U):
+    return {U.UIA_DocumentControlTypeId, U.UIA_ListControlTypeId, U.UIA_ListItemControlTypeId,
+            U.UIA_ButtonControlTypeId, U.UIA_CheckBoxControlTypeId, U.UIA_HyperlinkControlTypeId,
+            U.UIA_ImageControlTypeId, U.UIA_TextControlTypeId, U.UIA_TabItemControlTypeId,
+            U.UIA_TreeControlTypeId, U.UIA_TreeItemControlTypeId, U.UIA_MenuItemControlTypeId,
+            U.UIA_DataItemControlTypeId, U.UIA_TitleBarControlTypeId, U.UIA_ToolBarControlTypeId}
+
+
+snapshot_problem = ""      # why the last read_input_snapshot returned None (logged by correction.py, never the text)
+
+
+def _no_snapshot(reason: str):
+    global snapshot_problem
+    snapshot_problem = reason
+    return None
+
+
+def read_input_snapshot():
+    """The focused editable control, for scoped correction learning, or None.
+
+    Called only by CorrectionWatcher's daemon worker. TextPattern supplies selection
+    offsets; ValuePattern can supply a value whose insertion must later be unique.
+    Terminal screen buffers, passwords and unknown/read-only controls are excluded.
+    """
+    from .correction import InputSnapshot
+
+    maximum = 20000
+    try:
+        hwnd = ctypes.windll.user32.GetForegroundWindow()
+        if not hwnd:
+            return _no_snapshot("no foreground window")
+        uia, U = _uia()
+        el = uia.GetFocusedElement()
+        pid, identity = el.CurrentProcessId, tuple(el.GetRuntimeId())
+        if not pid or not identity or el.CurrentIsPassword or not el.CurrentIsEnabled:
+            return _no_snapshot("focused control has no id, is a password or disabled")
+        if _proc_name(pid) in _TERMINALS or el.CurrentClassName == "TermControl":
+            return _no_snapshot("terminal")
+        if el.CurrentControlType not in (U.UIA_EditControlTypeId, U.UIA_DocumentControlTypeId):
+            return _no_snapshot(f"focus is not a text field (control type {el.CurrentControlType})")
+
+        def pattern(kind, interface):
+            try:
+                value = el.GetCurrentPattern(kind)
+                return value.QueryInterface(interface) if value else None
+            except Exception:
+                return None
+
+        value = pattern(U.UIA_ValuePatternId, U.IUIAutomationValuePattern)
+        text_pattern = pattern(U.UIA_TextPatternId, U.IUIAutomationTextPattern)
+        value_readonly = value.CurrentIsReadOnly if value is not None else None
+        document = text_pattern.DocumentRange if text_pattern is not None else None
+        text_readonly = document.GetAttributeValue(U.UIA_IsReadOnlyAttributeId) if document is not None else None
+
+        def flag(raw):
+            return bool(raw) if isinstance(raw, (bool, int)) else None
+
+        writable_flags = flag(value_readonly), flag(text_readonly)
+        if True in writable_flags or False not in writable_flags:
+            return _no_snapshot(f"field not known to be writable {writable_flags}")
+        start = end = None
+        if document is not None:
+            text = document.GetText(maximum + 1)
+            if len(text) > maximum:
+                return _no_snapshot("field too long")
+            ranges = text_pattern.GetSelection()
+            if ranges.Length == 1:
+                selected = ranges.GetElement(0)
+                prefix = document.Clone()
+                prefix.MoveEndpointByRange(_END, selected, _START)
+                left, span = prefix.GetText(maximum + 1), selected.GetText(maximum + 1)
+                start, end = len(left), len(left) + len(span)
+                if end > len(text) or text[:start] != left or text[start:end] != span:
+                    # an input method composing: the caret is unknown, the text is still what the field holds
+                    # (LINE with 注音: every read was thrown away, nothing was ever learned, 2026-10-14)
+                    start = end = None
+        elif value is not None:
+            text = value.CurrentValue
+            if not isinstance(text, str) or len(text) > maximum:
+                return _no_snapshot("value unreadable or too long")
+        else:
+            return _no_snapshot("no text or value pattern")
+        # Reject a focus/window change while the provider was responding.
+        current = uia.GetFocusedElement()
+        if ctypes.windll.user32.GetForegroundWindow() != hwnd or current.CurrentProcessId != pid \
+                or tuple(current.GetRuntimeId()) != identity:
+            return _no_snapshot("focus moved while reading")
+        return InputSnapshot(hwnd, pid, identity, text, start, end)
+    except Exception as e:
+        log.debug("editable input snapshot unavailable", exc_info=True)
+        return _no_snapshot(f"UI Automation error {type(e).__name__}")

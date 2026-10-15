@@ -4,7 +4,8 @@ key combinations (Ctrl+Shift+Enter) that a step presses."""
 MOUSE_TRIGGERS = {"mouse_middle": "中鍵", "mouse_x2": "側鍵（上）", "mouse_x1": "側鍵（下）"}
 
 # name -> (label, virtual-key code). Keys that are rarely typed, so taking them over costs little.
-KEY_TRIGGERS = {"caps_lock": ("CapsLock", 0x14), "alt_r": ("右 Alt", 0xA5), "ctrl_r": ("右 Ctrl", 0xA3),
+KEY_TRIGGERS = {"caps_lock": ("CapsLock", 0x14), "alt": ("Alt（左右皆可）", 0x12),
+                "alt_l": ("左 Alt", 0xA4), "alt_r": ("右 Alt", 0xA5), "ctrl_r": ("右 Ctrl", 0xA3),
                 "insert": ("Insert", 0x2D), "scroll_lock": ("ScrollLock", 0x91), "pause": ("Pause", 0x13)}
 KEY_TRIGGERS.update({f"f{i}": (f"F{i}", 0x6F + i) for i in range(1, 25)})
 

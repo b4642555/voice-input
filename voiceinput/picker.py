@@ -14,13 +14,15 @@ from PySide6.QtGui import QCursor, QGuiApplication
 from PySide6.QtWidgets import QLineEdit, QPushButton, QVBoxLayout, QWidget
 
 _STYLE = """
-QWidget#picker { background: #202024; border: 1px solid #3a3a40; border-radius: 8px; }
-QPushButton { color: #f2f2f2; background: transparent; border: none; border-radius: 5px;
-              padding: 4px 10px; text-align: left; font-size: 15px; }
-QPushButton:hover { background: #3a3a44; }
-QLineEdit { color: #f2f2f2; background: #2a2a30; border: 1px solid #3a3a40; border-radius: 5px;
-            padding: 3px 9px; font-size: 15px; }
-QLineEdit:focus { border-color: #6a6a78; }
+QWidget#picker { background: #1c1c21; border: 1px solid #34343c; border-radius: 12px; }
+QPushButton { color: #f2f2f5; background: transparent; border: none; border-radius: 7px;
+              padding: 6px 12px; text-align: left; font-size: 15px;
+              font-family: "Microsoft JhengHei UI", "Segoe UI"; }
+QPushButton:hover { background: #5b4bdb; color: white; }
+QLineEdit { color: #f2f2f5; background: #26262d; border: 1px solid #34343c; border-radius: 7px;
+            padding: 5px 10px; font-size: 14px; font-family: "Microsoft JhengHei UI", "Segoe UI";
+            selection-background-color: #5b4bdb; }
+QLineEdit:focus { border-color: #7b6cf0; }
 """
 _MAX_WIDTH = 360
 _MIN_WIDTH = 150
@@ -60,7 +62,7 @@ class Picker(QWidget):
         self.rows = QVBoxLayout()
         self.rows.setSpacing(0)
         inner = QVBoxLayout(self.frame)
-        inner.setContentsMargins(6, 6, 6, 6)
+        inner.setContentsMargins(7, 7, 7, 7)
         inner.setSpacing(2)
         inner.addWidget(self.input)
         inner.addLayout(self.rows)

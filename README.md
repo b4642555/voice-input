@@ -5,7 +5,15 @@ Single process: one tray icon, settings window, floating indicator. Speech recog
 
 ## Install / run
 
-Install with `install.bat`, run with `start.bat`.
+1. Get the code: `git clone https://github.com/b4642555/voice-input` (or press **Code → Download ZIP** on the GitHub page
+   and unzip it somewhere you will keep it).
+2. Double-click `install.bat` (a few minutes: it downloads Python and the speech model, about 300MB), then `start.bat`.
+3. The VoiceInput icon appears in the tray. Hold the **middle mouse button**, speak, release: the text is typed where
+   your cursor is.
+4. Optional, for cleaner text (no stray 嗯／呃, fixed homophones, lists): open the window → **AI 潤稿** → follow the
+   Claude Code line (install, 登入 Claude). It uses your own Claude subscription; no key to paste.
+
+Windows 10/11 only.
 
 The installer puts uv, Python and the venv inside this folder. Nothing is installed system-wide.
 If you move the folder, run the installer again (the venv records absolute paths).
@@ -33,10 +41,35 @@ Data from the old layout (`config.json`, `models/` inside the app folder) is mov
 - 自訂操作: choose a mouse button, keyboard key or spoken phrase, a gesture (tap / double tap / hold), a situation
   (any / right after dictating / text selected) and steps run in order: 錄音, 選字, delete the selection,
   delete what was just dictated, a key combination, text, a wait.
+- For a mouse button mapped to ordinary Alt in Logi Options+ or another remapper, choose the keyboard trigger
+  **Alt（左右皆可）**. It accepts either Alt key and mapped Alt presses. **右 Alt** remains right-side-only.
 - 熱詞: words with a weight that biases recognition: typed in the 選字 menu (highest weight) or picked in it
   (weight grows with each pick, drops when picked away). Listed with their weights (and % of the cap) on the 熱詞 tab.
   Steps after 錄音 run once the text is typed (e.g. 錄音 → Enter: speak and send).
 - Missing models are downloaded automatically on launch (progress shown in settings / tray tooltip).
+
+## AI 潤稿 (optional, free)
+
+The easiest way is **Claude Code with your own Claude subscription** (no API key, nothing to paste): install
+[Claude Code](https://claude.com/product/claude-code), then in the AI 潤稿 page press 「登入 Claude」 (it opens
+`claude auth login` and your browser) and 「重新檢查」. The page shows whether Claude Code is missing, installed
+but signed out, or ready, with a button for the next step. VoiceInput talks to your local `claude` only; it never
+sees your credentials, and every dictation costs a little of your own Claude quota (turn AI off in the tray menu
+or pick 「省額度」 to spend less). No Claude subscription? Paste a free API key instead (Groq or Google Gemini; or
+run Ollama locally, no key). Dictations are then cleaned up like Typeless: fillers and repeats removed, self-corrections resolved
+(「三點，不對，四點」→「四點」), spoken lists numbered, paragraphs split, tone matched to the app. If the AI is
+unreachable the plain transcript is pasted. **AI 指令**: bind it in 自訂操作 (or from the AI page), select text
+and say 「改得正式一點」/「翻成英文」, or say 「寫一封感謝信給王經理」 with nothing selected.
+
+History (searchable, copy again), the dictionary (字典) and stats are in the main window. Set a 同步資料夾
+(OneDrive / Google Drive / Dropbox) in 設定 to share the dictionary, smart picks and history between computers.
+
+## Names on screen (no AI needed)
+
+While you speak, VoiceInput reads the foreground window (a chat, a page, a mail) and picks out names and topic words
+(張雨薇, 薔薇計畫). Recognition leans toward them, and a same-sounding miss (張玉薇) is written the way the screen
+writes it. Common words are never changed. The screen text is not saved or logged; the words are forgotten after
+each dictation.
 
 ## Correcting
 
@@ -50,7 +83,7 @@ Select text with the mouse, then:
 
 ## Models
 
-Fixed [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) models, no LLM:
+Fixed [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) models (the optional AI 潤稿 LLM is a remote or Ollama endpoint):
 
 | Model | Size | Role |
 |---|---|---|

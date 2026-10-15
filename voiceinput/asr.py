@@ -1,5 +1,6 @@
 """Speech recognition via sherpa-onnx."""
 import os
+import logging
 import re
 import struct
 from pathlib import Path
@@ -13,6 +14,28 @@ SAMPLE_RATE = 16000
 _THREADS = max(1, min(4, (os.cpu_count() or 2) // 2))
 _PUNCT_SPACE = re.compile(r"([，。？！、；：])\s+")
 _TAGS = re.compile(r"<\|[^|]*\|>")
+log = logging.getLogger("voiceinput")
+_CHUNK_SAMPLES = SAMPLE_RATE * 30
+_CUT_WINDOW = SAMPLE_RATE * 5
+_ENERGY_FRAME = SAMPLE_RATE // 10
+
+
+def _audio_chunks(audio):
+    """X-ASR's position table supports ~40s. Keep every sample, using a quiet cut within the last 5s of 30s.
+    Continuous speech uses the lowest-energy boundary; no overlap (which could repeat recognized words)."""
+    start = 0
+    while audio.size - start > _CHUNK_SAMPLES:
+        # Leave at least one second for the final decode, including a short tail after a near-30s recording.
+        end = min(start + _CHUNK_SAMPLES, audio.size - SAMPLE_RATE)
+        search = max(start, end - _CUT_WINDOW)
+        frames = (end - search) // _ENERGY_FRAME
+        energy = np.mean(np.square(audio[search:search + frames * _ENERGY_FRAME].reshape(frames, -1)), axis=1)
+        # Choose the latest equally quiet frame; all-silence input should still make full-sized chunks.
+        quiet = frames - 1 - int(np.argmin(energy[::-1]))
+        cut = search + quiet * _ENERGY_FRAME + _ENERGY_FRAME // 2
+        yield audio[start:cut]
+        start = cut
+    yield audio[start:]
 
 # Hotword biasing (X-ASR only). Modified beam search with per-utterance hotwords costs about the same as greedy
 # search (tested 2026-09-29: 0.11-0.22s either way on 3s clips). Latin terms work well (L M -> LLM,
@@ -142,10 +165,31 @@ class Recognizer:
         if audio.size < SAMPLE_RATE * 0.2:
             return ""
         spec = self.hotword_spec(hotwords) if hotwords and self.supports_hotwords else ""
-        stream = self._rec.create_stream(spec) if spec else self._rec.create_stream()
-        stream.accept_waveform(SAMPLE_RATE, audio.astype(np.float32))
+        audio = audio.astype(np.float32, copy=False)
+        chunks = _audio_chunks(audio) if self.key == "xasr" else (audio,)
+        result, count = "", 0
+        for chunk in chunks:
+            stream = self._rec.create_stream(spec) if spec else self._rec.create_stream()
+            stream.accept_waveform(SAMPLE_RATE, chunk)
+            self._rec.decode_stream(stream)
+            text = self._clean(stream.result.text)
+            if result and text and result[-1].isascii() and text[0].isascii():
+                result += " "
+            result += text
+            count += 1
+        if count > 1:
+            log.info("long recording decoded: seconds=%.2f chunks=%d", audio.size / SAMPLE_RATE, count)
+        return result
+
+    def sound_event(self, audio: np.ndarray) -> str:
+        """SenseVoice only: what the whole clip is (<|Speech|>, <|Laughter|>, <|Applause|>, <|BGM|>, <|Cough|> ...)
+        without the angle brackets, lower case. The model names one event per clip."""
+        if self.key != "sensevoice" or audio.size < SAMPLE_RATE * 0.3:
+            return ""
+        stream = self._rec.create_stream()
+        stream.accept_waveform(SAMPLE_RATE, audio.astype(np.float32, copy=False))
         self._rec.decode_stream(stream)
-        return self._clean(stream.result.text)
+        return str(getattr(stream.result, "event", "")).strip("<|/>").lower()
 
     @staticmethod
     def _clean(text: str) -> str:

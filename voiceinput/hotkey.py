@@ -2,19 +2,20 @@
 
 Those keys are suppressed with low-level hooks (pynput) so holding CapsLock does not toggle caps and a middle
 click does not reach the app. Whether a gesture is given back to the key (replay()) is up to the app: only
-gestures no rule takes are. Injected events (our own replays and keystrokes) always pass.
+gestures no rule takes are. Remapped bound keys can trigger operations; our tagged replays and keystrokes pass.
 """
 import time
 
 from pynput import keyboard, mouse
 
 from .keys import KEY_TRIGGERS
-from .output import press_key
+from .output import INPUT_TAG, press_key
 
 TAP_THRESHOLD = 0.3     # seconds; shorter presses are taps
 DOUBLE_TAP_GAP = 0.35   # seconds from a tap's release to the next press to count as a double tap
 
 _WM_KEYDOWN, _WM_SYSKEYDOWN = 0x0100, 0x0104
+_LLKHF_EXTENDED = 0x01
 _LLKHF_INJECTED = 0x10
 _LLMHF_INJECTED = 1
 # name -> (button down message, button up message, XBUTTON number in the high word of MSLLHOOKSTRUCT.mouseData)
@@ -35,7 +36,8 @@ class Hotkeys:
     """Calls on_down(name, time) / on_up(name, time) for the watched keys, and on_other_key(vk) for any other key
     the user presses."""
 
-    def __init__(self, on_down, on_up, on_other_key=None):
+    def __init__(self, on_down, on_up, on_other_key=None, on_injected_key=None):
+        self.on_injected_key = on_injected_key
         self.on_down = on_down
         self.on_up = on_up
         self.on_other_key = on_other_key
@@ -49,7 +51,10 @@ class Hotkeys:
     def set_keys(self, names) -> None:
         self._names = frozenset(names)
         self._vks = {KEY_TRIGGERS[n][1]: n for n in self._names if n in KEY_TRIGGERS}
-        self._held &= self._names
+        if "alt" in self._names:
+            self._vks.update({0xA4: "alt_l", 0xA5: "alt_r"})
+        # Keep each physical side distinct through the gesture and its eventual replay.
+        self._held &= self._names | set(self._vks.values())
 
     def is_bound_mouse(self, msg: int, mouse_data: int) -> bool:
         return _mouse_key(self._names, msg, mouse_data) is not None
@@ -70,12 +75,20 @@ class Hotkeys:
 
     # Everything is handled inside the hooks so the key can be suppressed
     def _win32_filter(self, msg, data):
-        if data.flags & _LLKHF_INJECTED:
+        vk = data.vkCode
+        if vk == 0x12:   # VK_MENU: some remappers send a generic Alt rather than a sided code
+            vk = 0xA5 if data.flags & _LLKHF_EXTENDED else 0xA4
+        name = self._vks.get(vk)
+        if data.flags & _LLKHF_INJECTED and (name is None or data.dwExtraInfo == INPUT_TAG):
+            # unbound injected keys must not end a dictation; our keys must not retrigger. A mouse button a remapper
+            # turns into Enter is injected too: the app may still take it (the 複製最後的轉錄 shortcut)
+            if name is None and data.dwExtraInfo != INPUT_TAG and self.on_injected_key                     and msg in (_WM_KEYDOWN, _WM_SYSKEYDOWN) and self.on_injected_key(vk):
+                self._listener.suppress_event()
             return True
-        name = self._vks.get(data.vkCode)
         if name is None:
             if self.on_other_key and msg in (_WM_KEYDOWN, _WM_SYSKEYDOWN):
-                self.on_other_key(data.vkCode)
+                if self.on_other_key(data.vkCode):   # True: the key was taken (the 複製最後的轉錄 shortcut)
+                    self._listener.suppress_event()
             return True
         self._event(name, msg in (_WM_KEYDOWN, _WM_SYSKEYDOWN))
         self._listener.suppress_event()

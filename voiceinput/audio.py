@@ -56,7 +56,7 @@ class Recorder:
         with self._lock:
             self._chunks.append(mono)
         rms = float(np.sqrt(np.mean(mono * mono)))
-        self.level = min(1.0, rms * 12)
+        self.level = min(1.0, rms * 20)
 
     def stop(self) -> np.ndarray:
         if self._stream is not None:

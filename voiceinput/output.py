@@ -10,6 +10,9 @@ from PySide6.QtGui import QGuiApplication
 
 from .keys import EXTENDED
 
+# Identify our SendInput events so hotkeys can accept other apps' remapped keys without feedback.
+INPUT_TAG = 0x56494E50
+
 _kb = keyboard.Controller()
 
 
@@ -70,7 +73,7 @@ def press_key(vk: int, n: int) -> None:
     events = (_INPUT * (2 * n))()
     for i in range(2 * n):
         events[i].type = 1   # INPUT_KEYBOARD
-        events[i].ki = _KEYBDINPUT(vk, 0, ext | (2 if i % 2 else 0), 0, None)   # KEYEVENTF_KEYUP on odd
+        events[i].ki = _KEYBDINPUT(vk, 0, ext | (2 if i % 2 else 0), 0, INPUT_TAG)   # KEYEVENTF_KEYUP on odd
     ctypes.windll.user32.SendInput(len(events), events, ctypes.sizeof(_INPUT))
 
 
@@ -79,7 +82,7 @@ def press_chord(*vks: int) -> None:
     events = (_INPUT * (2 * len(vks)))()
     for i, (vk, up) in enumerate([(vk, 0) for vk in vks] + [(vk, 2) for vk in reversed(vks)]):
         events[i].type = 1   # INPUT_KEYBOARD
-        events[i].ki = _KEYBDINPUT(vk, 0, up | (1 if vk in EXTENDED else 0), 0, None)
+        events[i].ki = _KEYBDINPUT(vk, 0, up | (1 if vk in EXTENDED else 0), 0, INPUT_TAG)
     ctypes.windll.user32.SendInput(len(events), events, ctypes.sizeof(_INPUT))
 
 
@@ -96,12 +99,12 @@ def backspace(n: int, gap: float = 0.0) -> None:
 
 class _KEYBDINPUT(ctypes.Structure):
     _fields_ = [("wVk", wt.WORD), ("wScan", wt.WORD), ("dwFlags", wt.DWORD), ("time", wt.DWORD),
-                ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong))]
+                ("dwExtraInfo", ctypes.c_size_t)]
 
 
 class _MOUSEINPUT(ctypes.Structure):   # only sizes the union like the real INPUT
     _fields_ = [("dx", wt.LONG), ("dy", wt.LONG), ("mouseData", wt.DWORD), ("dwFlags", wt.DWORD),
-                ("time", wt.DWORD), ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong))]
+                ("time", wt.DWORD), ("dwExtraInfo", ctypes.c_size_t)]
 
 
 class _UNION(ctypes.Union):
@@ -111,3 +114,20 @@ class _UNION(ctypes.Union):
 class _INPUT(ctypes.Structure):
     _anonymous_ = ("u",)
     _fields_ = [("type", wt.DWORD), ("u", _UNION)]
+
+
+def key_down(*vks: int) -> None:
+    """Hold keys down (released by key_up): Discord's 按住靜音 is held for the whole recording."""
+    events = (_INPUT * len(vks))()
+    for i, vk in enumerate(vks):
+        events[i].type = 1
+        events[i].ki = _KEYBDINPUT(vk, 0, 1 if vk in EXTENDED else 0, 0, INPUT_TAG)
+    ctypes.windll.user32.SendInput(len(events), events, ctypes.sizeof(_INPUT))
+
+
+def key_up(*vks: int) -> None:
+    events = (_INPUT * len(vks))()
+    for i, vk in enumerate(reversed(vks)):
+        events[i].type = 1
+        events[i].ki = _KEYBDINPUT(vk, 0, 2 | (1 if vk in EXTENDED else 0), 0, INPUT_TAG)
+    ctypes.windll.user32.SendInput(len(events), events, ctypes.sizeof(_INPUT))

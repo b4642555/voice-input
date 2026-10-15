@@ -20,6 +20,8 @@ ANY, DICTATED, SELECTION = "any", "dictated", "selection"
 COMMAND, KEYS, TEXT, WAIT = "command", "keys", "text", "wait"
 RECORD, DELETE_SELECTION, DELETE_DICTATION = "record", "delete_selection", "delete_dictation"
 PICK = "pick"
+INSTRUCT = "instruct"   # AI 指令 (2026-10-13): records like 錄音, but what is said is an instruction for the LLM
+RECORDS = (RECORD, INSTRUCT)
 _ADD_HOTWORD = "add_hotword"   # 加入熱詞, removed 2026-10-11: hotwords are typed in the 選字 menu instead
 VERSION = 2   # config rules_version: 2 added the tap on a selection that opens 選字
 
@@ -51,7 +53,11 @@ class Rule:
         return asdict(self)
 
     def record_index(self) -> int | None:
-        return next((i for i, s in enumerate(self.steps) if s.type == COMMAND and s.value == RECORD), None)
+        return next((i for i, s in enumerate(self.steps) if s.type == COMMAND and s.value in RECORDS), None)
+
+    def instructs(self) -> bool:
+        i = self.record_index()
+        return i is not None and self.steps[i].value == INSTRUCT
 
 
 def defaults(key: str = "mouse_middle", newline: bool = True, send: bool = True) -> list[Rule]:
@@ -115,7 +121,12 @@ def _same_trigger(a: Rule, b: Rule) -> bool:
 def candidates(rules: list[Rule], source: str, trigger: str, gesture: str = "") -> list[Rule]:
     """Enabled, valid rules for a trigger (a key name, or the utterance for speech) and gesture."""
     probe = Rule(source, key=trigger, phrase=trigger, gesture=gesture)
-    return [r for r in rules if r.enabled and _same_trigger(r, probe) and not problems(r, rules)]
+    out = [r for r in rules if r.enabled and _same_trigger(r, probe) and not problems(r, rules)]
+    if source == KEY and trigger in ("alt_l", "alt_r"):
+        general = Rule(KEY, key="alt", gesture=gesture)
+        # A sided rule wins within the same situation; the general Alt rule covers either physical side.
+        out.extend(r for r in rules if r.enabled and _same_trigger(r, general) and not problems(r, rules))
+    return out
 
 
 def pick(cands: list[Rule], selection: bool, dictated: bool) -> Rule | None:
@@ -133,7 +144,7 @@ def problems(rule: Rule, rules: list[Rule]) -> list[str]:
     out = []
     if rule.source == SPEECH and not normalize(rule.phrase):
         out.append("請輸入要說的話")
-    records = sum(1 for s in rule.steps if s.type == COMMAND and s.value == RECORD)
+    records = sum(1 for s in rule.steps if s.type == COMMAND and s.value in RECORDS)
     if rule.source == SPEECH and records:
         out.append("「說出」的操作不能錄音")
     elif records > 1:

@@ -32,28 +32,34 @@ from PySide6.QtCore import QLockFile, QObject, QPointF, QRectF, Qt, QTimer, Sign
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
-from . import autostart, candidates, edit, models, paths, rules
-from .asr import Recognizer
+from . import autostart, candidates, edit, laugh, llm, models, paths, rules, screen_terms, sync
+from .asr import SAMPLE_RATE, Recognizer
 from .audio import Recorder
 from .config import Config
-from .hotwords import Hotwords
+from .correction import CorrectionWatcher
+from .history import Entry, History
+from .hotwords import Hotwords, eligible as hotword_eligible
 from .hotkey import DOUBLE_TAP_GAP, TAP_THRESHOLD, Hotkeys
 from .keys import MOUSE_TRIGGERS, combo_vks
 from .memory import Memory, is_latin, situation
+from .discord import DiscordMute
+from .micguard import MicGuard
 from .mute import Muter
 from .output import backspace, paste_text, press_chord, press_delete
-from .overlay import Overlay
+from .copycard import CopyCard
+from .overlay import Overlay, Toast
 from .picker import Picker
 from .reading import reading_key
 from .rules import DOUBLE, HOLD, TAP
-from .selection import ContextProbe, move_cursor_after, term_watcher
+from .selection import ContextProbe, no_input_focused, move_cursor_after, term_watcher
 from .session import Session, foreground
 from .settings import SettingsDialog
-from .textfmt import format_text, to_traditional
+from .textfmt import drop_casual_period, format_text, to_traditional
 
 log = logging.getLogger("voiceinput")
 
 _SCREEN_TERM_SCORE = 1.5
+_SCREEN_ZH_SCORE = 3.0     # Chinese names / topic words on screen (screen_terms); hotwords go to 5, these are guesses
 # Spoken commands (speech operations' phrases, punctuation names) are boosted only when the utterance is short: they
 # are said alone, and boosting them in every sentence would turn 還行 into 換行 (the user's choice, 2026-10-11).
 # "Short" is judged by the first decode's text (at most the longest command + _COMMAND_SLACK characters), which then
@@ -67,6 +73,7 @@ _NO_RECORD = "目前沒有任何操作會錄音，無法語音輸入。請到「
 _INDICATOR_DELAY = 0.1     # seconds held before the recording indicator shows (a tap is < TAP_THRESHOLD)
 _STEP_GAP = 0.03           # seconds between the steps of an operation
 _MENU_ROWS = 8
+_MODIFIER_KEYS = {0x10, 0x11, 0x12, 0x5B, 0x5C, 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5}
 
 
 @dataclass
@@ -124,6 +131,8 @@ class App(QObject):
         self.cfg = Config.load()
         self.recorder = Recorder()
         self.recognizer: Recognizer | None = None
+        self.sense: Recognizer | None = None             # SenseVoice, loaded only for the laughter setting (laugh.py)
+        self._sense_loading = False
         # self.second: Recognizer | None = None         # second-opinion model (SenseVoice), off for now
         self.worker = ThreadPoolExecutor(max_workers=1)   # serializes model loads and transcription
         self.steps = ThreadPoolExecutor(max_workers=1)    # runs operations' steps in order
@@ -132,6 +141,9 @@ class App(QObject):
         self._records = deque(maxlen=100)       # transcript log, kept for this session only
         self.session = Session()
         self.muter = Muter()
+        self.micguard = MicGuard()               # other apps get no microphone while recording
+        self.discord = DiscordMute()
+        self.micguard.recover()                  # our own session unmuted, a crashed run's mutes undone
         self._press: _Press | None = None        # the key or button held now
         self._pending: _Press | None = None      # a tap waiting to see whether a second press follows
         self._pending_timer = QTimer(self, singleShot=True, timeout=self._pending_expired)
@@ -139,25 +151,41 @@ class App(QObject):
         self._mic: _Press | None = None          # the press the microphone records for
         self._ignored: set[str] = set()          # keys pressed while another was held
         self._could_record = rules.can_record(self.cfg.rules)
-        self.hotwords = Hotwords()
-        self.memory = Memory()
+        self.shared = sync.folder(self.cfg.sync_dir)     # 同步: where hotwords, smart picks and history live
+        self.hotwords = Hotwords(self.shared / sync.HOTWORDS)
+        self.memory = Memory(self.shared / sync.PICKS)
+        self.history = History(self.shared)
+        self._ai_warned = False
+        self.corrections = CorrectionWatcher(
+            lambda changes: self.main.emit(lambda: self._learn_corrections(changes)))
         self._menu = None                        # ("pick", Selection) while the 選字 menu is up
 
         self.icon_idle = make_icon(QColor(235, 235, 235) if self._dark_taskbar() else QColor(40, 40, 40))
         self.icon_rec = make_icon(QColor(255, 69, 58))
 
         self.overlay = Overlay(lambda: self.recorder.level)
+        self.toast = Toast()                     # 「程式」已加入字典 after a manual correction is learned
+        self.copycard = CopyCard()               # 複製最後的轉錄, when there is no input field to paste into
+        self.copycard.copy_requested.connect(self._copy_last)
+        self._last_text = ""
+        self._swallow_up = False                 # a click on the recording pill's buttons: its release is swallowed too
         self.picker = Picker()
         self.picker.picked.connect(self.on_menu_pick)
         self.picker.typed.connect(self.on_menu_typed)
         self.picker.closed.connect(self._forget_menu)
         self._picker_hwnd = int(self.picker.winId())
-        self.settings = SettingsDialog(self.cfg, self.hotwords, self.memory.path)
+        self.settings = SettingsDialog(self.cfg, self.hotwords, self.memory.path, history=self.history,
+                                       memory=self.memory, hotword_validator=self._hotword_error)
         self.settings.applied.connect(self.apply_settings)
+        self.settings.sync_changed.connect(self.change_sync_folder)
 
         self.tray = QSystemTrayIcon(self.icon_idle)
         menu = QMenu()
         menu.addAction(QAction("設定…", menu, triggered=self.open_settings))
+        self.ai_action = QAction("AI 潤稿（會用掉 AI 額度）", menu, checkable=True)
+        self.ai_action.setChecked(self.cfg.ai_enabled)
+        self.ai_action.toggled.connect(self._toggle_ai)
+        menu.addAction(self.ai_action)
         menu.addSeparator()
         menu.addAction(QAction("結束", menu, triggered=self.quit))
         self.tray.setContextMenu(menu)
@@ -173,13 +201,15 @@ class App(QObject):
         self.status.connect(self.on_status)
         self.record.connect(self.on_record)
 
-        self.hotkeys = Hotkeys(self.key_down.emit, self.key_up.emit, self._on_other_key)
+        self.hotkeys = Hotkeys(self.key_down.emit, self.key_up.emit, self._on_other_key, self._on_injected_key)
         self.hotkeys.set_keys(rules.bound_keys(self.cfg.rules))
         self.hotkeys.start()
         self._mouse = self._watch_mouse()
         self.worker.submit(self._load_model_job)
         # self.bg.submit(self._load_second_job)
         candidates.preload()   # the disfluency pass uses the dictionary
+        self._warm_ai()
+        self._sync_laugh()
         if self.cfg.autostart:
             self._set_autostart()   # re-register so the entry follows the app if its folder was moved
         if not self._could_record:
@@ -199,11 +229,60 @@ class App(QObject):
         """Keyboard hook thread: a key the user pressed (injected keys never get here). Typing in the 選字 menu's
         input box leaves the target app alone; any other key closes the menu."""
         import ctypes
+        if self.copycard.active:
+            if self._is_copy_key(vk):
+                self.main.emit(self._copy_last)
+                return True          # taken: Enter must not also open a selected file
+            if vk not in _MODIFIER_KEYS:
+                self.main.emit(self.copycard.dismiss)   # any other key: the user has moved on
         if ctypes.windll.user32.GetForegroundWindow() == self._picker_hwnd:
             return
+        self.corrections.on_key(vk,
+                                ctrl=bool(ctypes.windll.user32.GetAsyncKeyState(0x11) & 0x8000),
+                                shift=bool(ctypes.windll.user32.GetAsyncKeyState(0x10) & 0x8000),
+                                alt=bool(ctypes.windll.user32.GetAsyncKeyState(0x12) & 0x8000),
+                                hwnd=foreground())
         self.session.on_input()
         term_watcher.forget()
         self.main.emit(self.picker.dismiss)
+
+    def _on_injected_key(self, vk: int) -> bool:
+        """Keyboard hook thread: a key another program sent (a mouse button remapped to Enter by its driver). Only the
+        複製最後的轉錄 shortcut is taken from those; they never end a dictation otherwise."""
+        if self.copycard.active and self._is_copy_key(vk):
+            self.main.emit(self._copy_last)
+            return True
+        return False
+
+    def _is_copy_key(self, vk: int) -> bool:
+        """Keyboard hook thread: the key (with exactly the modifiers) set for copying the last dictation."""
+        import ctypes
+        vks = combo_vks(self.cfg.copy_key)
+        if not vks or vk != vks[-1]:
+            return False
+        down = lambda k: bool(ctypes.windll.user32.GetAsyncKeyState(k) & 0x8000)
+        return all(down(m) == (m in vks[:-1]) for m in (0x11, 0x10, 0x12))
+
+    def _copy_last(self):
+        """Main thread: the 複製最後的轉錄 card's button or shortcut."""
+        if self._last_text and self.copycard.active:
+            self.qapp.clipboard().setText(self._last_text)
+            log.info("last transcription copied")
+            self.copycard.copied()
+
+    def _overlay_button(self, ok: bool):
+        """Main thread: the ✓ (stop and recognize) or ✕ (throw the recording away) on the recording pill."""
+        press = self._mic
+        if press is None or not press.recording:
+            return
+        if self._toggle is press:
+            self._toggle = None
+        press.consumed = press.finished = True    # the key's release, if it is still down, changes nothing
+        log.info("recording %s from the pill", "finished" if ok else "cancelled")
+        if ok:
+            self._stop_recording(press)
+        else:
+            self._discard_mic(press)
 
     def _on_picker(self, pt) -> bool:
         """Mouse hook thread: the point is on the 選字 menu."""
@@ -224,10 +303,24 @@ class App(QObject):
                 return False
             if self.hotkeys.is_bound_mouse(msg, data.mouseData):
                 return False   # a button an operation uses is not a click
+            if msg == 0x201:
+                button = self.overlay.button_at(data.pt.x, data.pt.y)
+                if button:
+                    self._swallow_up = True
+                    self.main.emit(lambda ok=button == "ok": self._overlay_button(ok))
+                    listener.suppress_event()    # the click belongs to the pill, not to the app under it
+            elif msg == 0x202 and self._swallow_up:
+                self._swallow_up = False
+                listener.suppress_event()
+            if msg in downs and self.copycard.isVisible():
+                if self.copycard.contains_screen_point(data.pt.x, data.pt.y):
+                    return False      # a click on the card is not a click in the app
+                self.main.emit(self.copycard.dismiss)
             if msg in downs:
                 if self._on_picker(data.pt):
                     return False   # a click in the 選字 menu leaves the caret and the selection where they are
                 self.main.emit(self.picker.dismiss)   # a click anywhere else closes it
+                self.corrections.on_pointer(hwnd=foreground())
                 self.session.on_input()
                 if msg == 0x201:
                     term_watcher.mouse_down(data.pt.x, data.pt.y)
@@ -281,6 +374,7 @@ class App(QObject):
             self._ignored.add(key)
             return
         self._close_menu()
+        self.reload_shared()
         if self._toggle is not None:         # any press stops a recording a tap started
             toggle, self._toggle = self._toggle, None
             self._press = _Press(key, None, t, False, consumed=True)
@@ -293,6 +387,9 @@ class App(QObject):
             self._discard_mic(pending)
             self._decide(pending, TAP)       # another key came first: the tap is just a tap
         if double:
+            # A double tap replaces the pending tap. Its speculative microphone belongs to the first press,
+            # even when the second press is a delete (and never starts a microphone of its own).
+            self._discard_mic(pending)
             press = _Press(key, pending.probe, t, pending.dictated, first=pending)
         else:
             press = _Press(key, ContextProbe(), t, self.session.deletable() is not None)
@@ -321,11 +418,13 @@ class App(QObject):
         if press is None or press.key != key:
             return
         self._press = None
-        press.released, press.up_at = True, t
+        press.up_at = t
         if press.consumed:
+            press.released = True
             return
         if not press.held and t - press.down_at >= TAP_THRESHOLD:   # the hold timer has not run yet
             self._hold_check(press)
+        press.released = True
         if press.first is None and not press.held:
             if self._rules_for(key, DOUBLE):     # wait to see whether a second press follows
                 if not self._records_on(key, (TAP,)):
@@ -439,6 +538,13 @@ class App(QObject):
             self.overlay.show_recording()
             if self.cfg.mute_while_recording:
                 self.muter.mute()
+            if self.cfg.mic_exclusive and False:      # disabled: the mute is shared with our own capture
+                self.micguard.mute()
+            # Windows can keep a microphone session's mute for a program: ours was muted once (flat waveform,
+            # words guessed, 2026-10-15), so our own session is unmuted at every recording
+            self.micguard.recover()
+            if self.cfg.discord_mute:
+                self.discord.start(self.cfg.discord_key)
 
     def _release_mic(self, press: _Press):
         if not press.recording:
@@ -446,12 +552,16 @@ class App(QObject):
         press.recording = False
         if self._mic is press:
             self._mic = None
+        self.micguard.restore()          # the other apps get the microphone back as soon as we stop listening
+        self.discord.stop()
         self.tray.setIcon(self.icon_idle)
         return self.recorder.stop()
 
     def _discard_mic(self, press: _Press):
         if press.recording:
-            self._release_mic(press)
+            audio = self._release_mic(press)
+            log.info("recording discarded: key=%s gesture=%s seconds=%.2f", press.key, press.gesture or "pending",
+                     audio.size / 16000 if audio is not None else 0)
             self.overlay.hide_overlay()
             self._input_done()
 
@@ -462,6 +572,7 @@ class App(QObject):
             self._input_done()
             return
         self.overlay.show_thinking()
+        log.info("recording stopped: key=%s gesture=%s seconds=%.2f", press.key, press.gesture, audio.size / 16000)
         self.worker.submit(self._transcribe_job, self.recognizer, audio, press, self._hwnd)
 
     def _input_done(self):
@@ -473,7 +584,7 @@ class App(QObject):
     # --- steps ---
     def _run_steps(self, press: _Press, steps: list, done=None):
         """Run steps in order on the steps thread (錄音 is not a step to run: the press records)."""
-        steps = [s for s in steps if not (s.type == rules.COMMAND and s.value == rules.RECORD)]
+        steps = [s for s in steps if not (s.type == rules.COMMAND and s.value in rules.RECORDS)]
         if not steps:
             if done:
                 done()
@@ -490,6 +601,14 @@ class App(QObject):
                 elif step.type == rules.KEYS:
                     vks = combo_vks(step.value)
                     if vks:
+                        if 0x0D in vks:
+                            self.corrections.on_key(0x0D,
+                                                    ctrl=bool({0x11, 0xA2, 0xA3}.intersection(vks)),
+                                                    shift=bool({0x10, 0xA0, 0xA1}.intersection(vks)),
+                                                    alt=bool({0x12, 0xA4, 0xA5}.intersection(vks)),
+                                                    hwnd=foreground())
+                        else:
+                            self.corrections.cancel()
                         press_chord(*vks)
                         self.session.on_input()     # the caret may have moved
                 elif step.type == rules.TEXT:
@@ -522,6 +641,7 @@ class App(QObject):
 
     def _type_text(self, text: str):
         if text:
+            self.corrections.cancel()
             paste_text(text)
             self.session.dictated(text, None, foreground())
 
@@ -531,6 +651,7 @@ class App(QObject):
         if sel is None:
             log.info("delete selection: nothing selected")
             return
+        self.corrections.cancel()
         log.info("delete %r on %s", sel.text, sel.app)
         if sel.term is not None:
             self.overlay.hide_now()
@@ -550,6 +671,7 @@ class App(QObject):
         if step is None:
             log.info("delete: nothing to delete")
             return
+        self.corrections.cancel()
         n, tail = s.plan_to(step.before)
         log.info("delete last: %d backspaces + %r", n, tail)
         backspace(n)
@@ -566,11 +688,14 @@ class App(QObject):
     # --- transcription ---
     def _transcribe_job(self, rec, audio, press: _Press, hwnd):
         stamp = time.strftime("%H:%M:%S")
+        t0, raw = time.monotonic(), ""
         try:
             ctx = press.probe.result()
+            zh = getattr(ctx, "zh_terms", [])   # Chinese names / topic words on screen
             press.resolved.wait(3.0)
             t0 = time.monotonic()
-            words = self.hotwords.bias() + [(t, _SCREEN_TERM_SCORE) for t in ctx.terms]
+            words = (self.hotwords.bias() + [(t, _SCREEN_TERM_SCORE) for t in ctx.terms]
+                     + [(t, _SCREEN_ZH_SCORE) for t in zh])
             raw = rec.recognize(audio, _bias(words))
             commands = self._command_words()
             if commands and len(_TEXT_CHARS.sub("", raw)) <= max(map(len, commands)) + _COMMAND_SLACK:
@@ -579,11 +704,28 @@ class App(QObject):
                     log.info("asr with commands boosted: %s -> %s", raw, again)
                 raw = again
             t_asr = time.monotonic() - t0
-            log.info("asr %.2fs: %s%s", t_asr, raw, f" (terms: {len(ctx.terms)})" if ctx.terms else "")
+            log.info("asr %.2fs: %s (screen terms: %d en, %d zh)", t_asr, raw, len(ctx.terms), len(zh))
+            laughing = False
+            if self.cfg.laugh_enabled and self.sense is not None and audio is not None:
+                laughing = laugh.heard(self.sense, audio)
+                if laughing:
+                    log.info("laughter heard")
             # no sentence-final punctuation when the caret has text on both sides: the user is inserting
             mid = ctx.caret is not None and all(s.strip() for s in ctx.caret)
             formatted = format_text(raw, mid)
+            # a heard common word gives way to a screen name only without the AI: with it, the model reads the whole
+            # sentence (在輕井澤鍋物開會 became 輕井澤鍋物凱慧 by the rule, 2026-10-14)
+            ai_on = self.cfg.ai_enabled and self._llm_settings().ready()
+            formatted, fixed = screen_terms.fix(formatted, zh, getattr(ctx, "zh_fix", []), common_wins=not ai_on)
+            formatted, fixed_en = screen_terms.fix_english(formatted, getattr(ctx, "en_names", []))
+            fixed += fixed_en
+            if fixed:
+                log.info("screen terms fixed %d span(s)", fixed)   # never the words: screen text is not logged
             selected = ctx.selection is not None and press.deleted is None and press.first is None
+            rule = press.redictate or press.rule
+            if rule is not None and rule.instructs():
+                self._instruct(formatted, raw, ctx, selected, audio, hwnd, press, stamp, t_asr)
+                return
             op = rules.pick(rules.candidates(self.cfg.rules, rules.SPEECH, formatted), selected, press.dictated)
             if op is not None:
                 log.info("spoken operation: %s", op.phrase)
@@ -597,10 +739,27 @@ class App(QObject):
                 log.info("described character: %s", described)
                 sym = described   # typed as it is, like a punctuation mark
             text = sym or formatted
+            polished = False
             if not sym:   # smart picks (single characters)
                 prefix = ctx.selection.before if selected else (ctx.caret[0] if ctx.caret else "")
                 text = self.memory.apply(text, prefix)
-            entry = {"time": stamp, "asr": to_traditional(raw), "asr_s": t_asr, "fmt": text}
+                # the screen wins over smart picks: 成 -> 宸 learned for 林又宸 turned 吳宇澄 (fixed from the
+                # screen) into 吳宇宸 (2026-10-14)
+                text, _ = screen_terms.fix(text, zh, getattr(ctx, "zh_fix", []), common_wins=not ai_on)
+                text, polished = self._polish(text, ctx, selected, mid)
+                if self.cfg.casual_no_period:
+                    text = drop_casual_period(text)
+                if laughing:
+                    text = laugh.apply(text, self.cfg.laugh_text, True)
+            entry = {"time": stamp, "asr": to_traditional(raw), "asr_s": t_asr, "fmt": text,
+                     "ai": polished,
+                     # what was taken from the screen, for the 除錯紀錄 page only: in memory for this run, never
+                     # in the log file (the user's condition) -- so the user can see what the program saw
+                     "screen": "、".join(list(zh[:25]) + list(getattr(ctx, "en_names", [])[:15])) or "（沒有）"}
+            if text.strip():
+                self.history.add(Entry(time.time(), text, to_traditional(raw), ctx.app,
+                                       round(len(audio) / SAMPLE_RATE, 2) if audio is not None else 0.0,
+                                       polished))
             if described:
                 entry["edit"] = f"指定字：{formatted.strip()} → {described}"
             if selected:
@@ -612,11 +771,135 @@ class App(QObject):
                     text = edit.replacement(replaced.text, text)
                 entry["edit"] = f"{replaced.text} → {text}（刪除後重講）"
             self.record.emit(entry)
-            self.main.emit(lambda: self._dictate(text, audio, hwnd, press))
-        except Exception:
+            nowhere = bool(text.strip()) and no_input_focused()
+            self.main.emit(lambda: self._dictate(text, audio, hwnd, press, nowhere))
+        except Exception as exc:
             log.exception("transcribe failed")
+            detail = f"{type(exc).__name__}: {exc}"
+            self.record.emit({"time": stamp, "asr": to_traditional(raw), "asr_s": time.monotonic() - t0,
+                              "fmt": "", "audio_s": audio.size / 16000, "error": detail})
+            self.main.emit(lambda: self._notify("辨識失敗，已留下紀錄。請到「設定 → 辨識紀錄」查看原因。"))
             self.main.emit(self.overlay.hide_overlay)
             self.main.emit(self._input_done)
+        finally:
+            _forget_screen(press)
+
+    def _polish(self, text: str, ctx, selected: bool, mid: bool) -> tuple[str, bool]:
+        """Worker thread: AI 潤稿 (llm.py) when it is on, or the text as it was. Never loses the dictation: any
+        failure pastes the formatted transcript."""
+        s = self._llm_settings()
+        known = [w for w, _ in self.hotwords.bias()] + list(getattr(ctx, "zh_terms", [])) + list(getattr(ctx, "en_names", []))
+        if not self.cfg.ai_enabled or not s.ready() or not llm.worth_polishing(text, known, self.cfg.ai_scope == "saver"):
+            return text, False
+        self.main.emit(self.overlay.show_polishing)
+        c = llm.Context()
+        if self.cfg.ai_context:
+            c.app, c.title = ctx.app, ctx.title
+            c.screen = getattr(ctx, "screen", "")
+            if selected:
+                c.before, c.after, c.selected = ctx.selection.before, ctx.selection.after, ctx.selection.text
+            elif ctx.caret:
+                c.before, c.after = ctx.caret
+        c.inserting = mid
+        glossary = [w for w, _ in self.hotwords.bias()]
+        if self.cfg.ai_context:   # screen terms are screen content: sent only with the context switch on
+            glossary += (list(getattr(ctx, "en_names", [])[:20]) + list(ctx.terms[:20])
+                         + list(getattr(ctx, "zh_terms", [])[:40]))
+        try:
+            return llm.polish(s, text, c, glossary), True
+        except llm.LLMError as e:
+            log.warning("AI 潤稿 failed, pasting the transcript: %s", e)
+            if not self._ai_warned:
+                self._ai_warned = True
+                self._notify(f"AI 潤稿失敗，已改貼原始辨識結果：{str(e)[:120]}")
+            return text, False
+
+    def _instruct(self, instruction: str, raw: str, ctx, selected: bool, audio, hwnd, press, stamp, t_asr):
+        """Worker thread: AI 指令. What was said is an instruction: on a selection the LLM rewrites it (更正式一點,
+        翻成英文), without one it writes the text asked for (寫一封感謝信給王經理), which is pasted."""
+        entry = {"time": stamp, "asr": to_traditional(raw), "asr_s": t_asr, "fmt": "", "ai": True}
+        s = self._llm_settings()
+        if not instruction.strip():
+            self.main.emit(self.overlay.hide_overlay)
+            self.main.emit(self._input_done)
+            return
+        if not s.ready():
+            self.main.emit(self.overlay.hide_overlay)
+            self.main.emit(self._input_done)
+            self._notify("AI 指令需要先在「AI 潤稿」頁設定模型和金鑰。")
+            return
+        self.main.emit(self.overlay.show_polishing)
+        c = llm.Context()
+        if self.cfg.ai_context:
+            c.app, c.title = ctx.app, ctx.title
+            if not selected and ctx.caret:
+                c.before, c.after = ctx.caret
+        try:
+            text = llm.instruct(s, instruction, ctx.selection.text if selected else "", c)
+        except llm.LLMError as e:
+            log.warning("AI 指令 failed: %s", e)
+            self.main.emit(self.overlay.hide_overlay)
+            self.main.emit(self._input_done)
+            self._notify(f"AI 指令失敗：{str(e)[:120]}")
+            return
+        entry["fmt"] = text
+        entry["edit"] = f"AI 指令：{instruction}"
+        self.history.add(Entry(time.time(), text, f"［指令］{instruction}", ctx.app,
+                               round(len(audio) / SAMPLE_RATE, 2) if audio is not None else 0.0, True))
+        self.record.emit(entry)
+        if selected:
+            self.edited.emit(ctx.selection, text, press)
+        else:
+            self.main.emit(lambda: self._dictate(text, audio, hwnd, press))
+
+    def _toggle_ai(self, on: bool):
+        """The tray switch for the AI (the user: 要有關掉 AI 額度的選項): saved at once, the settings page follows."""
+        if on == self.cfg.ai_enabled:
+            return
+        self.cfg.ai_enabled = on
+        self.cfg.save()
+        if on:
+            self._warm_ai()
+        self.settings.load_values()
+        self.toast.show_text("AI 潤稿已開啟" if on else "AI 潤稿已關閉，不會用掉額度", 2.5)
+
+    def _warm_ai(self):
+        """Claude Code answers in 1-3s once it is running, 6s when it has to start: start it before it is needed."""
+        if self.cfg.ai_enabled and self.cfg.ai_provider == "claude_cli":
+            def check():
+                if llm.claude_login_state() == "out":      # tell at once, not at the first dictation
+                    self.main.emit(lambda: self._notify("Claude Code 還沒登入，AI 潤稿暫時不會作用。"
+                                                        "請到 設定 → AI 潤稿 按「登入 Claude」"))
+                else:
+                    llm.warm_up(self._llm_settings())
+            threading.Thread(target=check, daemon=True).start()
+
+    def _llm_settings(self) -> llm.Settings:
+        c = self.cfg
+        guess = llm.provider_for_key(c.ai_key)
+        if guess and guess != c.ai_provider and c.ai_provider in ("groq", "gemini", "openrouter"):   # the key decides
+            return llm.Settings(guess, "", "", c.ai_key, c.ai_style)
+        return llm.Settings(c.ai_provider, c.ai_base_url, c.ai_model, c.ai_key, c.ai_style)
+
+    def reload_shared(self):
+        """Another computer saved the shared files (同步): read them again. Called at key-down."""
+        self.hotwords.reload_if_changed()
+        self.memory.reload_if_changed()
+        if self.history.reload() and self.settings.isVisible():
+            self.settings.refresh_history()
+
+    def change_sync_folder(self):
+        new = sync.folder(self.cfg.sync_dir)
+        copied = sync.move(self.shared, new)
+        log.info("sync folder %s -> %s, copied %s", self.shared, new, copied)
+        self.shared = new
+        self.hotwords = Hotwords(new / sync.HOTWORDS)
+        self.memory = Memory(new / sync.PICKS)
+        self.history.set_folder(new)
+        self.settings.hotwords, self.settings.memory = self.hotwords, self.memory
+        self.settings.memory_path = self.memory.path
+        self.settings.refresh_hotwords()
+        self.settings.refresh_history()
 
     def _command_words(self) -> list[str]:
         """What may be said alone as a command: speech operations' phrases, and punctuation names when they are on.
@@ -633,14 +916,32 @@ class App(QObject):
         self._run_steps(press, op.steps)
 
     # --- dictation ---
-    def _dictate(self, text: str, audio, hwnd: int, press: _Press):
-        """Main thread: paste a dictation, then run the operation's steps after 錄音."""
+    def _dictate(self, text: str, audio, hwnd: int, press: _Press, nowhere: bool = False):
+        """Main thread: paste a dictation, then run the operation's steps after 錄音. With no input field in focus
+        (nowhere) it is shown on the 複製最後的轉錄 card instead."""
         self.overlay.hide_overlay()
         log.info("result: %s", text)
         if not text:
             self._input_done()
             return
+        self._last_text = text
+        if not nowhere:
+            self.copycard.dismiss()
+        if nowhere:
+            log.info("no input field in focus: offering to copy")
+            self._input_done()
+            self.copycard.show_text(text, self.cfg.copy_key)
+            return
+        token = None
+        try:
+            token = self.corrections.prepare_before_paste()
+        except Exception:
+            log.exception("correction snapshot failed; continuing dictation")
         paste_text(text)
+        try:
+            self.corrections.after_paste(token, text)
+        except Exception:
+            log.exception("correction tracking failed; dictation was pasted")
         self._input_done()
         self.session.dictated(text, audio, foreground() or hwnd)
         # u = self.session.dictated(text, audio, foreground() or hwnd)
@@ -670,6 +971,62 @@ class App(QObject):
 
     def _notify(self, text: str):
         self.tray.showMessage("VoiceInput", text, self.icon_idle, 4000)
+
+    def _hotword_error(self, word: str) -> str:
+        if self.recognizer is None:
+            return "模型載入中，請稍後再加入熱詞。"
+        if not self.recognizer.hotword_spec([(word, 1)]):
+            return "目前模型無法辨識此詞的部分字元，請移除符號或調整文字。"
+        return ""
+
+    def _learn_corrections(self, changes):
+        """Verified edits from one submitted dictation; UI and stores update on the main thread."""
+        learned = []
+        for change in changes:
+            saved = False
+            word = change.new
+            named = False
+            if re.search(r"[㐀-䶿一-鿿]", change.new):
+                # the name a changed character belongs to (林又成 -> 林又宸, not 宸 alone; 更正宇澄 -> 跟吳宇澄
+                # learns 吳宇澄, not 跟吳): the longest name around any changed character
+                fixed = change.text[:change.start] + change.new + change.text[change.end:]
+                names = [screen_terms.name_around(fixed, k, k + 1)
+                         for k in range(change.start, change.start + len(change.new))]
+                names = [n for n in names if n]
+                if names:
+                    word = max(names, key=len)
+                    named = True
+                else:
+                    # 貓米 -> 包你 inside 包你發娛樂城: the user means the whole phrase (2026-10-14)
+                    whole = (screen_terms.expand_around(fixed, change.start, change.start + len(change.new))
+                             if len(change.new) >= 2 else "")
+                    if whole:
+                        word = whole
+                    elif screen_terms.has_stop_char(change.new):
+                        word = ""      # 跟吳 alone is grammar plus a character, not a word to learn
+            # a single character is a smart pick only when it is not part of a name: the name is learned instead
+            # (成 -> 宸 learned for 林又宸 later turned 吳宇澄 into 吳宇宸)
+            if not named and ((len(change.old) == len(change.new) == 1
+                                        and re.fullmatch(r"[㐀-䶿一-鿿]", change.old)
+                                        and re.fullmatch(r"[㐀-䶿一-鿿]", change.new))
+                                       or (is_latin(change.old) and is_latin(change.new))):
+                saved = self.memory.record(change.text, change.start, change.end, change.new)
+            if word and hotword_eligible(word) and not self._hotword_error(word):
+                added = self.hotwords.add(word)
+                log.info("manual correction: hotword add %s, the list has %d words", "ok" if added else "refused",
+                         len(self.hotwords.items))
+                saved = added or saved
+            elif word:
+                log.info("manual correction: hotword not added (%s)",
+                         "not eligible" if not hotword_eligible(word) else self._hotword_error(word))
+            if saved:
+                learned.append(word.strip())
+                log.info("manual correction learned: %r -> %r", change.old, change.new)
+                self.record.emit({"time": time.strftime("%H:%M:%S"), "asr": "", "asr_s": None,
+                                  "fmt": "", "edit": f"手動修正學習：{change.old} → {change.new}"})
+        if learned:   # Typeless-style notice (the user's wording, 2026-10-14)
+            self.toast.show_text("、".join(f"「{w}」" for w in learned[:3]) + " 已加入字典")
+        self.settings.refresh_hotwords()
 
     # --- popups: 選字 and the hotword notice ---
     def _close_menu(self):
@@ -751,6 +1108,7 @@ class App(QObject):
         """A pick replaces the selection. A single character is learned with its context (smart picks); a word
         gains hotword weight and the word it replaced loses some."""
         text = sel.text.strip()
+        self.corrections.cancel()
         lead = sel.text.index(text)
         log.info("menu %s: %s -> %s", "typed" if typed else "pick", text, word)
         if sel.term is not None:
@@ -784,6 +1142,7 @@ class App(QObject):
         self.edited.emit(sel, rep, press)
 
     def on_edited(self, sel, rep: str, press: _Press):
+        self.corrections.cancel()
         if sel.term is not None:
             self.overlay.hide_now()
         self.overlay.hide_overlay()
@@ -810,6 +1169,8 @@ class App(QObject):
     def on_record(self, entry: dict):
         self._records.append(entry)
         self.settings.set_log(self._records)
+        if self.settings.isVisible():
+            self.settings.refresh_history()
 
     def open_settings(self):
         self.settings.load_values()
@@ -819,13 +1180,39 @@ class App(QObject):
         self.settings.raise_()
         self.settings.activateWindow()
 
+    def _sync_laugh(self):
+        """SenseVoice (the laughter listener) is in memory only while the setting is on."""
+        if not self.cfg.laugh_enabled:
+            self.sense = None
+        elif self.sense is None and not self._sense_loading:
+            self._sense_loading = True
+            self.worker.submit(self._load_sense_job)
+
+    def _load_sense_job(self):
+        try:
+            if not models.is_installed(models.SECOND_MODEL):
+                models.download(models.SECOND_MODEL)
+            t0 = time.monotonic()
+            self.sense = Recognizer(models.SECOND_MODEL)
+            log.info("laughter listener loaded in %.1fs", time.monotonic() - t0)
+        except Exception:
+            log.exception("the laughter listener failed to load")
+        finally:
+            self._sense_loading = False
+
     def apply_settings(self):
+        self._sync_laugh()
         self.hotkeys.set_keys(rules.bound_keys(self.cfg.rules))
         can = rules.can_record(self.cfg.rules)
         if self._could_record and not can:
             self._notify(_NO_RECORD)
         self._could_record = can
         self._set_autostart()
+        if self.ai_action.isChecked() != self.cfg.ai_enabled:
+            self.ai_action.blockSignals(True)       # the settings page changed it: only the menu follows
+            self.ai_action.setChecked(self.cfg.ai_enabled)
+            self.ai_action.blockSignals(False)
+        self._warm_ai()
 
     def _set_autostart(self):
         try:
@@ -835,12 +1222,25 @@ class App(QObject):
             self.settings.set_status(f"開機啟動設定失敗：{e}")
 
     def quit(self):
+        self.corrections.close()
         self.muter.restore()
+        self.micguard.restore()
+        self.discord.stop()
         self.hotkeys.stop()
         if self._mouse:
             self._mouse.stop()
         self.tray.hide()
         self.qapp.quit()
+
+
+def _forget_screen(press):
+    """The terms read from the screen are dropped once their dictation is done (the user's condition)."""
+    try:
+        ctx = press.probe.result()      # already read: the dictation used it
+        ctx.terms, ctx.zh_terms, ctx.zh_fix, ctx.en_names = [], [], [], []
+        ctx.screen = ""
+    except Exception:
+        pass
 
 
 def _bias(words: list[tuple[str, float]]) -> list[tuple[str, float]]:

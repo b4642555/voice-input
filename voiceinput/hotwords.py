@@ -13,12 +13,15 @@ replacement after recognition any more: words of two or more characters are left
 """
 import json
 import logging
+import math
 import re
 import threading
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
+from datetime import date
 
 from .paths import DATA_DIR
+from .word_storage import JsonFile
 
 log = logging.getLogger("voiceinput")
 
@@ -35,6 +38,8 @@ def cap(word: str) -> float:
 
 def eligible(word: str) -> bool:
     """Single characters never become hotwords."""
+    if not isinstance(word, str):
+        return False
     word = word.strip()
     return bool(word) and not (len(word) == 1 and _CJK.match(word))
 
@@ -51,78 +56,171 @@ def _today() -> str:
     return time.strftime("%Y-%m-%d")
 
 
+def _parse(data) -> list[Hotword]:
+    if not isinstance(data, list):
+        raise ValueError("熱詞檔須為清單")
+    items, seen = [], set()
+    for row in data:
+        if isinstance(row, str):  # first format: a plain list of manual words
+            row = {"word": row, "weight": cap(row), "source": MANUAL}
+        if not isinstance(row, dict) or not isinstance(row.get("word"), str):
+            raise ValueError("熱詞須有文字 word 欄位")
+        word = row["word"].strip()
+        if not eligible(word):
+            continue
+        weight = row.get("weight")
+        if isinstance(weight, bool) or not isinstance(weight, (int, float, str)):
+            raise ValueError("熱詞權重須為數字")
+        weight = float(weight)
+        if not math.isfinite(weight) or not 0 <= weight <= cap(word):
+            raise ValueError("熱詞權重須在 0 與該詞上限之間")
+        source = row.get("source", MANUAL)
+        if source not in (MANUAL, PICKED):
+            raise ValueError("熱詞 source 須為 manual 或 picked")
+        added = row.get("added") or "2026-10-11"
+        if not isinstance(added, str):
+            raise ValueError("熱詞日期須為 YYYY-MM-DD")
+        date.fromisoformat(added)
+        if word in seen:
+            raise ValueError("熱詞清單有重複詞")
+        seen.add(word)
+        items.append(Hotword(word, weight, source, added))
+    return items
+
+
 class Hotwords:
     def __init__(self, path=PATH):
         self.path = path
-        self._lock = threading.Lock()
-        self.items: list[Hotword] = []
-        try:
-            for d in json.loads(path.read_text(encoding="utf-8")):
-                if isinstance(d, str):    # the first format, the same day: a plain list of 加入熱詞 words
-                    d = {"word": d, "weight": cap(d), "source": MANUAL}
-                if eligible(d.get("word", "")):
-                    # entries from before dates were kept (2026-10-11) were all added that day
-                    self.items.append(Hotword(d["word"], float(d["weight"]), d.get("source", MANUAL),
-                                              d.get("added") or "2026-10-11"))
-        except (OSError, ValueError, TypeError, KeyError):
-            pass
+        self._lock = threading.RLock()
+        self._items: list[Hotword] = []
+        self._file = JsonFile(path, _parse, list)
+        self.reload_if_changed()
 
-    def save(self):
+    @property
+    def error(self) -> str | None:
+        return self._file.error
+
+    @property
+    def items(self) -> list[Hotword]:
         with self._lock:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            lines = ",\n".join("  " + json.dumps(asdict(h), ensure_ascii=False) for h in self.items)
-            self.path.write_text("[\n" + lines + "\n]\n", encoding="utf-8")
+            self.reload_if_changed()
+            return list(self._items)
+
+    def reload_if_changed(self) -> bool:
+        with self._lock:
+            valid, items = self._file.load()
+            if items is not None:
+                self._items = items
+            return valid
+
+    def save(self) -> bool:
+        with self._lock:
+            return self.reload_if_changed() and self._save()
+
+    def _save(self) -> bool:
+        lines = ",\n".join("  " + json.dumps(asdict(h), ensure_ascii=False) for h in self._items)
+        return self._file.save("[\n" + lines + "\n]\n")
+
+    def _find(self, word: str) -> Hotword | None:
+        return next((h for h in self._items if h.word == word), None)
 
     def find(self, word: str) -> Hotword | None:
-        return next((h for h in self.items if h.word == word), None)
+        with self._lock:
+            self.reload_if_changed()
+            return self._find(word)
 
     def add(self, word: str) -> bool:
         """A word typed in the 選字 menu: a hotword at the cap (a picked one is promoted). False if not eligible."""
-        word = word.strip()
         if not eligible(word):
             return False
-        h = self.find(word)
-        if h is None:
-            self.items.append(Hotword(word, cap(word), MANUAL, _today()))
-        else:
-            h.weight, h.source = cap(word), MANUAL
-        self.save()
-        return True
+        word = word.strip()
+        with self._lock:
+            if not self.reload_if_changed():
+                return False
+            before = [replace(h) for h in self._items]
+            h = self._find(word)
+            if h is None:
+                self._items.append(Hotword(word, cap(word), MANUAL, _today()))
+            else:
+                h.weight, h.source = cap(word), MANUAL
+            if self._save():
+                return True
+            self._items = before
+            return False
 
-    def picked(self, old: str, new: str):
+    def picked(self, old: str, new: str) -> bool:
         """A pick in 選字 replaced old with new: new gains weight, old loses some."""
         new, old = new.strip(), old.strip()
-        changed = False
-        if eligible(new):
-            h = self.find(new)
-            if h is None:
-                self.items.append(Hotword(new, cap(new) / 2, PICKED, _today()))
-            elif h.source == PICKED:
-                h.weight = min(cap(new), h.weight + _STEP)
-            changed = True
-        h = self.find(old)
-        if h is not None and h.source == PICKED and old != new:
-            h.weight -= _DROP
-            if h.weight <= 0:
-                self.items.remove(h)
-            changed = True
-        if changed:
+        with self._lock:
+            if not self.reload_if_changed():
+                return False
+            before = [replace(h) for h in self._items]
+            changed = False
+            if eligible(new):
+                h = self._find(new)
+                if h is None:
+                    self._items.append(Hotword(new, cap(new) / 2, PICKED, _today()))
+                elif h.source == PICKED:
+                    h.weight = min(cap(new), h.weight + _STEP)
+                changed = True
+            h = self._find(old)
+            if h is not None and h.source == PICKED and old != new:
+                h.weight -= _DROP
+                if h.weight <= 0:
+                    self._items.remove(h)
+                changed = True
+            if not changed:
+                return True
+            if not self._save():
+                self._items = before
+                return False
             log.info("hotword weights after pick %s -> %s: %s", old, new,
-                     [(h.word, h.weight) for h in self.items if h.word in (old, new)])
-            self.save()
+                     [(h.word, h.weight) for h in self._items if h.word in (old, new)])
+            return True
 
-    def remove(self, word: str):
-        h = self.find(word)
-        if h is not None:
-            self.items.remove(h)
-            self.save()
+    def rename(self, old: str, new: str) -> bool:
+        """Change one manual word atomically, retaining its original date."""
+        if not eligible(new):
+            return False
+        new = new.strip()
+        with self._lock:
+            if not self.reload_if_changed():
+                return False
+            h = self._find(old)
+            if h is None or (new != old and self._find(new) is not None):
+                self._file.error = "熱詞已變更或新名稱已存在，請重新確認列表。"
+                return False
+            before = [replace(item) for item in self._items]
+            h.word, h.weight, h.source = new, cap(new), MANUAL
+            if self._save():
+                return True
+            self._items = before
+            return False
+
+    def remove(self, word: str) -> bool:
+        with self._lock:
+            if not self.reload_if_changed():
+                return False
+            h = self._find(word)
+            if h is None:
+                return True
+            before = list(self._items)
+            self._items.remove(h)
+            if self._save():
+                return True
+            self._items = before
+            return False
 
     def percent(self, h: Hotword) -> float:
         return 100 * h.weight / cap(h.word)
 
     def bias(self) -> list[tuple[str, float]]:
-        return [(h.word, h.weight) for h in self.items]
+        with self._lock:
+            self.reload_if_changed()
+            return [(h.word, h.weight) for h in self._items]
 
     def weights_for(self, words) -> dict[str, float]:
         """Weights of those of words that are hotwords (to put picked words first in 選字)."""
-        return {h.word: h.weight for h in self.items if h.word in words}
+        with self._lock:
+            self.reload_if_changed()
+            return {h.word: h.weight for h in self._items if h.word in words}

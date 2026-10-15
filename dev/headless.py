@@ -8,9 +8,10 @@ box), click (the user clicks: ends what the app knows about the text), tap (one 
 (double tap), tap2:WAV (double tap, the second press held while WAV is spoken), toggle:WAV (tap, speak, tap),
 hotkey:NAME (the key or button the next steps press, default mouse_middle), rules:default (the default operations),
 rule:JSON (add an operation, rules.Rule.from_dict), at:WORD (put the caret right after the last WORD; at: puts it at
-the end), say:TEXT (dictate TEXT as if recognized), set:NAME=VALUE (change a setting in memory only) or key:BACK (the
+the end), say:TEXT (dictate TEXT as if recognized), screen:TEXT (what the foreground window shows, / for a new line), set:NAME=VALUE (change a setting in memory only) or key:BACK (the
 user presses Backspace n times: key:BACK*3), pick:N / pickw:WORD (click a row of the 選字 menu), type:TEXT (type TEXT in the menu's input box and press Enter). Settings are never saved; hotwords and smart picks live in <dir> (hotwords.test.json,
-smart-picks.test.json, emptied at the start), never in the real files.
+smart-picks.test.json, history/, emptied at the start), never in the real files. AI 潤稿 follows the real
+config (set:ai_enabled=0 turns it off for a run).
 """
 import json
 import shutil
@@ -18,12 +19,13 @@ import sys
 import time
 import wave
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 from PySide6.QtWidgets import QApplication
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from voiceinput import app as appmod, output, rules, selection, session  # noqa: E402
+from voiceinput import app as appmod, output, rules, screen_terms, selection, session  # noqa: E402
 
 S = sys.argv[1]
 HWND = 4242
@@ -90,22 +92,40 @@ appmod.Hotkeys.start = lambda self: None           # no real hotkey / keyboard h
 replayed = []                                      # gestures given back to the key (key name per press)
 appmod.Hotkeys.replay = lambda self, name, times=1: replayed.extend([name] * times)
 appmod.App._watch_mouse = lambda self: None       # the user's real clicks must not end the simulated session
+appmod.App._set_autostart = lambda self: None     # tests must not update the user's startup registration
+appmod.Muter = lambda: SimpleNamespace(mute=lambda: None, restore=lambda: None)
+appmod.MicGuard = lambda: SimpleNamespace(mute=lambda: None, restore=lambda: None, recover=lambda: None)
+appmod.DiscordMute = lambda: SimpleNamespace(start=lambda *a: None, stop=lambda: None)   # never mute real apps
+appmod.CorrectionWatcher = lambda callback: SimpleNamespace(
+    prepare_before_paste=lambda: None, after_paste=lambda *args: None,
+    on_key=lambda *args, **kwargs: None, on_pointer=lambda **kwargs: None,
+    cancel=lambda: None, close=lambda: None)       # never read the user's live input fields
+
+
+SCREEN = {"text": ""}   # screen:TEXT, what the foreground window shows (screen_terms)
 
 
 class Probe:
     def __init__(self, *_):
-        self._ctx = selection.Context(box.selection(), [], box.caret_context())
+        text = screen_terms.normalize_screen(SCREEN["text"])
+        self._ctx = selection.Context(box.selection(), selection.terms_in(text), box.caret_context(),
+                                      screen_terms.terms(text) + screen_terms.recent(text),
+                                      screen_terms.fix_candidates(text))
+        self._ctx.en_names = screen_terms.english_names(text)
 
     def result(self, timeout=2.0):
         return self._ctx
 
 
 appmod.ContextProbe = Probe
-_Hotwords, _Memory = appmod.Hotwords, appmod.Memory
+_Hotwords, _Memory, _History = appmod.Hotwords, appmod.Memory, appmod.History
 for name in ("hotwords.test.json", "smart-picks.test.json"):
     (Path(S) / name).unlink(missing_ok=True)
-appmod.Hotwords = lambda: _Hotwords(Path(S) / "hotwords.test.json")
-appmod.Memory = lambda: _Memory(Path(S) / "smart-picks.test.json")
+for p in (Path(S) / "history").glob("history-*.jsonl"):
+    p.unlink()
+appmod.Hotwords = lambda *_: _Hotwords(Path(S) / "hotwords.test.json")
+appmod.Memory = lambda *_: _Memory(Path(S) / "smart-picks.test.json")
+appmod.History = lambda *_: _History(Path(S) / "history")
 qapp = QApplication(sys.argv)
 qapp.setQuitOnLastWindowClosed(False)
 A = appmod.App(qapp)
@@ -132,6 +152,17 @@ def pump(sec):
     while time.monotonic() < end:
         qapp.processEvents()
         time.sleep(0.01)
+
+
+def settle():
+    """Wait for the serial recognizer and deliver its Qt signals, including long recordings."""
+    barrier = A.worker.submit(lambda: None)
+    end = time.monotonic() + 120
+    while not barrier.done() and time.monotonic() < end:
+        pump(0.05)
+    if not barrier.done():
+        raise TimeoutError("transcription did not finish in 120 seconds")
+    pump(0.2)
 
 
 def load(name):
@@ -197,6 +228,7 @@ try:
                 pump(0.6 if wav else 0.05)
                 up()
             pump(2.5 if wav else 1.0)
+            settle()
             given = f"  (還給按鍵：{replayed})" if replayed else ""
             given += menu()
             print(f"[{step}] → 文字框：{box.text[:box.caret] + '|' + box.text[box.caret:]!r}{given}")
@@ -214,6 +246,10 @@ try:
             A.cfg.rules.append(rules.Rule.from_dict(json.loads(step[5:])))
             A.hotkeys.set_keys(rules.bound_keys(A.cfg.rules))
             print(f"[新增操作] {A.cfg.rules[-1]}  {rules.problems(A.cfg.rules[-1], A.cfg.rules) or ''}")
+            continue
+        if step.startswith("screen:"):
+            SCREEN["text"] = step[7:].replace("/", "\n")
+            print(f"[畫面] 專有名詞：{screen_terms.terms(SCREEN['text'])}")
             continue
         if step.startswith("set:"):
             name, value = step[4:].split("=")
@@ -268,6 +304,7 @@ try:
         pump(0.6)
         up()
         pump(2.5)
+        settle()
         shown = box.text[:box.caret] + "|" + box.text[box.caret:]
         print(f"[{step}] {A._records[-1]['fmt'] if A._records else ''!r:32} → 文字框：{shown!r}{menu()}")
 finally:

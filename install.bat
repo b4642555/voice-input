@@ -7,6 +7,8 @@ set "TOOLS=%~dp0.tools"
 set "UV=%TOOLS%\uv.exe"
 set "UV_PYTHON_INSTALL_DIR=%TOOLS%\python"
 set "UV_PYTHON_PREFERENCE=only-managed"
+rem use the Windows certificate store (antivirus / company proxies that re-sign HTTPS broke the download)
+set "UV_NATIVE_TLS=1"
 
 if not exist "%UV%" (
     echo [1/4] Installing uv ...

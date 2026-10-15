@@ -22,6 +22,25 @@ def to_traditional(text: str) -> str:
     return text
 
 
+_CASUAL_BREAKS = re.compile(r"[，,、；;\n]")
+_FINAL_PERIOD = re.compile(r"[。．.]+(?=\s*$)")
+_HAS_CJK = re.compile(r"[㐀-䶿一-鿿]")
+
+
+def casual(text: str) -> bool:
+    """A chat-length message (the user's rule, 2026-10-14): with Chinese, fewer than five commas / line breaks;
+    English, two commas at most."""
+    breaks = len(_CASUAL_BREAKS.findall(text.strip()))
+    return breaks < 5 if _HAS_CJK.search(text) else breaks <= 2
+
+
+def drop_casual_period(text: str) -> str:
+    """No full stop at the end of a chat-length message, in any language; ？！… keep their tone."""
+    if not text.strip() or not casual(text) or text.rstrip().endswith(("...", "…")):
+        return text
+    return _FINAL_PERIOD.sub("", text)
+
+
 def to_simplified(text: str) -> str:
     return _t2s.convert(text)
 
@@ -67,7 +86,7 @@ _HALF = str.maketrans("，。？！；：", ",.?!;:")
 _SPACE_CJK_ASCII = re.compile(f"([{CJK}])\\s*([A-Za-z0-9])")
 _SPACE_ASCII_CJK = re.compile(f"([A-Za-z0-9%])\\s*([{CJK}])")
 _TRAILING_PUNCT = re.compile(r"[。，,.]+$")
-_FILLER = re.compile(r"[嗯呃]+[，,、。]?\s*")
+_FILLER = re.compile(r"[嗯呃痾]+[，,、。]?\s*")
 
 # Disfluencies (2026-09-29, from the user's log: 我們我們明天見, 你可不可不可以, 今天今天, 先打開那個，先打開設定頁).
 # Repeated 2-4 character chunks are removed unless they are ABAB reduplication (研究研究, 討論討論: listed in the
@@ -178,14 +197,18 @@ def _parse_number(s: str) -> int | None:
         if len(s) == 1 or len(s) >= 3 or "零" in s or "〇" in s:
             return int("".join(str(_DIGITS[ch]) for ch in s))
         return None
-    total, rest = 0, s
+    total, rest, last_big = 0, s, 0
     for big_ch, big in sorted(_BIG.items(), key=lambda kv: -kv[1]):
         if big_ch in rest:
             head, rest = rest.split(big_ch, 1)
+            last_big = big
             v = _parse_section(head) if head else 1
             if v is None:
                 return None
             total += v * big
+    if len(rest) == 1 and rest in _DIGITS and _DIGITS[rest] and last_big:
+        # 一萬九 -> 19000, 三億五 -> 350000000 (like 三百五 -> 350); 一萬零九 stays 10009
+        return total + _DIGITS[rest] * last_big // 10
     if rest:
         v = _parse_section(rest.lstrip("零〇"))
         if v is None:

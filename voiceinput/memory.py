@@ -23,6 +23,7 @@ tab): styles, how often each way of writing English was picked (voiceInput, Voic
 word and for several, to order those candidates. (Picks raising a word's X-ASR bias was planned and dropped the same
 day: X-ASR barely follows Chinese biasing, and the user chose not to keep it for English alone.)
 """
+import copy
 import json
 import logging
 import re
@@ -30,6 +31,7 @@ import threading
 
 from .paths import DATA_DIR
 from .reading import Token, reading_key, tokens
+from .word_storage import JsonFile
 
 log = logging.getLogger("voiceinput")
 
@@ -120,6 +122,48 @@ def is_latin(text: str) -> bool:
     return bool(_LATIN.match(text.strip()))
 
 
+def _count(value, minimum: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise ValueError("選字次數與序號須為整數")
+    number = int(value)
+    if number < minimum:
+        raise ValueError("選字次數與序號不可小於下限")
+    return number
+
+
+def _parse(data):
+    if not isinstance(data, dict):
+        raise ValueError("智慧選字檔須為物件")
+    rows, styles = data.get("examples", []), data.get("styles", {})
+    if not isinstance(rows, list) or not isinstance(styles, dict):
+        raise ValueError("examples 須為清單，styles 須為物件")
+    examples, serial = {}, 1
+    for row in rows:
+        if not isinstance(row, dict) or not isinstance(row.get("value"), str):
+            raise ValueError("選字例子須有文字 value 欄位")
+        if not _single(row["value"]):
+            continue  # phrases and English were learned before the change to single characters
+        key, left, right = row.get("key"), row.get("left"), row.get("right")
+        if not isinstance(key, str) or not key.strip():
+            raise ValueError("選字例子須有讀音 key")
+        if any(not isinstance(side, list) or len(side) > _SIDE
+               or any(not isinstance(token, str) or not token for token in side)
+               for side in (left, right)):
+            raise ValueError("選字前後文須為最多兩個文字項目的清單")
+        number = _count(row.get("serial"), 1)
+        examples.setdefault(key, []).append({"value": row["value"], "left": list(left),
+                                              "right": list(right), "serial": number})
+        serial = max(serial, number + 1)
+    for exs in examples.values():
+        exs.sort(key=lambda e: -e["serial"])
+    counts = {}
+    for key, value in styles.items():
+        if not isinstance(key, str) or not key:
+            raise ValueError("英文寫法偏好須有文字 key")
+        counts[key] = _count(value, 0)
+    return examples, counts, serial
+
+
 class Memory:
     def __init__(self, path=PATH):
         self.path = path
@@ -127,84 +171,108 @@ class Memory:
         self.examples: dict[str, list[dict]] = {}   # key -> examples, newest first
         self.styles: dict[str, int] = {}
         self._serial = 1
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            for ex in data.get("examples", []):
-                if not _single(ex["value"]):
-                    continue          # phrases and English were learned before the change to single characters
-                self.examples.setdefault(ex["key"], []).append(
-                    {"value": ex["value"], "left": list(ex["left"]), "right": list(ex["right"]),
-                     "serial": int(ex["serial"])})
-            self.styles = {k: int(v) for k, v in data.get("styles", {}).items()}
-        except (OSError, ValueError, KeyError, TypeError):
-            pass
-        for exs in self.examples.values():
-            exs.sort(key=lambda e: -e["serial"])
-            self._serial = max([self._serial] + [e["serial"] + 1 for e in exs])
+        self._file = JsonFile(path, _parse, lambda: ({}, {}, 1))
+        self.reload_if_changed()
 
-    def save(self):
+    @property
+    def error(self) -> str | None:
+        return self._file.error
+
+    def reload_if_changed(self) -> bool:
         with self._lock:
-            rows = [{"key": k, "value": e["value"], "left": e["left"], "right": e["right"], "serial": e["serial"]}
-                    for k, exs in sorted(self.examples.items()) for e in exs]
-            # one example per line, so the file reads as a list
-            lines = ",\n".join("  " + json.dumps(r, ensure_ascii=False) for r in rows)
-            text = ('{\n"examples": [\n' + lines + '\n],\n"styles": '
-                    + json.dumps(self.styles, ensure_ascii=False) + "\n}\n")
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            self.path.write_text(text, encoding="utf-8")
+            valid, state = self._file.load()
+            if state is not None:
+                self.examples, self.styles, self._serial = state
+            return valid
+
+    def save(self) -> bool:
+        with self._lock:
+            return self.reload_if_changed() and self._save()
+
+    def _save(self) -> bool:
+        rows = [{"key": k, "value": e["value"], "left": e["left"], "right": e["right"], "serial": e["serial"]}
+                for k, exs in sorted(self.examples.items()) for e in exs]
+        # one example per line, so the file reads as a list
+        lines = ",\n".join("  " + json.dumps(r, ensure_ascii=False) for r in rows)
+        text = ('{\n"examples": [\n' + lines + '\n],\n"styles": '
+                + json.dumps(self.styles, ensure_ascii=False) + "\n}\n")
+        return self._file.save(text)
 
     # --- examples ---
     def lookup(self, key: str, left, right, single: bool) -> str | None:
         with self._lock:
-            exs = self.examples.get(key)
-            if not exs:
+            self.reload_if_changed()
+            return self._lookup(key, left, right, single)
+
+    def _lookup(self, key: str, left, right, single: bool) -> str | None:
+        exs = self.examples.get(key)
+        if not exs:
+            return None
+        scored = []
+        for e in exs:
+            lm, rm, b = _agreement(e["left"], e["right"], left, right)
+            scored.append(((lm + rm, rm, b), e))
+        best = max(rank for rank, _ in scored)
+        top = [e for rank, e in scored if rank == best]
+        if single:
+            total, right_only = best[0], best[1]
+            # the character right before agrees, or two around it do: one shared neighbour on the right is not
+            # evidence (成 -> 宸 learned before 跟 turned 吳宇澄跟防疫 into 吳宇宸, the user: 「這邏輯不對」, 2026-10-14)
+            # a character on the left and two in all (the start of the text counts as one on the left): 他在這裡
+            # yes, 我在這裡 / 他在家 no
+            left_ok = total - right_only >= 1 or best[2]
+            # an example learned with less context around it (在 said alone) needs only what it has
+            known = min(len([c for c in e["left"] if c != BOUNDARY]) + len(e["right"]) + (BOUNDARY in e["left"])
+                        for e in top)
+            if not (left_ok and total + bool(best[2]) >= min(2, known)) or len({e["value"] for e in top}) > 1:
                 return None
-            scored = []
-            for e in exs:
-                lm, rm, b = _agreement(e["left"], e["right"], left, right)
-                scored.append(((lm + rm, rm, b), e))
-            best = max(rank for rank, _ in scored)
-            top = [e for rank, e in scored if rank == best]
-            if single:
-                if best == (0, 0, False) or len({e["value"] for e in top}) > 1:
-                    return None
-            return max(top, key=lambda e: e["serial"])["value"]
+        return max(top, key=lambda e: e["serial"])["value"]
 
     def values(self, key: str) -> list[str]:
         """Every value picked for key, newest first."""
         with self._lock:
+            self.reload_if_changed()
             out = []
             for e in self.examples.get(key, []):
                 if e["value"] not in out:
                     out.append(e["value"])
             return out
 
-    def record(self, text: str, start: int, end: int, value: str):
+    def record(self, text: str, start: int, end: int, value: str) -> bool:
         """The user picked value for text[start:end] (the selection, with its line around it)."""
         old = text[start:end]
         key = reading_key(old)
-        if not key or not (_single(old) and _single(value)):
-            self._learn_style(old, value)
-            self.save()
-            return
-        left, right = situation(text, start, end)
-        new = {"value": value, "left": left, "right": right, "serial": self._serial}
         with self._lock:
-            self._serial += 1
-            exs = [e for e in self.examples.get(key, [])
-                   if not ((e["value"] != value and not _conflict(e, new))
-                           or (e["value"] == value and e["left"] == left and e["right"] == right))]
-            self.examples[key] = [new] + exs
+            if not self.reload_if_changed():
+                return False
+            before = copy.deepcopy(self.examples), dict(self.styles), self._serial
+            single = bool(key) and _single(old) and _single(value)
+            if single:
+                left, right = situation(text, start, end)
+                new = {"value": value, "left": left, "right": right, "serial": self._serial}
+                self._serial += 1
+                exs = [e for e in self.examples.get(key, [])
+                       if not ((e["value"] != value and not _conflict(e, new))
+                               or (e["value"] == value and e["left"] == left and e["right"] == right))]
+                self.examples[key] = [new] + exs
             self._learn_style(old, value)
-        log.info("smart pick: %s -> %s (%s %s / %s)", old, value, key, "".join(left), "-".join(right))
-        self.save()
+            if not self._save():
+                self.examples, self.styles, self._serial = before
+                return False
+            if single:
+                log.info("smart pick: %s -> %s (%s %s / %s)", old, value, key, "".join(left), "-".join(right))
+            return True
 
     def apply(self, text: str, prefix: str = "") -> str:
         """Replace every span of text that the examples decide otherwise. prefix: the line before it (context)."""
         with self._lock:
-            if not self.examples:
-                return text
-            lengths = [1]
+            self.reload_if_changed()
+            return self._apply(text, prefix)
+
+    def _apply(self, text: str, prefix: str) -> str:
+        if not self.examples:
+            return text
+        lengths = [1]
         full = prefix + text
         toks = tokens(full)
         out, pos, i = [], len(prefix), 0
@@ -220,7 +288,7 @@ class Memory:
                     continue
                 a, b = run[0].start, run[-1].end
                 left, right = situation(full, a, b)
-                value = self.lookup(key, left, right, single=(n == 1 and run[0].kind == "cjk"))
+                value = self._lookup(key, left, right, single=(n == 1 and run[0].kind == "cjk"))
                 if value is None:
                     continue
                 if value != full[a:b]:
@@ -244,6 +312,7 @@ class Memory:
         """English ways of writing text, the styles picked most often first."""
         vs = variants(text)
         with self._lock:
+            self.reload_if_changed()
             vs.sort(key=lambda sv: -self.styles.get(sv[0], 0))   # stable: default order breaks ties
         return [form for _, form in vs]
 
