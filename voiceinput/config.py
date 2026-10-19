@@ -29,6 +29,7 @@ class Config:
     punctuation_names: bool = True  # an utterance of just a punctuation name (逗號, 句號 …) types the mark
     describe_char: bool = True     # 節日的節 types 節 (edit.described)
     copy_key: str = "Enter"        # copies the last dictation while the 複製最後的轉錄 card is up (copycard.py)
+    tech_terms: bool = True        # English tech / software / game names heard wrong are written right (techterms.py)
     casual_no_period: bool = True  # a chat-length dictation ends without 。 / . (textfmt.drop_casual_period)
     theme: str = "mist"            # main window colours (settings.THEMES); the blue one the user picked
     laugh_enabled: bool = False    # experiment: SenseVoice listens for laughter (loaded only when on, +150MB)

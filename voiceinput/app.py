@@ -34,7 +34,7 @@ from PySide6.QtCore import QLockFile, QObject, QPointF, QRectF, Qt, QTimer, Sign
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
-from . import autostart, candidates, edit, laugh, llm, models, paths, rules, screen_terms, sync
+from . import autostart, candidates, edit, laugh, llm, models, paths, rules, screen_terms, sync, techterms
 from .asr import SAMPLE_RATE, Recognizer
 from .audio import Recorder
 from .config import Config
@@ -811,6 +811,10 @@ class App(QObject):
             formatted, fixed = screen_terms.fix(formatted, zh, getattr(ctx, "zh_fix", []), common_wins=not ai_on)
             formatted, fixed_en = screen_terms.fix_english(formatted, getattr(ctx, "en_names", []))
             fixed += fixed_en
+            if self.cfg.tech_terms:       # the bundled list of tech names; what is on screen has already won above
+                formatted, fixed_tech = techterms.fix(formatted)
+                if fixed_tech:
+                    log.info("tech terms fixed %d span(s)", fixed_tech)
             if fixed:
                 log.info("screen terms fixed %d span(s)", fixed)   # never the words: screen text is not logged
             selected = ctx.selection is not None and press.deleted is None and press.first is None

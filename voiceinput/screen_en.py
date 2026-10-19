@@ -152,8 +152,10 @@ def _ocr_same(a: str, b: str) -> bool:
     return norm(a) == norm(b)
 
 
-def _matches(heard: list[str], name: str) -> bool:
-    """heard (the words of a run) is name misheard."""
+def _matches(heard: list[str], name: str, strict: bool = False) -> bool:
+    """heard (the words of a run) is name misheard. strict (the bundled tech list, no screen evidence): only the same
+    letters (get hub = GitHub), a one-word near miss of a long word, or a run whose every word sounds like the name's
+    part in the same place; numbers must be equal (Windows 10 is not Windows 11)."""
     key, nkey = "".join(heard).lower(), _key(name)
     if _ocr_same(key, nkey) and key != nkey:
         return False                 # the screen's spelling is the misread one
@@ -164,7 +166,9 @@ def _matches(heard: list[str], name: str) -> bool:
     parts = _parts(name)
     if len(heard) != len(parts):
         if len(heard) == 1 and len(parts) == 1 and len(key) >= 6 and not _ordinary(key):
-            return _distance(key, nkey) <= 1 and _soundex(key) == _soundex(nkey) or _like(key, nkey)
+            return _distance(key, nkey) <= 1 and _soundex(key) == _soundex(nkey) or (not strict and _like(key, nkey))
+        if strict:
+            return False
         if len(heard) >= 2 and len(parts) == 1 and len(nkey) >= 6:
             # one long name heard as several words of plain English: cover nets -> Kubernetes (c / k alike);
             # never a run that holds a name already (Instagram before)
@@ -173,10 +177,12 @@ def _matches(heard: list[str], name: str) -> bool:
     words = [w.lower() for w in heard]
     if len(words) == 1:
         return len(key) >= 6 and not _ordinary(key) and (
-            _distance(key, nkey) <= 1 and _soundex(key) == _soundex(nkey) or _like(key, nkey))
+            _distance(key, nkey) <= 1 and _soundex(key) == _soundex(nkey) or (not strict and _like(key, nkey)))
     if not any(w == p for w, p in zip(words, parts)):
         return False
     for w, p in zip(words, parts):
+        if strict and w != p and (any(c.isdigit() for c in w + p) or _soundex(w) != _soundex(p)):
+            return False             # google dream is not Google Drive; Windows 10 is not Windows 11
         if w != p and _soundex(w) != _soundex(p) and w[:2] != p[:2]:
             return False             # clock / Claude: different Soundex, same start
     return _ratio(key, nkey) >= 0.6
@@ -227,8 +233,9 @@ def _supported_hits(text: str, tok, screen_names: list[str]) -> list[str]:
     return out
 
 
-def fix(text: str, screen_names: list[str]) -> tuple[str, int]:
-    """Replace runs of English words that are a screen name misheard. Returns the text and how many changed."""
+def fix(text: str, screen_names: list[str], rank: dict | None = None, strict: bool = False) -> tuple[str, int]:
+    """Replace runs of English words that are a screen name misheard. Returns the text and how many changed. rank (name
+    -> number): when two names fit one run, the one with the higher number wins if it is higher than the other's."""
     if not screen_names:
         return text, 0
     tokens = [(m.start(), m.end(), m.group(0)) for m in _WORD.finditer(text)]
@@ -245,11 +252,16 @@ def fix(text: str, screen_names: list[str]) -> tuple[str, int]:
                 continue
             surface = text[run[0][0]:run[-1][1]]
             heard = [t[2] for t in run]
-            hits = [name for name in screen_names if surface != name and _matches(heard, name)
-                    and not _inside_english(text, tokens, i, n, run, _key(surface) == _key(name))]
+            hits = [name for name in screen_names if surface != name and _matches(heard, name, strict)
+                    and not _inside_english(text, tokens, i, n, run,
+                                            _key(surface) == _key(name) and not (" " not in name and _ordinary(name)))]
             hits = list(dict.fromkeys(hits))
-            if not hits and n == 1:
+            if not hits and n == 1 and not strict:
                 hits = _supported_hits(text, run[0], screen_names)
+            if rank and len(hits) > 1:
+                top = max(rank.get(h, 0) for h in hits)
+                best = [h for h in hits if rank.get(h, 0) == top]
+                hits = best if len(best) == 1 else hits
             if len(hits) == 1:
                 chosen.append((run[0][0], run[-1][1], hits[0]))
                 i += n

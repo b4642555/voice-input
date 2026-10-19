@@ -1917,6 +1917,7 @@ class SettingsDialog(QDialog):
         dh.addWidget(self.discord_f24)
         self.describe = Switch()
         self.casual = Switch()
+        self.tech_terms = Switch()
         self.laugh_on = Switch()
         self.laugh_text = QLineEdit(placeholderText="例如 哈哈、XD、😂")
         self.laugh_text.setFixedWidth(160)
@@ -1943,6 +1944,8 @@ class SettingsDialog(QDialog):
             _setting_row("選取句號後講話改成逗號接續", "今天很好。明天見 → 選取「。」講「我們去公園」→ 今天很好，我們去公園。明天見",
                          self.period_comma),
             _setting_row("指定字", "說「節日的節」時只輸入「節」", self.describe),
+            _setting_row("英文科技詞自動校正", "把聽錯的英文軟體、科技、遊戲名稱寫對（get hub → GitHub、cloud code → Claude Code）。"
+                         "只在很有把握時才改，一般英文單字不會動", self.tech_terms),
             _setting_row("聊天短句不加句號", "中文逗號少於 5 個、英文逗號 2 個以下時，句尾不加句號（問號、驚嘆號照留）",
                          self.casual),
             _setting_row("複製最後的轉錄的快捷鍵", "游標不在輸入框時，聽寫結果不會貼上，而是顯示在卡片上；按這個鍵或「複製」按鈕就複製。"
@@ -1980,7 +1983,7 @@ class SettingsDialog(QDialog):
         col.addStretch(1)
 
         self.mic.currentIndexChanged.connect(self._apply)
-        for box in (self.punct, self.period_comma, self.describe, self.casual, self.autostart, self.mute, self.mic_exclusive, self.discord_on, self.voice_stop, self.mouse_text_only,
+        for box in (self.punct, self.period_comma, self.describe, self.casual, self.tech_terms, self.autostart, self.mute, self.mic_exclusive, self.discord_on, self.voice_stop, self.mouse_text_only,
                     self.laugh_on):
             box.toggled.connect(self._apply)
         self.laugh_text.editingFinished.connect(self._apply)
@@ -2052,6 +2055,7 @@ class SettingsDialog(QDialog):
         self.discord_key.setText(self.cfg.discord_key)
         self.describe.setChecked(self.cfg.describe_char)
         self.casual.setChecked(self.cfg.casual_no_period)
+        self.tech_terms.setChecked(self.cfg.tech_terms)
         self.laugh_on.setChecked(self.cfg.laugh_enabled)
         self.theme.setCurrentIndex(max(0, self.theme.findData(self.cfg.theme)))
         self.laugh_text.setText(self.cfg.laugh_text)
@@ -2082,6 +2086,7 @@ class SettingsDialog(QDialog):
         self.cfg.discord_key = self.discord_key.text() or "Ctrl+Shift+D"
         self.cfg.describe_char = self.describe.isChecked()
         self.cfg.casual_no_period = self.casual.isChecked()
+        self.cfg.tech_terms = self.tech_terms.isChecked()
         self.cfg.laugh_enabled = self.laugh_on.isChecked()
         self.cfg.laugh_text = self.laugh_text.text().strip()
         self.cfg.copy_key = self.copy_key.text() or "Enter"

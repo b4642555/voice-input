@@ -1,0 +1,48 @@
+# English tech, software and game names, spelled the way they are written (tech_terms.py, 2026-10-19).
+# "== 3" starts a group of the most used names, "== 2" common ones, "== 1" the rest; a higher group wins when two names
+# fit one heard word. Names are separated by commas or new lines. Everyday words that are only sometimes a name
+# (Go, Edge, Teams, Signal, Arc, Slack ...) are left out on purpose: a wrong change costs more than a missed one.
+
+== 3
+Claude, Claude Code, Anthropic, ChatGPT, OpenAI, GPT, GitHub, GitLab, Gemini, Copilot, Cursor, Codex, DeepSeek, Midjourney,
+Google, YouTube, Discord, Telegram, WhatsApp, Instagram, Facebook, TikTok, Netflix, Spotify, Notion, Figma, Photoshop,
+PowerPoint, Excel, Windows, Linux, macOS, iPhone, iPad, Android, Chrome, Firefox, Steam, Docker, Kubernetes, Python,
+JavaScript, TypeScript, React, Node.js, Next.js, PyTorch, TensorFlow, Hugging Face, VS Code, Visual Studio Code,
+Minecraft, Fortnite, Valorant, Roblox, PlayStation, Xbox, Nintendo Switch, NVIDIA, Godot, Unity, Unreal Engine, Obsidian
+
+== 2
+Claude Opus, Claude Sonnet, Claude Haiku, Opus, Sonnet, Haiku, Gemini Pro, Gemini Flash, GPT-4, GPT-4o, GPT-5, ChatGPT Plus,
+Perplexity, Grok, Llama, Mistral, Qwen, Kimi, Ollama, LangChain, LlamaIndex, Stable Diffusion, DALL-E, Sora, Whisper,
+Anthropic Console, OpenRouter, Groq, Cerebras, Replit, Vercel, Netlify, Supabase, Firebase, Cloudflare, DigitalOcean,
+Heroku, Terraform, Ansible, Jenkins, Prometheus, Grafana, Redis, PostgreSQL, MySQL, MongoDB, SQLite, Elasticsearch, Kafka,
+RabbitMQ, GraphQL, REST API, WebSocket, OAuth, JSON, YAML, TOML, Markdown, LaTeX, Vim, Neovim, Emacs, JetBrains, IntelliJ,
+PyCharm, WebStorm, Xcode, Android Studio, Sublime Text, Visual Studio, Git, Bash, PowerShell, Zsh, WSL, Homebrew, npm, pnpm,
+Yarn, Webpack, Vite, Babel, ESLint, Prettier, Jest, Vitest, Playwright, Selenium, Puppeteer, Tailwind CSS, Bootstrap,
+Vue, Nuxt, Angular, Svelte, SvelteKit, Astro, Remix, NestJS, Django, Flask, FastAPI, Rails, Ruby on Rails, Laravel,
+Spring Boot, Kotlin, Swift, SwiftUI, Rust, Golang, Dart, Flutter, React Native, Electron, Tauri, Qt, PySide, PyQt, NumPy,
+pandas, SciPy, Jupyter, Matplotlib, scikit-learn, Keras, ONNX, CUDA, WebAssembly, WebGPU, OpenGL, Vulkan, DirectX,
+AWS, Amazon Web Services, EC2, S3, Lambda, Azure, Google Cloud, GCP, Alibaba Cloud, Oracle Cloud, Raspberry Pi, Arduino,
+Wikipedia, Reddit, Twitter, LinkedIn, Pinterest, Snapchat, Bluesky, Mastodon, WeChat, KakaoTalk, Zoom,
+Microsoft Teams, Google Meet, Skype, Twitch, Bilibili, Vimeo, SoundCloud, Apple Music, Amazon Prime, Disney Plus, HBO Max,
+Dropbox, OneDrive, Google Drive, iCloud, Evernote, OneNote, Trello, Asana, Jira, Confluence, ClickUp, Airtable,
+Canva, Sketch, Illustrator, Premiere Pro, After Effects, DaVinci Resolve, Final Cut Pro, Blender, Audacity, OBS, OBS Studio,
+Lightroom, InDesign,, SharePoint, Google Docs, Google Sheets, Gmail, Chrome OS, Ubuntu, Debian, Fedora,
+Arch Linux, Windows 11, Windows 10, iOS, iPadOS, watchOS, Safari,, Microsoft Edge, Bing, DuckDuckGo,
+1Password, Bitwarden, LastPass, ProtonMail, Proton VPN, NordVPN, Tailscale, WireGuard, OpenVPN, Wireshark, Burp Suite,
+Kali Linux, Metasploit, Nmap, Samsung, Qualcomm, Snapdragon, MediaTek, Intel, AMD, Ryzen, Radeon, GeForce, RTX, Tesla,
+SpaceX, Starlink, Huawei, Xiaomi, OnePlus, MacBook, MacBook Pro, MacBook Air, iMac, AirPods, Apple Watch,
+Vision Pro, Meta Quest, Oculus, HTC Vive, Steam Deck, ROG Ally, Logitech, Razer, Corsair, Synology, Ubiquiti
+
+== 2
+League of Legends, Genshin Impact, Honkai Star Rail, Zenless Zone Zero, Wuthering Waves, Elden Ring, Dark Souls, Sekiro,
+Bloodborne, Baldur's Gate 3, Cyberpunk 2077, The Witcher 3, Red Dead Redemption, Grand Theft Auto, GTA, Skyrim, Fallout,
+Starfield, Hollow Knight, Stardew Valley, Terraria, Balatro, Slay the Spire, Undertale, Cuphead, Among Us,
+Apex Legends, Overwatch, Counter-Strike, CS2, Dota 2, Diablo, World of Warcraft, Hearthstone, StarCraft, Call of Duty,
+Battlefield, Rainbow Six Siege, Rocket League, Fall Guys, PUBG, Warframe, Destiny 2, Path of Exile, Monster Hunter,
+Final Fantasy, Dragon Quest, Pokemon, Pokémon, Zelda, Mario, Smash Bros, Animal Crossing, Splatoon, Kirby,
+Street Fighter, Tekken, Mortal Kombat, Resident Evil, Silent Hill, Metal Gear, Assassin's Creed, Far Cry, Halo, Gears of War,
+Forza, Gran Turismo, FIFA, EA FC, NBA 2K, Madden, Civilization, Age of Empires, Total War, Cities Skylines, RimWorld,
+Factorio, Valheim, Palworld, Lethal Company, Helldivers 2, Black Myth Wukong, Lies of P, Wo Long,
+Epic Games, Epic Games Store, Battle.net, Ubisoft, Ubisoft Connect, Blizzard, Riot Games, Bethesda, Capcom,
+Konami, Square Enix, Bandai Namco, FromSoftware, CD Projekt, Rockstar, Naughty Dog, GOG, itch.io, Game Pass, Xbox Game Pass,
+GeForce Now, RenPy, GameMaker, RPG Maker, Cocos, PICO-8, LÖVE, MonoGame, Bevy, Defold, Aseprite,

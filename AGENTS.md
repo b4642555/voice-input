@@ -87,6 +87,14 @@ local option, pill + main window + 選字 menu restyled, a sync folder, context 
   (+150MB, only while on) and asks `Recognizer.sound_event` about the whole clip and its last 1.5s; on
   `<|Laughter|>` the chosen text (哈哈 / XD / 😂) is typed alone or after the sentence. TTS cannot laugh, so only the
   plumbing is tested (fake recognizer, SenseVoice answers <|Speech|> on real speech); accuracy on real laughter is unknown.
+- **English tech-name list** (`techterms.py`, `dict/tech_terms.txt`, the user, 2026-10-19: 先只做英文的科技詞、軟體、遊戲名稱):
+  about 430 curated names in three popularity groups (not downloaded data: there is no "world list"; nothing updates
+  itself). After the screen fixes, `screen_en.fix(..., strict=True, rank=...)` writes a heard run the way the name is
+  spelled (get hub -> GitHub, cloud code -> Claude Code, type script -> TypeScript, node js -> Node.js). Strict mode:
+  the same letters, a whole run that sounds like the name part by part, or a near miss of one long non-word; no
+  "another name is nearby" support (it gave via -> Vite and opens -> OpenAI on 760 doc / log sentences), numbers must be
+  equal, a one-word ordinary name (unity) is not capitalized between English words. The higher group wins a tie.
+  Setting 英文科技詞自動校正 (on). Not done: Chinese new words, automatic updates (the user wanted English only).
 - **Least quota** (the user, 2026-10-14: 越省越好，不想浪費額度; 要自動設定好，也要有關掉 AI 額度的選項):
   `worth_polishing` sends only a dictation of 14+ content characters, or 5+ with a filler / self-correction / list
   (嗯、那個、不對、第一…); short clean ones are left to the rules. The rules sit in the Claude Code process as its fixed
