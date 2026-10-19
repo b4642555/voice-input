@@ -20,7 +20,7 @@ from PySide6.QtCore import QEasingCurve, QEvent, QRectF, QSize, Qt, QTimer, QUrl
 from PySide6.QtGui import QColor, QDesktopServices, QGuiApplication, QPainter, QPainterPath, QRadialGradient
 from PySide6.QtWidgets import (QAbstractButton, QApplication, QButtonGroup, QComboBox, QDialog, QFileDialog,
                                QFrame, QGridLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMessageBox, QPushButton,
-                               QScrollArea, QSpinBox, QStackedWidget, QTextBrowser, QVBoxLayout,
+                               QPlainTextEdit, QScrollArea, QSpinBox, QStackedWidget, QTextBrowser, QVBoxLayout,
                                QWidget)
 
 from . import audio, hotwords, llm, rules
@@ -32,7 +32,7 @@ SOURCES = [(rules.MOUSE, "滑鼠鍵"), (rules.KEY, "鍵盤鍵"), (rules.SPEECH, 
 GESTURES = [(rules.TAP, "按一下"), (rules.DOUBLE, "連按兩下"), (rules.HOLD, "按住")]
 SITUATIONS = [(rules.ANY, "不限"), (rules.DICTATED, "剛輸入完"), (rules.SELECTION, "有選取文字")]
 STEP_TYPES = [(rules.COMMAND, "命令"), (rules.KEYS, "按鍵"), (rules.TEXT, "輸入文字"), (rules.WAIT, "等待")]
-COMMANDS = [(rules.RECORD, "錄音"), (rules.INSTRUCT, "AI 指令（錄音）"), (rules.PICK, "選字"),
+COMMANDS = [(rules.RECORD, "錄音"), (rules.PICK, "選字"),
             (rules.DELETE_SELECTION, "刪除選取的文字"),
             (rules.DELETE_DICTATION, "刪除剛輸入的文字")]
 _STEP_DEFAULTS = {rules.COMMAND: rules.DELETE_SELECTION, rules.KEYS: "", rules.TEXT: "", rules.WAIT: 100}
@@ -634,7 +634,9 @@ class SettingsDialog(QDialog):
     sync_changed = Signal()
     _ai_result = Signal(str, bool)      # AI test / model list result from a thread: text, ok
     _models_ready = Signal(list, str)
-    _cli_state_ready = Signal(str)      # Claude Code check from a thread: missing / out / ok
+    _catalog_ready = Signal(str, list)        # a service's model list from a thread: "claude" / "gpt" / "flash", [(label, value)]
+    _codex_state_ready = Signal(str, str)
+    _cli_state_ready = Signal(str, str)      # Claude Code check from a thread: missing / out / ok, the account
 
     NAV = [("home", "首頁", "⌂"), ("history", "歷史紀錄", "☰"), ("dictionary", "字典", "Aa"),
            ("ai", "AI 潤稿", "✦"), ("rules", "自訂操作", "⌘"), ("settings", "設定", "◎")]
@@ -1018,7 +1020,7 @@ class SettingsDialog(QDialog):
                         sub.deleteLater()
         lines = []
         for r in self.cfg.rules:
-            if not r.enabled or r.source == rules.SPEECH or r.record_index() is None or r.instructs()                     or rules.problems(r, self.cfg.rules):
+            if not r.enabled or r.source == rules.SPEECH or r.record_index() is None                     or rules.problems(r, self.cfg.rules):
                 continue
             name = MOUSE_TRIGGERS.get(r.key) or KEY_TRIGGERS.get(r.key, (r.key,))[0]
             if r.source == rules.MOUSE and not name.endswith("鍵"):
@@ -1424,11 +1426,12 @@ class SettingsDialog(QDialog):
     # --- AI 潤稿 ---
     def _ai_page(self) -> QWidget:
         page, col = self._page("AI 潤稿", "說完話後由 AI 去掉贅字、修正改口、自動分段和條列，並依你正在用的 App 調整語氣。"
-                                         "用免費額度的雲端模型或本機模型，不需要付費。")
+                                         "可使用已登入的訂閱額度，或自行設定其他服務。")
         self.ai_on = Switch()
         self.ai_provider = QComboBox()
         for key, (label, *_rest) in llm.PROVIDERS.items():
-            self.ai_provider.addItem(label, key)
+            if key != "claude_cli":          # Claude is part of the one subscription entry (codex_cli)
+                self.ai_provider.addItem("訂閱帳號（Claude → Flash → GPT，免金鑰）" if key == "codex_cli" else label, key)
         self.ai_key = QLineEdit(echoMode=QLineEdit.Password, placeholderText="貼上 API 金鑰")
         self.ai_key.setMinimumWidth(260)
         self.ai_get_key = QPushButton("取得免費金鑰", objectName="ghost", clicked=self._open_key_page)
@@ -1458,7 +1461,22 @@ class SettingsDialog(QDialog):
         self._url_row = _setting_row("API 網址", "OpenAI 相容的 /v1 端點", self.ai_url)
         self._key_row = _setting_row("登入並取得金鑰", "按右邊的按鈕：在網頁登入帳號，按「建立 API 金鑰」並複製，程式會自動填入"
                                      "（金鑰只存在這台電腦，並用 Windows 帳號加密）", key_box)
-        self._model_row = _setting_row("模型", "留空使用預設", model_box)
+        self._model_row = _setting_row("模型", "留空使用預設；訂閱自動接續時，此欄為 GPT 模型。", model_box)
+        # the three subscriptions: fixed order Claude -> Flash -> GPT, each with a model menu read from the service
+        self.ai_claude_model = self._model_combo("Haiku 5.5，最快最省")
+        self.ai_flash_model = self._model_combo("Flash Low")
+        self.ai_gpt_model = self._model_combo("Luna")
+        self.ai_flash_enabled = Switch()
+        self._catalog_loaded = False
+        self.ai_reload_models = QPushButton("重新讀取模型清單", objectName="ghost", clicked=lambda: self._load_catalog(True))
+        self._order_row = _setting_row("使用順序", "固定為 Claude → Flash → GPT：前一個無法使用時，自動換下一個。"
+                                       "GPT 固定使用 Fast（比較快，較耗訂閱額度）。模型清單直接向各服務讀取。",
+                                       self.ai_reload_models)
+        self._claude_model_row = _setting_row("Claude 模型", "", self.ai_claude_model)
+        self._flash_row = _setting_row("Antigravity Flash（選用）", "使用 Antigravity 已登入的帳號。開啟代表同意它保存潤稿對話與傳入的畫面文字。",
+                                       self.ai_flash_enabled)
+        self._flash_model_row = _setting_row("Flash 模型", "", self.ai_flash_model)
+        self._gpt_model_row = _setting_row("GPT 模型", "", self.ai_gpt_model)
         self.ai_cli_state = _label("", wrap=True)
         self.ai_cli_btn = QPushButton("", objectName="primary", clicked=self._cli_action)
         self.ai_cli_recheck = QPushButton("重新檢查", objectName="ghost", clicked=self._check_cli)
@@ -1472,16 +1490,35 @@ class SettingsDialog(QDialog):
         self._cli_state_ready.connect(self._show_cli_state)
         self._cli_row = _setting_row("Claude Code", "用你自己的 Claude 訂閱，不用金鑰。裝好並登入就能用，之後每句約 1～3 秒", cli_box)
 
+        self.ai_codex_state = _label("", wrap=True)
+        self.ai_codex_state.setTextFormat(Qt.TextFormat.PlainText)
+        self.ai_codex_btn = QPushButton("", objectName="primary", clicked=self._codex_action)
+        self.ai_codex_recheck = QPushButton("重新檢查", objectName="ghost", clicked=self._check_codex)
+        gpt_box = QWidget()
+        gh = QHBoxLayout(gpt_box)
+        gh.setContentsMargins(0, 0, 0, 0)
+        gh.addWidget(self.ai_codex_state, 1)
+        gh.addWidget(self.ai_codex_btn)
+        gh.addWidget(self.ai_codex_recheck)
+        self._codex_stage = "missing"
+        self._codex_state_ready.connect(self._show_codex_state)
+        self._codex_row = _setting_row("GPT", "使用 ChatGPT 訂閱。", gpt_box)
+
         self.ai_usage = _label("", "muted")
         row = _setting_row("開啟 AI 潤稿", "關閉時完全不會用到 AI 額度，直接貼上辨識結果。"
-                           "短句、沒有贅字的句子本來就不會送出。也可以在工具列圖示按右鍵開關", self.ai_on)
+                           "選擇省額度時，短句會交給程式規則。也可以在工具列圖示按右鍵開關", self.ai_on)
         row.layout().itemAt(0).layout().addWidget(self.ai_usage)
         col.addWidget(_card(row))
         col.addWidget(_label("模型", "section"))
         col.addWidget(_card(
-            _setting_row("服務", "最簡單：Claude Code（用你自己的 Claude 訂閱登入，不用金鑰）。"
-                         "其他服務要貼 API 金鑰", self.ai_provider),
+            _setting_row("服務", "訂閱方式不需 API 金鑰；Claude、Flash、GPT 共用下方潤稿規則。", self.ai_provider),
+            self._order_row,
             self._cli_row,
+            self._claude_model_row,
+            self._flash_row,
+            self._flash_model_row,
+            self._codex_row,
+            self._gpt_model_row,
             self._url_row,
             self._key_row,
             self._model_row))
@@ -1490,15 +1527,27 @@ class SettingsDialog(QDialog):
             _setting_row("整理程度", "", self.ai_style),
             _setting_row("檢查範圍", "AI 會判斷整句語意，把辨識錯的字（隻友→只有）改回來。選省額度時，短又沒問題的句子不送出",
                          self.ai_scope),
-            _setting_row("參考畫面上下文", "傳送 App 名稱、視窗標題、游標附近的文字和目前畫面上的文字（只存在記憶體、用完即丟），讓 AI 理解你這句話的話題、語氣與專有名詞",
+            _setting_row("參考畫面上下文", "傳送 App 名稱、視窗標題、游標附近與畫面文字，協助理解語意與專有名詞。VoiceInput 不儲存畫面文字；啟用 Antigravity 時，它會保存對話。",
                          self.ai_context)))
 
-        col.addWidget(_label("AI 指令", "section"))
-        self.ai_instruct_btn = QPushButton("加入：按住滑鼠上側鍵", clicked=self._add_instruct_rule)
-        col.addWidget(_card(_setting_row(
-            "用說的叫 AI 改寫或寫東西",
-            "選取文字後說「改得正式一點」「翻成英文」「整理成條列」就會改寫它；沒選取時說「寫一封感謝信給王經理」"
-            "會直接寫好貼上。可在「自訂操作」改成別的鍵。", self.ai_instruct_btn)))
+        col.addWidget(_label("提示詞（進階）", "section"))
+        self.ai_prompt = QPlainTextEdit()
+        self.ai_prompt.setMinimumHeight(260)
+        self.ai_prompt.setPlaceholderText("給 AI 的整理規則")
+        self._prompt_timer = QTimer(self, singleShot=True, interval=700, timeout=self._save_prompt)
+        self.ai_prompt.textChanged.connect(lambda: None if self._loading else self._prompt_timer.start())
+        reset = QPushButton("還原預設", objectName="ghost", clicked=self._reset_prompt)
+        head = QHBoxLayout()
+        head.addWidget(_label("這是每句話交給 AI 的整理規則，可以直接改。{format_rule} 會換成上面選的整理程度，"
+                              "{tone_rule} 會換成依 App 調整的語氣；刪掉就不會加入。改完 0.7 秒後自動儲存，下一句就套用。",
+                              "muted", wrap=True), 1)
+        head.addWidget(reset, 0, Qt.AlignTop)
+        box = QFrame(objectName="card")
+        bv = QVBoxLayout(box)
+        bv.setContentsMargins(16, 12, 16, 12)
+        bv.addLayout(head)
+        bv.addWidget(self.ai_prompt)
+        col.addWidget(box)
 
         col.addWidget(_label("試試看", "section"))
         test = QFrame(objectName="card")
@@ -1525,20 +1574,82 @@ class SettingsDialog(QDialog):
         self.ai_model.currentTextChanged.connect(lambda _: self._apply_ai())
         self.ai_style.currentIndexChanged.connect(self._apply_ai)
         self.ai_scope.currentIndexChanged.connect(self._apply_ai)
+        for combo in (self.ai_claude_model, self.ai_flash_model, self.ai_gpt_model):
+            combo.currentIndexChanged.connect(self._apply_ai)
+        self.ai_flash_enabled.toggled.connect(self._apply_ai)
+        self._catalog_ready.connect(self._fill_catalog)
         return page
 
     def _llm_settings(self) -> llm.Settings:
-        c = self.cfg
-        return llm.Settings(c.ai_provider, c.ai_base_url, c.ai_model, c.ai_key, c.ai_style)
+        return llm.settings_from(self.cfg)
 
     def _provider_changed(self):
         if self._loading:
             return
         self.cfg.ai_provider = self.ai_provider.currentData()
-        self.cfg.ai_model = ""
+        if self.cfg.ai_provider != "codex_cli":
+            self.cfg.ai_model = ""
         self.cfg.ai_base_url = ""
         self._load_ai()
         self._save()
+
+    @staticmethod
+    def _model_combo(default_name: str) -> QComboBox:
+        c = _NoWheelCombo()
+        c.setMinimumWidth(300)
+        c.addItem(f"預設（{default_name}）", "")
+        return c
+
+    def _set_models(self, combo: QComboBox, current: str, items=None):
+        """Fill a model menu: the default, what the service lists, and the saved model when the list lacks it."""
+        was = combo.blockSignals(True)
+        first = combo.itemText(0)
+        known = items if items is not None else [(combo.itemText(k), combo.itemData(k)) for k in range(1, combo.count())]
+        combo.clear()
+        combo.addItem(first, "")
+        for label, value in known:
+            if value and combo.findData(value) < 0:
+                combo.addItem(label, value)
+        if current and combo.findData(current) < 0:
+            combo.addItem(current, current)
+        combo.setCurrentIndex(max(0, combo.findData(current or "")))
+        combo.blockSignals(was)
+
+    def _load_catalog(self, force: bool = False):
+        """Read the model menus of the three services in the background (once per window, or when asked)."""
+        if self._catalog_loaded and not force:
+            return
+        self._catalog_loaded = True
+        self.ai_reload_models.setText("讀取中…")
+        self.ai_reload_models.setEnabled(False)
+
+        def job(name, read):
+            try:
+                items = read()
+            except Exception:
+                items = []
+            self._catalog_ready.emit(name, items)
+
+        def claude():
+            return [(m.get("description") or m.get("displayName") or m["value"], m["value"])
+                    for m in llm.claude_models() if m.get("value") and m["value"] != "default"]
+
+        for name, read in (("claude", claude),
+                           ("gpt", lambda: [(m, m) for m in llm.codex_cli.list_models()]),
+                           ("flash", lambda: [(m, m) for m in llm.antigravity_cli.list_models()])):
+            threading.Thread(target=job, args=(name, read), daemon=True).start()
+        self._catalog_pending = 3
+
+    def _fill_catalog(self, name: str, items: list):
+        c = self.cfg
+        combo, current = {"claude": (self.ai_claude_model, c.ai_claude_model),
+                          "gpt": (self.ai_gpt_model, c.ai_model),
+                          "flash": (self.ai_flash_model, c.ai_flash_model)}[name]
+        self._set_models(combo, current, items)
+        self._catalog_pending -= 1
+        if self._catalog_pending <= 0:
+            self.ai_reload_models.setText("重新讀取模型清單")
+            self.ai_reload_models.setEnabled(True)
 
     def _load_ai(self):
         was, self._loading = self._loading, True
@@ -1546,7 +1657,7 @@ class SettingsDialog(QDialog):
         p = llm.PROVIDERS.get(c.ai_provider, llm.PROVIDERS["custom"])
         self.ai_on.setChecked(c.ai_enabled)
         n = self.history.ai_today() if self.history is not None else 0
-        self.ai_usage.setText(f"今天已用 {n} 次" if c.ai_enabled else "目前關閉")
+        self.ai_usage.setText(f"今日潤稿 {n} 次（不含測試）" if c.ai_enabled else "目前關閉")
         self.ai_provider.setCurrentIndex(max(0, self.ai_provider.findData(c.ai_provider)))
         self.ai_key.setText(c.ai_key)
         self.ai_key.setPlaceholderText("本機不需要金鑰（可留空）" if c.ai_provider == "ollama" else "貼上 API 金鑰")
@@ -1557,13 +1668,22 @@ class SettingsDialog(QDialog):
         self.ai_get_key.setObjectName("primary" if keyed else "ghost")     # the one thing to press for Google / Groq
         self.ai_get_key.setStyle(self.ai_get_key.style())                  # re-read the style sheet
         self.ai_url.setText(c.ai_base_url or p[1])
-        cli = c.ai_provider == "claude_cli"
+        sub = c.ai_provider == "codex_cli"
+        for row in (self._order_row, self._cli_row, self._claude_model_row, self._flash_row,
+                    self._codex_row, self._gpt_model_row):
+            row.setVisible(sub)
+        self._flash_model_row.setVisible(sub and c.ai_flash_enabled)
         self._url_row.setVisible(c.ai_provider in ("custom", "ollama"))
-        self._key_row.setVisible(not cli and c.ai_provider != "ollama")
-        self._model_row.setVisible(c.ai_provider in ("custom", "ollama"))   # the default model is the right one
-        self._cli_row.setVisible(cli)
-        if cli:
+        self._key_row.setVisible(not sub and c.ai_provider != "ollama")
+        self._model_row.setVisible(not sub)
+        if sub:
             self._check_cli()
+            self._check_codex()
+            self.ai_flash_enabled.setChecked(c.ai_flash_enabled)
+            self._set_models(self.ai_claude_model, c.ai_claude_model)
+            self._set_models(self.ai_gpt_model, c.ai_model)
+            self._set_models(self.ai_flash_model, c.ai_flash_model)
+            self._load_catalog()
         self.ai_model.clear()
         if p[2]:
             self.ai_model.addItem(p[2])
@@ -1571,18 +1691,65 @@ class SettingsDialog(QDialog):
         self.ai_style.setCurrentIndex(max(0, self.ai_style.findData(c.ai_style)))
         self.ai_context.setChecked(c.ai_context)
         self.ai_scope.setCurrentIndex(max(0, self.ai_scope.findData(c.ai_scope)))
-        self._show_instruct()
+        self.ai_prompt.setPlainText(c.ai_prompt or llm.default_prompt())
         self._loading = was
+
+    def _save_prompt(self):
+        """The rules the user edited are saved at once; text equal to the built-in rules is stored as "" so that later
+        improvements of the built-in rules reach a user who never changed them."""
+        text = self.ai_prompt.toPlainText().strip()
+        self.cfg.ai_prompt = "" if text == llm.default_prompt().strip() or not text else text
+        self._save()
+        self._warm_after_prompt()
+
+    def _reset_prompt(self):
+        self.ai_prompt.setPlainText(llm.default_prompt())
+        self._save_prompt()
+
+    def _warm_after_prompt(self):
+        if self.cfg.ai_enabled:
+            llm.warm_up(self._llm_settings())
+
+    def _check_codex(self):
+        if not self.ai_codex_recheck.isEnabled():
+            return
+        self.ai_codex_state.setText("檢查中…")
+        self.ai_codex_btn.hide()
+        self.ai_codex_recheck.setEnabled(False)
+        threading.Thread(target=lambda: self._codex_state_ready.emit(*llm.codex_cli.login_status()), daemon=True).start()
+
+    def _show_codex_state(self, stage: str, account: str = ""):
+        self._codex_stage = stage
+        self.ai_codex_recheck.setEnabled(True)
+        text, button = {"ok": ("✓ 已登入：" + account if account else "✓ 已登入 ChatGPT（未提供帳號名稱）", ""),
+                        "unknown": ("暫時無法確認 ChatGPT 帳號，請重新檢查", ""),
+                        "out": ("尚未登入 ChatGPT，目前會使用 Claude", "登入 ChatGPT"),
+                        "missing": ("找不到 Codex，目前會使用 Claude", "安裝 Codex")}[stage]
+        self.ai_codex_state.setText(text)
+        self.ai_codex_btn.setText(button)
+        self.ai_codex_btn.setVisible(bool(button))
+        if stage == "ok" and self.cfg.ai_enabled and self.cfg.ai_provider == "codex_cli":
+            llm.codex_cli.retry_now()
+
+    def _codex_action(self):
+        if self._codex_stage == "missing":
+            QDesktopServices.openUrl(QUrl(llm.codex_cli.INSTALL_URL))
+        else:
+            try:
+                llm.codex_cli.login()
+                self.ai_codex_state.setText("請在瀏覽器完成登入，再按「重新檢查」")
+            except (llm.codex_cli.CodexError, OSError) as e:
+                self.ai_codex_state.setText(str(e))
 
     def _check_cli(self):
         self.ai_cli_state.setText("檢查中…")
         self.ai_cli_state.setStyleSheet("")
         self.ai_cli_btn.hide()
-        threading.Thread(target=lambda: self._cli_state_ready.emit(llm.claude_login_state()), daemon=True).start()
+        threading.Thread(target=lambda: self._cli_state_ready.emit(*llm.claude_status()), daemon=True).start()
 
-    def _show_cli_state(self, stage: str):
+    def _show_cli_state(self, stage: str, account: str = ""):
         self._cli_stage = stage
-        text, btn = {"ok": ("✓ 已安裝並登入", ""),
+        text, btn = {"ok": ("✓ 已登入" + (f"：{account}" if account else "（已安裝）"), ""),
                      "out": ("已安裝，但還沒登入", "登入 Claude"),
                      "missing": ("還沒安裝 Claude Code", "安裝 Claude Code")}[stage]
         self.ai_cli_state.setText(text)
@@ -1618,34 +1785,22 @@ class SettingsDialog(QDialog):
             return
         url = self.ai_url.text().strip()
         c.ai_base_url = "" if url == p[1] else url
-        model = self.ai_model.currentText().strip()
-        c.ai_model = "" if model == p[2] else model
+        if c.ai_provider == "codex_cli":
+            c.ai_model = self.ai_gpt_model.currentData() or ""
+            c.ai_claude_model = self.ai_claude_model.currentData() or ""
+            c.ai_flash_model = self.ai_flash_model.currentData() or ""
+            c.ai_flash_enabled = self.ai_flash_enabled.isChecked()
+            self._flash_model_row.setVisible(c.ai_flash_enabled)      # the model menu only matters when Flash is on
+        else:
+            model = self.ai_model.currentText().strip()
+            c.ai_model = "" if model == p[2] else model
         c.ai_style = self.ai_style.currentData()
         c.ai_context = self.ai_context.isChecked()
         c.ai_scope = self.ai_scope.currentData()
         if c.ai_enabled and not self._llm_settings().ready():
-            self.ai_out.setText("⚠ 還需要 API 金鑰（或網址 / 模型）才能使用。")
+            self.ai_out.setText("⚠ 請先安裝並登入 Claude Code、Antigravity 或 Codex 其中一個。" if c.ai_provider == "codex_cli"
+                                else "⚠ 還需要 API 金鑰（或網址 / 模型）才能使用。")
         self._save()
-
-    def _instruct_rule(self):
-        return next((r for r in self.cfg.rules if r.enabled and r.source != rules.SPEECH and r.instructs()), None)
-
-    def _show_instruct(self):
-        r = self._instruct_rule()
-        if r is None:
-            self.ai_instruct_btn.setText("加入：按住滑鼠上側鍵")
-            self.ai_instruct_btn.setEnabled(True)
-        else:
-            name = MOUSE_TRIGGERS.get(r.key) or KEY_TRIGGERS.get(r.key, (r.key,))[0]
-            self.ai_instruct_btn.setText(f"已設定：{dict(GESTURES)[r.gesture]}{name}")
-            self.ai_instruct_btn.setEnabled(False)
-
-    def _add_instruct_rule(self):
-        if self._instruct_rule() is None:
-            self.cfg.rules.append(Rule(rules.MOUSE, "mouse_x2", gesture=rules.HOLD,
-                                       steps=[Step(rules.COMMAND, rules.INSTRUCT)]))
-            self._changed(rebuild=True)
-        self._show_instruct()
 
     def _open_key_page(self):
         """Open the service's key page in the browser (sign in there, with Chrome and the Google account) and watch the
@@ -1698,7 +1853,7 @@ class SettingsDialog(QDialog):
             t0 = time.monotonic()
             try:
                 out = llm.polish(s, text, llm.Context(), [w for w, _ in self.hotwords.bias()])
-                self._ai_result.emit(f"{out}\n\n（{time.monotonic() - t0:.1f} 秒）", True)
+                self._ai_result.emit(f"{out}\n\n（{llm.result_label(s)} · {time.monotonic() - t0:.1f} 秒）", True)
             except llm.LLMError as e:
                 self._ai_result.emit(f"失敗：{e}", False)
         threading.Thread(target=run, daemon=True).start()
@@ -1748,6 +1903,8 @@ class SettingsDialog(QDialog):
         self.mute = Switch()
         self.mic_exclusive = Switch()
         self.discord_on = Switch()
+        self.voice_stop = Switch()
+        self.mouse_text_only = Switch()
         self.discord_key = KeyCapture(self.cfg.discord_key)
         self.discord_key.setMinimumWidth(150)
         self.discord_key.captured.connect(self._apply)
@@ -1770,6 +1927,10 @@ class SettingsDialog(QDialog):
         col.addWidget(_label("聲音", "section"))
         col.addWidget(_card(
             _setting_row("麥克風", "", self.mic),
+            _setting_row("滑鼠按鍵只在輸入框上有效", "只有游標在打字的輸入框上按滑鼠快捷鍵（例如中鍵）才會錄音；"
+                         "在網頁、檔案、桌面按中鍵，照原本的功能運作，不受影響", self.mouse_text_only),
+            _setting_row("說「送出」自動結束錄音", "錄音時說完話、停頓一下再說「送出」，會自動結束錄音、打出文字並送出，"
+                         "不用再按鍵（錄音時多一點點耗電）", self.voice_stop),
             _setting_row("錄音時靜音電腦", "錄音期間把喇叭靜音，文字輸入完成後恢復；原本就靜音的話不會動", self.mute),
             _setting_row("錄音時讓 Discord 收不到", "開始錄音時按一次 Discord 的快捷鍵，結束時再按一次。"
                          "Discord 要設成全域快捷鍵（使用者設定 → 快捷鍵）", self.discord_on),
@@ -1819,7 +1980,7 @@ class SettingsDialog(QDialog):
         col.addStretch(1)
 
         self.mic.currentIndexChanged.connect(self._apply)
-        for box in (self.punct, self.period_comma, self.describe, self.casual, self.autostart, self.mute, self.mic_exclusive, self.discord_on,
+        for box in (self.punct, self.period_comma, self.describe, self.casual, self.autostart, self.mute, self.mic_exclusive, self.discord_on, self.voice_stop, self.mouse_text_only,
                     self.laugh_on):
             box.toggled.connect(self._apply)
         self.laugh_text.editingFinished.connect(self._apply)
@@ -1886,6 +2047,8 @@ class SettingsDialog(QDialog):
         self.mute.setChecked(self.cfg.mute_while_recording)
         self.mic_exclusive.setChecked(self.cfg.mic_exclusive)
         self.discord_on.setChecked(self.cfg.discord_mute)
+        self.voice_stop.setChecked(self.cfg.voice_stop)
+        self.mouse_text_only.setChecked(self.cfg.mouse_text_only)
         self.discord_key.setText(self.cfg.discord_key)
         self.describe.setChecked(self.cfg.describe_char)
         self.casual.setChecked(self.cfg.casual_no_period)
@@ -1914,6 +2077,8 @@ class SettingsDialog(QDialog):
         self.cfg.mute_while_recording = self.mute.isChecked()
         self.cfg.mic_exclusive = self.mic_exclusive.isChecked()
         self.cfg.discord_mute = self.discord_on.isChecked()
+        self.cfg.voice_stop = self.voice_stop.isChecked()
+        self.cfg.mouse_text_only = self.mouse_text_only.isChecked()
         self.cfg.discord_key = self.discord_key.text() or "Ctrl+Shift+D"
         self.cfg.describe_char = self.describe.isChecked()
         self.cfg.casual_no_period = self.casual.isChecked()
@@ -1977,7 +2142,6 @@ class SettingsDialog(QDialog):
     def _changed(self, rebuild: bool = False):
         """A rule was edited: save, and redraw the cards when their layout changes."""
         self._save()
-        self._show_instruct()
         if rebuild:
             self.refresh_rules()
         else:

@@ -10,8 +10,8 @@ from voiceinput import llm
 class LlmTests(unittest.TestCase):
     def test_a_screen_name_keeps_its_spelling(self):
         # the Traditional conversion turned the screen's 佳怜 into 佳憐 (2026-10-14)
-        self.assertEqual(llm._keep_glossary_spelling("佳憐、凱慧", ["佳怜", "凱慧"]), "佳怜、凱慧")
-        self.assertEqual(llm._keep_glossary_spelling("佳怜、凱慧", ["佳怜"]), "佳怜、凱慧")
+        self.assertEqual(llm._keep_glossary_spelling("佳憐、凱蕙", ["佳怜", "凱蕙"]), "佳怜、凱蕙")
+        self.assertEqual(llm._keep_glossary_spelling("佳怜、凱蕙", ["佳怜"]), "佳怜、凱蕙")
 
     def test_a_key_decides_only_between_key_services(self):
         self.assertEqual(llm.provider_for_key("AIzaXXXX"), "gemini")

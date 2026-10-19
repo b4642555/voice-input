@@ -269,8 +269,17 @@ def ends_with_punct(text: str) -> bool:
     return bool(_TRAILING_PUNCT.search(text))
 
 
+# 隻 is the counter for animals, never 「only」: 隻要 / 隻是 / 隻有 / 隻能 are not words (the user, 2026-10-19: 「隻要」根本
+# 不應該出現). They become 只, unless a number or a pointer word comes right before 隻 (一隻是黑的, 這隻有點胖, 每隻能飛).
+_ZHI = re.compile(r"(?<![一二兩三四五六七八九十百幾這那哪每整半各某另])隻(?=[要是有能為])")
+
+
+def fix_zhi(text: str) -> str:
+    return _ZHI.sub("只", text)
+
+
 def format_text(text: str, strip_trailing_punct: bool = False) -> str:
-    text = to_traditional(text)
+    text = fix_zhi(to_traditional(text))
     text = _FILLER.sub("", text)
     text = remove_disfluencies(text)
     text = _PERCENT.sub(_percent, text)

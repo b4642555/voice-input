@@ -35,21 +35,25 @@ class LearningTests(unittest.TestCase):
         self.assertIn('城市 → 程式',self.records[0]['edit'])
         self.assertEqual(self.toasts, ['「程式」 已加入字典'])
 
-    def test_one_character_of_a_name_learns_the_whole_name(self):
-        # the user's case, 2026-10-14: 林又成跟曾冠維, 成 corrected to 宸
-        self.learn('林又成跟曾冠維',2,3,'宸')
-        self.assertIn(('林又宸',5), self.app.hotwords.bias())
-        self.assertEqual(self.toasts, ['「林又宸」 已加入字典'])
+    def test_one_changed_character_is_not_widened_to_a_name(self):
+        # 2026-10-19 (the user: 只改一個字就不要多記): 林又成 -> 林又宸 changes one character: no word is learned
+        self.learn('林又成跟曾冠維', 2, 3, '宸')
+        self.assertNotIn('林又宸', [w for w, _ in self.app.hotwords.bias()])
 
-    def test_a_name_inside_a_bigger_edit(self):
-        # the user's case, 2026-10-14: 幫你發娛樂城更正宇澄醫生 -> 包你發娛樂城跟吳宇澄 (醫生 deleted)
+    def test_exactly_the_changed_span_is_learned_not_its_surroundings(self):
+        # the user's case, 2026-10-19: 正下方置中好 where only 置中 was changed learned 正下方置中
+        self.learn('正下方對中好', 3, 5, '置中')
+        self.assertEqual([w for w, _ in self.app.hotwords.bias()], ['置中'])
+        self.assertEqual(self.toasts, ['「置中」 已加入字典'])
+
+    def test_a_replaced_span_with_a_grammar_character_is_not_a_word(self):
+        # 幫你發娛樂城更正宇澄醫生 -> 包你發娛樂城跟吳宇澄: the replaced span 跟吳 has 跟 in it: nothing is learned from it
         from voiceinput.correction import _replacements
         text = '幫你發娛樂城更正宇澄醫生'
         changes = _replacements(text, '包你發娛樂城跟吳宇澄')
         self.assertIn((6, 8, '跟吳'), changes)
         for a, b, new in changes:
             self.learn(text, a, b, new)
-        self.assertIn('吳宇澄', [w for w, _ in self.app.hotwords.bias()])
         self.assertNotIn('跟吳', [w for w, _ in self.app.hotwords.bias()])
 
     def test_a_name_is_learned_without_a_smart_pick(self):
@@ -64,11 +68,10 @@ class LearningTests(unittest.TestCase):
         self.assertEqual(self.app.memory.apply('吳宇成跟曾冠維'), '吳宇成跟曾冠維')     # nothing on the left
         self.assertEqual(self.app.memory.apply('我跟林又成說'), '我跟林又宸說')
 
-    def test_the_whole_phrase_around_a_corrected_word_is_learned(self):
-        # the user's case, 2026-10-14: 貓米發娛樂城 -> 包你發娛樂城, the phrase is what to remember
+    def test_a_corrected_word_is_learned_without_its_phrase(self):
+        # 2026-10-19: 貓米發娛樂城 -> 包你發娛樂城 learns 包你, not the phrase around it
         self.learn('貓米發娛樂城', 0, 2, '包你')
-        self.assertIn('包你發娛樂城', [w for w, _ in self.app.hotwords.bias()])
-        self.assertEqual(self.toasts, ['「包你發娛樂城」 已加入字典'])
+        self.assertEqual([w for w, _ in self.app.hotwords.bias()], ['包你'])
 
     def test_single_character_learns_context_without_hotword(self):
         self.learn('他在這裡',1,2,'再')
@@ -90,7 +93,7 @@ class LearningTests(unittest.TestCase):
                            after_paste=lambda t,s: events.append(('after',t,s)))
                 a=NS(corrections=watcher, overlay=NS(hide_overlay=lambda: None), copycard=NS(dismiss=lambda: None),
                      _input_done=lambda: None, session=NS(dictated=lambda *args: None),
-                     _after_steps=lambda p: [], _run_steps=lambda *args: None)
+                     _after_steps=lambda p: [], _run_steps=lambda *args, **kw: None)
                 with patch('voiceinput.app.paste_text', side_effect=lambda text: events.append(('paste',text))), \
                      patch('voiceinput.app.foreground', return_value=123):
                     App._dictate(a, '測試', None, 123, None)
@@ -113,7 +116,7 @@ class LearningTests(unittest.TestCase):
         watcher=NS(prepare_before_paste=fail, after_paste=fail)
         a=NS(corrections=watcher, overlay=NS(hide_overlay=lambda: None), copycard=NS(dismiss=lambda: None),
              _input_done=lambda: None, session=NS(dictated=lambda *args: None),
-             _after_steps=lambda p: [], _run_steps=lambda *args: None)
+             _after_steps=lambda p: [], _run_steps=lambda *args, **kw: None)
         with patch('voiceinput.app.paste_text') as paste, \
              patch('voiceinput.app.foreground', return_value=123), \
              self.assertLogs('voiceinput', level='ERROR'):

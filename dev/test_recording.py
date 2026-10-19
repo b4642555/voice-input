@@ -55,6 +55,7 @@ class Harness:
         self.muter = NS(restore=lambda: None)
         self.micguard = NS(restore=lambda: None, mute=lambda: None, recover=lambda: None)
         self.discord = NS(start=lambda *a: None, stop=lambda: None)
+        self._voice_timer = NS(stop=lambda: None, start=lambda: None)
         self.icon_idle = None
         self.hotkeys = NS(replay=lambda *args: None)
 

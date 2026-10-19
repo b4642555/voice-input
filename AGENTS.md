@@ -94,8 +94,8 @@ local option, pill + main window + 選字 menu restyled, a sync folder, context 
   (~100-150 characters, was ~900); the same dictation with the same context is answered from a cache (32). On 8
   inputs: 4 requests. First run: AI turns on by itself when Claude Code is found (`Config.load`); off switches: the
   AI page and the tray menu 「AI 潤稿（會用掉 AI 額度）」; the AI page shows today's count (`History.ai_today`). With
-  the AI on, the 開會 -> 凱慧 "screen first" rule is left to the model (`fix(common_wins=False)`: the rule had
-  turned 在輕井澤鍋物開會 into 輕井澤鍋物凱慧).
+  the AI on, the 開會 -> 凱蕙 "screen first" rule is left to the model (`fix(common_wins=False)`: the rule had
+  turned 在輕井澤鍋物開會 into 輕井澤鍋物凱蕙).
 - **AI 指令** (`rules.INSTRUCT`, a command that records like 錄音): what is said is an instruction; on a selection the
   LLM rewrites it, without one it writes the text and it is pasted. Not bound by default; the AI page adds "hold the
   upper side button".
@@ -230,17 +230,17 @@ CJK/ASCII spacing → trailing punctuation.
   all three). Why a watch stopped / a field was unreadable is logged, never the text.
 - Screen reading, from the user's LINE roster (2026-10-14): the focused field under 1000 characters is the draft
   being written and is not screen evidence; its lines are removed from the OCR text too, also when OCR misread them
-  (宋家雅婷 read as 餐家雅婷 protected / "fixed" 宋家). OCR reads the window enlarged 1.5x (GDI StretchBlt, HALFTONE;
+  (宋家雅茹 read as 餐家雅茹 protected / "fixed" 宋家). OCR reads the window enlarged 1.5x (GDI StretchBlt, HALFTONE;
   17 names: 12 read as is, 15 enlarged). GDI calls declare 64-bit handle types (ctypes' int cut them: crashes).
   Simplified vs Traditional is decided for the whole screen (佳怜 alone became 佳憐). Up to 30 recent names; pieces
   with a grammar character are never names (明天的); rare dictionary names under frequency 80 (會議室 is 102).
   The loose rule needs the first and last sounds to match at any length (明天見 is not 明天的). English support
   rule only for words of 3-5 letters. The 除錯紀錄 page shows what each dictation took from the screen (row 畫面),
   in memory only: the log file never has it.
-- Screen first for names (2026-10-14, the user's example 開會 / 凱慧): any common word, however frequent (開會 is 495),
+- Screen first for names (2026-10-14, the user's example 開會 / 凱蕙): any common word, however frequent (開會 is 495),
   gives way to a screen name that sounds exactly the same when another screen name is in the same dictation
-  (佳怜開會阿嵐 -> 佳怜凱慧阿嵐); alone (我們明天開會) it stays, and dictionary words on screen never win (城市 stays).
-  A time or number on screen is no supporting name (下午三點 made 跟客戶開會 into 凱慧).
+  (佳怜開會阿霖 -> 佳怜凱蕙阿霖); alone (我們明天開會) it stays, and dictionary words on screen never win (城市 stays).
+  A time or number on screen is no supporting name (下午三點 made 跟客戶開會 into 凱蕙).
 - OCR is not stable: one read of LINE's chat list missed the bold 曾冠維 that the next read found. Two reads (1x and
   2x, joined; ~1.2s in the background). The grammar characters that split pieces are only those (almost) never in a
   name (又 cut 林又宸). The draft is matched by overall similarity (陸寶瓦 for 陸寶寶 kept the draft's 曾冠偉).

@@ -807,3 +807,57 @@ def read_input_snapshot():
     except Exception as e:
         log.debug("editable input snapshot unavailable", exc_info=True)
         return _no_snapshot(f"UI Automation error {type(e).__name__}")
+
+
+def text_focus_rect(timeout: float = 0.5):
+    """The screen rectangle (left, top, right, bottom, physical pixels) of the focused control when it may take text
+    (an edit box, a document that is writable or unknown, a terminal), None when it surely cannot (a desktop, a file
+    list, a button, a page without a field), "unknown" when UI Automation did not answer. For the mouse buttons that
+    act only on an input box (2026-10-19, the user: 中鍵只在對話框有效，其他時候不要影響中鍵)."""
+    box = ["unknown"]
+
+    def run():
+        try:
+            if not ctypes.windll.user32.GetForegroundWindow():
+                box[0] = None
+                return
+            uia, U = _uia()
+            el = uia.GetFocusedElement()
+            r = el.CurrentBoundingRectangle
+            rect = (r.left, r.top, r.right, r.bottom)
+            if _proc_name(el.CurrentProcessId) in _TERMINALS or el.CurrentClassName == "TermControl" \
+                    or el.CurrentIsPassword:
+                box[0] = rect
+                return
+            kind = el.CurrentControlType
+
+            def pattern(pid, interface):
+                try:
+                    value = el.GetCurrentPattern(pid)
+                    return value.QueryInterface(interface) if value else None
+                except Exception:
+                    return None
+
+            value = pattern(U.UIA_ValuePatternId, U.IUIAutomationValuePattern)
+            text = pattern(U.UIA_TextPatternId, U.IUIAutomationTextPattern)
+            read_only = []
+            if value is not None:
+                read_only.append(bool(value.CurrentIsReadOnly))
+            if text is not None:
+                flag = text.DocumentRange.GetAttributeValue(U.UIA_IsReadOnlyAttributeId)
+                read_only.append(bool(flag) if isinstance(flag, (bool, int)) else None)
+            if kind in (U.UIA_EditControlTypeId, U.UIA_ComboBoxControlTypeId):
+                box[0] = rect
+            elif read_only and (False in read_only or None in read_only):
+                box[0] = rect
+            elif kind in _NOT_INPUT_TYPES(U):
+                box[0] = None
+            else:
+                box[0] = rect                 # a control UI Automation tells nothing about (Electron, a game): maybe
+        except Exception:
+            log.debug("text_focus_rect failed", exc_info=True)
+
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    t.join(timeout)
+    return "unknown" if t.is_alive() else box[0]

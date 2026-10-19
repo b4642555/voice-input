@@ -20,8 +20,8 @@ ANY, DICTATED, SELECTION = "any", "dictated", "selection"
 COMMAND, KEYS, TEXT, WAIT = "command", "keys", "text", "wait"
 RECORD, DELETE_SELECTION, DELETE_DICTATION = "record", "delete_selection", "delete_dictation"
 PICK = "pick"
-INSTRUCT = "instruct"   # AI 指令 (2026-10-13): records like 錄音, but what is said is an instruction for the LLM
-RECORDS = (RECORD, INSTRUCT)
+RECORDS = (RECORD,)
+_INSTRUCT = "instruct"   # the AI 指令 command (2026-10-13 .. 2026-10-19, removed at the user's request)
 _ADD_HOTWORD = "add_hotword"   # 加入熱詞, removed 2026-10-11: hotwords are typed in the 選字 menu instead
 VERSION = 2   # config rules_version: 2 added the tap on a selection that opens 選字
 
@@ -55,9 +55,6 @@ class Rule:
     def record_index(self) -> int | None:
         return next((i for i, s in enumerate(self.steps) if s.type == COMMAND and s.value in RECORDS), None)
 
-    def instructs(self) -> bool:
-        i = self.record_index()
-        return i is not None and self.steps[i].value == INSTRUCT
 
 
 def defaults(key: str = "mouse_middle", newline: bool = True, send: bool = True) -> list[Rule]:
@@ -80,6 +77,8 @@ def migrate(rules: list[Rule]) -> list[Rule]:
     any situation becomes two: one for a selection, one right after a dictation."""
     out = []
     for r in rules:
+        if any(s.type == COMMAND and s.value == _INSTRUCT for s in r.steps):
+            continue        # AI 指令 was removed: a rule that only did that goes with it
         if any(s.type == COMMAND and s.value == _ADD_HOTWORD for s in r.steps):
             r.steps = [s for s in r.steps if not (s.type == COMMAND and s.value == _ADD_HOTWORD)]
             if not r.steps:
@@ -171,3 +170,36 @@ def bound_keys(rules: list[Rule]) -> set[str]:
 def can_record(rules: list[Rule]) -> bool:
     return any(r.enabled and r.source != SPEECH and r.record_index() is not None and not problems(r, rules)
                for r in rules)
+
+
+_BOUNDARY = "，,。.！!？?、；;：:\n"
+
+
+# The recognizer does not always put a mark before a command said after a short pause (「一二三一二三送出。」, the user,
+# 2026-10-16: 送出 should only be a command, never typed). It is a command at the very end unless the character
+# before it makes it part of a sentence or a word (想把它送出, 傳送出, 請送出).
+_NOT_A_COMMAND_AFTER = set("要想把能會請先已將被讓給於向去來就別不須需應該得傳發寄轉遞它他她你我這那")
+
+
+def split_trailing(text: str, phrases: list[str]) -> tuple[str, list[str]]:
+    """Spoken commands said as the last sentences after a pause (「…你檢查一下。送出。」, the user's way, 2026-10-16):
+    (what was dictated without them, the commands in the order they were said), or (text, []) when the text does not
+    end with one. A command must stand alone: at the start, or after a sentence mark the recognizer put at the
+    pause. Said again and again (送出。送出。) it is one command."""
+    found: list[str] = []
+    body = text
+    while True:
+        stripped = body.rstrip(_BOUNDARY + " 　")
+        hit = next((p for p in sorted(phrases, key=len, reverse=True) if p and stripped.endswith(p)), None)
+        if hit is None:
+            break
+        before = stripped[:-len(hit)]
+        last = before.rstrip(" 　")[-1:]
+        if before.strip() and last not in _BOUNDARY and last in _NOT_A_COMMAND_AFTER:
+            break              # 我想把它送出 / 傳送出 is a sentence, not 先打。送出
+        if not found or found[-1] != hit:
+            found.append(hit)
+        body = before
+    if not found:
+        return text, []
+    return body.rstrip("，,、；; 　"), found[::-1]

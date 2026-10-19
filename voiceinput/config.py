@@ -20,6 +20,8 @@ class Config:
     # off and not offered: on the user's PC the capture sessions share one mute, so muting Discord muted our own
     # recording too (flat waveform, poor recognition, 2026-10-15). Kept for a later approach.
     mic_exclusive: bool = False
+    mouse_text_only: bool = True   # mouse buttons used as shortcuts act only on an input box; elsewhere they pass through
+    voice_stop: bool = True        # saying 送出 (an operation that presses Enter) ends the recording at once (app._voice_tick)
     discord_mute: bool = False     # tap Discord's shortcut when a recording starts and when it stops (discord.py)
     discord_key: str = "Ctrl+Shift+D"   # Discord's own default 切換拒聽
     mute_while_recording: bool = False  # mute the speakers while recording, until the text is pasted
@@ -36,11 +38,15 @@ class Config:
     rules_version: int = RULES_VERSION
     # AI 潤稿 (llm.py)
     ai_enabled: bool = False
-    ai_provider: str = "claude_cli"   # the simplest: no key, the user's own Claude login (llm.py)
+    ai_provider: str = "codex_cli"   # the subscriptions: Claude, then Flash (when on), then GPT (llm._with_fallback)
     ai_base_url: str = ""          # "" = the provider's
     ai_model: str = ""             # "" = the provider's default
+    ai_claude_model: str = ""      # the Claude model, "" = the default; ai_model is the GPT model, ai_flash_model Flash's
+    ai_flash_enabled: bool = False  # user accepts agy's conversation persistence
+    ai_flash_model: str = ""
     ai_key: str = ""               # kept in memory in plain text, saved encrypted
     ai_style: str = "polish"
+    ai_prompt: str = ""            # the user's own cleanup rules (AI 潤稿 page); "" = the built-in ones (llm.default_prompt)
     ai_scope: str = "all"          # "all": every dictation is checked by the AI; "saver": only suspicious / long ones
     ai_context: bool = True        # send the app name, window title and the text near the caret
     sync_dir: str = ""             # 同步 folder (sync.py), "" = the data folder
@@ -53,12 +59,17 @@ class Config:
             return cls()
         known = {k: v for k, v in data.items() if k in cls.__dataclass_fields__ and k not in ("rules", "rules_version")}
         cfg = cls(**known)
+        if cfg.ai_provider == "claude_cli":      # merged into the one subscription chain (2026-10-19)
+            cfg.ai_claude_model, cfg.ai_model = cfg.ai_model or cfg.ai_claude_model, data.get("ai_gpt_model", "")
+            cfg.ai_provider = "codex_cli"
         cfg.ai_key = _unprotect(cfg.ai_key)
         from . import llm
-        if "ai_provider" not in data and llm.claude_cli_path() is None:
-            cfg.ai_provider = "gemini"     # no Claude Code: the Google sign-in + key route (settings page)
-        if "ai_enabled" not in data:   # first run: on by itself when Claude Code is installed (no key, nothing to set)
-            cfg.ai_enabled = cfg.ai_provider == "claude_cli" and llm.claude_cli_path() is not None
+        if "ai_provider" not in data:
+            cfg.ai_provider = ("codex_cli" if llm.codex_cli.cli_path() else
+                               "claude_cli" if llm.claude_cli_path() else "gemini")
+        if "ai_enabled" not in data:   # Existing configs keep an explicit off switch; enable a detected subscription client only once.
+            cfg.ai_enabled = cfg.ai_provider in ("codex_cli", "claude_cli") and (llm.codex_cli.cli_path() is not None
+                                                                            or llm.claude_cli_path() is not None)
         if "rules" in data:
             cfg.rules = rules.upgrade(rules.migrate([rules.Rule.from_dict(d) for d in data["rules"]]),
                                       data.get("rules_version", 1))

@@ -22,7 +22,7 @@ CODE = """Claude Code is running in the terminal. Open the VoiceInput settings.
 Push to GitHub after the tests pass. We compare OpenAI and Anthropic models; ChatGPT and GPT-4o too.
 The iPhone 15 build uses Kubernetes. Instagram and YouTube links. Visual Studio Code is open."""
 SIMPLIFIED = "张雨薇发来的文件在这里，请查看张雨薇的备注"
-ROSTER = chr(10).join(["6/15晚場（排球地帶 19:00-22:00", "女", "佳怜", "凱慧", "庭筠", "阿嵐", "宋嘉", "雅婷", "卉青",
+ROSTER = chr(10).join(["6/15晚場（排球地帶 19:00-22:00", "女", "佳怜", "凱蕙", "芷柔", "阿霖", "宋嘉", "雅茹", "卉青",
                        "饅頭", "芋頭", "男", "琮浩", "朝棟", "智傑"])
 CHAT_LIST = chr(10).join(["曾冠維", "常常搞到後來 發現跟別人很像", "裝潢 (3)", "林又宸", "用講話的聽寫功能",
                           "台新銀行", "呂昌衡 HAM", "我想問阿良奇的問題？", "下午3:06"])
@@ -65,8 +65,8 @@ FIX = [
     (MAP_PREVIEW, "我們約在輕井澤國物。", "我們約在輕井澤鍋物。"),     # real X-ASR output (TTS)
     (QUOTE, "一瓶的平丁天花板要包樑 19000。", "一萍的平丁天花板要包樑 19000。"),   # the user's case, 2026-10-14
     (CODE, "Anthropic 的 club 很強。", "Anthropic 的 Claude 很強。"),        # real X-ASR output (TTS)
-    (ROSTER, "佳怜開會阿嵐", "佳怜凱慧阿嵐"),                   # 開會 is common, but names around it: 凱慧
-    (ROSTER, "佳琳凱慧雲庭晴雲阿嵐，宋家雅婷", "佳琳凱慧雲庭晴雲阿嵐，宋嘉雅婷"),
+    (ROSTER, "佳怜開會阿霖", "佳怜凱蕙阿霖"),                   # 開會 is common, but names around it: 凱蕙
+    (ROSTER, "佳琳凱蕙雲亭晴霞阿霖，宋家雅茹", "佳琳凱蕙雲亭晴霞阿霖，宋嘉雅茹"),
     (CHAT_LIST, "林若晨，曾冠偉，陸寶寶，遊戲場外閒聊群", "林又宸，曾冠維，陸寶寶，遊戲場外閒聊群"),   # 2026-10-14
     # near sounds of a name on screen (the user's rule, 2026-10-14)
     (CHAT_LIST, "曾冠偉", "曾冠維"),

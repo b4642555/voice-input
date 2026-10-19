@@ -98,13 +98,13 @@ class ScreenTextTests(unittest.TestCase):
     """What counts as screen text (2026-10-14, the user's LINE roster)."""
 
     def test_the_draft_is_not_screen_evidence(self):
-        screen = "佳怜\n凱慧\n雅婷\n佳琳凱慧雲庭晴雲阿嵐 , 餐家雅婷\n台新銀行"     # OCR also misread the draft
-        kept = st.without_draft(screen, "佳琳凱慧雲庭晴雲阿嵐，宋家雅婷")
+        screen = "佳怜\n凱蕙\n雅茹\n佳琳凱蕙雲亭晴霞阿霖 , 餐家雅茹\n台新銀行"     # OCR also misread the draft
+        kept = st.without_draft(screen, "佳琳凱蕙雲亭晴霞阿霖，宋家雅茹")
         self.assertNotIn("餐家", kept)
-        for name in ("佳怜", "凱慧", "雅婷"):                  # names the draft also holds stay
+        for name in ("佳怜", "凱蕙", "雅茹"):                  # names the draft also holds stay
             self.assertIn(name, kept)
 
     def test_one_simplified_looking_character_does_not_convert_a_traditional_screen(self):
-        roster = "6/15晚場（排球地帶）\n女\n佳怜\n凱慧\n庭筠\n阿嵐\n宋嘉\n雅婷\n饅頭\n芋頭"
+        roster = "6/15晚場（排球地帶）\n女\n佳怜\n凱蕙\n芷柔\n阿霖\n宋嘉\n雅茹\n饅頭\n芋頭"
         self.assertIn("佳怜", st.normalize_screen(roster))
         self.assertIn("張雨薇", st.normalize_screen("张雨薇发来的文件在这里，请查看张雨薇的备注"))

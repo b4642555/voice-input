@@ -58,6 +58,21 @@ class Recorder:
         rms = float(np.sqrt(np.mean(mono * mono)))
         self.level = min(1.0, rms * 20)
 
+    def tail(self, seconds: float) -> tuple[np.ndarray, int]:
+        """(the last `seconds` of what is recorded so far, the number of samples recorded in all). A copy: the
+        recording goes on."""
+        need = int(SAMPLE_RATE * seconds)
+        with self._lock:
+            total = sum(len(c) for c in self._chunks)
+            got, out = 0, []
+            for c in reversed(self._chunks):
+                out.append(c)
+                got += len(c)
+                if got >= need:
+                    break
+        audio = np.concatenate(out[::-1]) if out else np.zeros(0, np.float32)
+        return audio[-need:].copy(), total
+
     def stop(self) -> np.ndarray:
         if self._stream is not None:
             self._stream.stop()

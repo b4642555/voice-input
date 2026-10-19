@@ -225,10 +225,10 @@ def without_draft(text: str, draft: str) -> str:
     for line in text.splitlines():
         k = _NOT_TEXT.sub("", line)
         # the draft itself, or a long piece of it (OCR wraps a long draft); a name in the list that the draft
-        # also holds (雅婷) stays
+        # also holds (雅茹) stays
         if len(k) >= 2 and (key in k or (k in key and len(k) >= 6 and 2 * len(k) >= len(key))):
             continue
-        # OCR misreads the draft too (宋家雅婷 read as 餐家雅婷, which then "fixed" 宋家 into 餐家): mostly the same
+        # OCR misreads the draft too (宋家雅茹 read as 餐家雅茹, which then "fixed" 宋家 into 餐家): mostly the same
         # characters in order, most of the draft's length
         if len(k) >= 4 and 2 * len(k) >= len(key) and difflib.SequenceMatcher(None, k, key).ratio() >= 0.7:
             continue           # (陸寶寶 read as 陸寶瓦 kept the draft's 曾冠偉 "on screen")
@@ -332,7 +332,7 @@ def _supported(text: str, i: int, size: int, term: str, words) -> bool:
     """Another screen name (2+ characters, not this one) is in the same dictation, outside the span: the user is
     talking about what is on screen (一瓶的平丁天花板 -> 一萍), not just saying a word (我買了一瓶水 stays)."""
     rest = text[:i] + "　" + text[i + size:]
-    # a time or a number on screen is not a name (下午三點 made 跟客戶開會 into 跟客戶凱慧)
+    # a time or a number on screen is not a name (下午三點 made 跟客戶開會 into 跟客戶凱蕙)
     return any(len(w) >= 2 and w != term and w in rest and not (set(w) & _NUMERALS) for w in words)
 
 
@@ -433,7 +433,7 @@ def fix(text: str, words: list[str], loose: list[str] = (), common_wins: bool = 
             mine = _readings(span)
             freq = candidates.frequency(span)
             # any common word heard (一瓶, even 開會 at 495) gives way to a name on screen that sounds exactly the
-            # same (一萍, 凱慧) when another screen name is in the same dictation: the user is reading from the
+            # same (一萍, 凱蕙) when another screen name is in the same dictation: the user is reading from the
             # screen (the user's rule, 2026-10-14). 城市 never becomes 程式: only names, not dictionary words, win.
             common = freq >= candidates.COMMON
             firsts = {_fuzzy(r) for r in mine[0]}

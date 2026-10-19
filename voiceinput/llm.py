@@ -16,14 +16,16 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 
 from .textfmt import to_traditional
+from . import codex_cli, antigravity_cli
 
 log = logging.getLogger("voiceinput")
 
 # key -> (label, base URL, default model, where to get a key)
 PROVIDERS = {
+    "codex_cli": ("訂閱自動接續（Claude / Flash / GPT，免金鑰）", "", codex_cli.MODEL, ""),
     "claude_cli": ("Claude Code（用你的訂閱，免金鑰）", "", "claude-haiku-5-5", ""),
     "groq": ("Groq（免費額度，最快）", "https://api.groq.com/openai/v1", "llama-3.3-70b-versatile",
              "https://console.groq.com/keys"),
@@ -88,15 +90,27 @@ class Settings:
     model: str = ""
     api_key: str = ""
     style: str = "polish"
-    timeout: float = 15.0   # the command line starts a program each time; the cloud APIs answer far sooner
+    prompt: str = ""        # the user's own rules for the cleanup (AI 潤稿 page); "" is the built-in text (_SYSTEM)
+    timeout: float = 15.0   # overall provider budget; GPT is bounded to 10 seconds before fallback
+    fallback_model: str = ""
+    flash_enabled: bool = False
+    flash_model: str = ""
+    used_provider: str = field(default="", init=False)
+    used_model: str = field(default="", init=False)
+    fallback_reason: str = field(default="", init=False)
 
     def url(self) -> str:
         return (self.base_url or PROVIDERS.get(self.provider, PROVIDERS["custom"])[1]).rstrip("/")
 
     def model_name(self) -> str:
+        if self.provider == "antigravity_cli":
+            return self.model or antigravity_cli.MODEL
         return self.model or PROVIDERS.get(self.provider, PROVIDERS["custom"])[2]
 
     def ready(self) -> bool:
+        if self.provider == "codex_cli":
+            return (codex_cli.cli_path() is not None or claude_cli_path() is not None
+                    or (self.flash_enabled and antigravity_cli.cli_path() is not None))
         if self.provider == "claude_cli":
             return claude_cli_path() is not None
         return bool(self.url() and self.model_name() and (self.api_key or self.provider == "ollama"
@@ -135,12 +149,23 @@ _TONE = {
 }
 
 
-def _messages(text: str, ctx: Context, glossary: list[str], style: str, cli: bool = False) -> list[dict]:
+def default_prompt() -> str:
+    """The built-in rules, with {format_rule} and {tone_rule} where the layout style and the app's tone go."""
+    return _SYSTEM
+
+
+def render_prompt(template: str, style: str, tone: str = "") -> str:
+    """The rules with the layout style and the tone put in. replace, not format: the user's text may hold braces."""
+    return ((template or _SYSTEM).replace("{format_rule}", _FORMAT_LIGHT if style == "light" else _FORMAT_POLISH)
+            .replace("{tone_rule}", tone))
+
+
+def _messages(text: str, ctx: Context, glossary: list[str], style: str, cli: bool = False,
+              template: str = "") -> list[dict]:
     k = kind(ctx.app)
     # the Claude Code process keeps the rules as its fixed system prompt (sent once, not with every dictation:
     # the user wants the least quota used, 2026-10-14); the tone, which varies by app, goes with the dictation
-    system = _SYSTEM.format(format_rule=_FORMAT_LIGHT if style == "light" else _FORMAT_POLISH,
-                            tone_rule="" if cli else _TONE.get(k, ""))
+    system = render_prompt(template, style, "" if cli else _TONE.get(k, ""))
     parts = []
     if cli and _TONE.get(k):
         parts.append("【語氣】" + _TONE[k].split(". ", 1)[-1].strip())
@@ -218,18 +243,34 @@ def claude_cli_path() -> str | None:
 CLAUDE_INSTALL_URL = "https://claude.com/product/claude-code"
 
 
-def claude_login_state() -> str:
-    """'missing' (not installed), 'out' (installed, not signed in) or 'ok'. Runs `claude auth status` (~1s)."""
+def claude_status() -> tuple[str, str]:
+    """('missing' | 'out' | 'ok', the signed-in account's email or ""). Runs `claude auth status` (~1s). The email is
+    only shown on the settings page: never logged, never saved (the user, 2026-10-19: 顯示目前登入的是哪一組帳號)."""
     import subprocess
     exe = claude_cli_path()
     if exe is None:
-        return "missing"
+        return "missing", ""
     try:
         r = subprocess.run([exe, "auth", "status"], capture_output=True, text=True, encoding="utf-8", timeout=15,
                            creationflags=0x08000000)
-        return "ok" if json.loads(r.stdout or "{}").get("loggedIn") else "out"
+        d = json.loads(r.stdout or "{}")
+        return ("ok", str(d.get("email") or "")) if d.get("loggedIn") else ("out", "")
     except (OSError, ValueError, subprocess.SubprocessError):
-        return "out"
+        return "out", ""
+
+
+def settings_from(c) -> Settings:
+    """Use identical prompt, models and routing in dictation and the settings test."""
+    guess = provider_for_key(c.ai_key)
+    if guess and guess != c.ai_provider and c.ai_provider in ("groq", "gemini", "openrouter"):
+        return Settings(guess, "", "", c.ai_key, c.ai_style, prompt=c.ai_prompt)
+    return Settings(c.ai_provider, c.ai_base_url, c.ai_model, c.ai_key, c.ai_style, prompt=c.ai_prompt,
+                    fallback_model=c.ai_claude_model, flash_enabled=c.ai_flash_enabled, flash_model=c.ai_flash_model)
+
+
+def claude_login_state() -> str:
+    """'missing' (not installed), 'out' (installed, not signed in) or 'ok'."""
+    return claude_status()[0]
 
 
 def claude_login():
@@ -351,7 +392,13 @@ def _claude_for(model: str, system: str = _CLI_SYSTEM) -> _ClaudeProcess:
 
 
 def warm_up(s: Settings) -> None:
-    """Start the Claude Code process in the background so the first dictation does not wait for it."""
+    """Prepare the primary and fallback before the user finishes recording."""
+    if s.provider == "codex_cli":
+        codex_cli.warm_up()
+        if s.flash_enabled:
+            antigravity_cli.warm_up(s.flash_model or antigravity_cli.MODEL)
+        warm_up(replace(s, provider="claude_cli", model=s.fallback_model))
+        return
     if s.provider != "claude_cli" or claude_cli_path() is None:
         return
 
@@ -360,7 +407,11 @@ def warm_up(s: Settings) -> None:
         log.info("Claude Code warm-up started")
         try:
             with _claude_lock:
-                _claude_for(s.model_name(), _polish_system(s.style)).ask("【逐字稿】\n好", 40.0)
+                system = _polish_system(s.style, s.prompt)
+                existing = _claude.get((s.model_name(), system))
+                if existing is not None and not existing.dead and existing.proc.poll() is None:
+                    return
+                _claude_for(s.model_name(), system).ask("【逐字稿】\n好", 15.0)
             log.info("Claude Code warm-up done in %.1fs", time.monotonic() - t0)
         except LLMError as e:
             log.info("Claude Code warm-up failed: %s", e)
@@ -369,8 +420,8 @@ def warm_up(s: Settings) -> None:
     threading.Thread(target=run, daemon=True).start()
 
 
-def _polish_system(style: str) -> str:
-    return _SYSTEM.format(format_rule=_FORMAT_LIGHT if style == "light" else _FORMAT_POLISH, tone_rule="")
+def _polish_system(style: str, template: str = "") -> str:
+    return render_prompt(template, style)
 
 
 def _chat_cli(s: Settings, messages: list[dict]) -> str:
@@ -380,9 +431,55 @@ def _chat_cli(s: Settings, messages: list[dict]) -> str:
         return _claude_for(s.model_name(), system).ask(task, s.timeout)
 
 
+def _chat_codex(s: Settings, messages: list[dict]) -> str:
+    try:
+        return codex_cli.chat(messages, min(s.timeout, 10.0), s.model_name(), fast=True)   # GPT always runs Fast
+    except codex_cli.CodexError as e:
+        raise LLMError(str(e)) from e
+
+
+def _with_fallback(s: Settings, operation):
+    """Validate each provider's result before accepting it; never route subscriptions to an API."""
+    s.used_provider = s.used_model = s.fallback_reason = ""
+    attempts = [s]
+    if s.provider == "codex_cli":
+        claude = replace(s, provider="claude_cli", model=s.fallback_model)
+        choices = {"claude_cli": claude, "codex_cli": s}
+        if s.flash_enabled:
+            choices["antigravity_cli"] = replace(s, provider="antigravity_cli", model=s.flash_model)
+        # the order is fixed (the user, 2026-10-19): Claude, then Flash when it is on, then GPT
+        attempts = [choices[p] for p in ("claude_cli", "antigravity_cli", "codex_cli") if p in choices]
+    failures = []
+    for candidate in attempts:
+        try:
+            out = operation(candidate)
+        except LLMError as error:
+            failures.append(f"{candidate.model_name()}：{error}")
+            continue
+        s.used_provider, s.used_model = candidate.provider, candidate.model_name()
+        s.fallback_reason = "；".join(failures)
+        return out
+    s.fallback_reason = "；".join(failures)
+    raise LLMError(s.fallback_reason)
+
+
+def result_label(s: Settings) -> str:
+    label = s.used_model
+    if s.used_provider == "codex_cli":
+        label += " Fast"
+    return label + ("（前一服務無法使用，已接續）" if s.fallback_reason else "")
+
+
 def chat(s: Settings, messages: list[dict], max_tokens: int = 1024) -> str:
+    if s.provider == "codex_cli":
+        return _chat_codex(s, messages)
     if s.provider == "claude_cli":
         return _chat_cli(s, messages)
+    if s.provider == "antigravity_cli":
+        try:
+            return antigravity_cli.chat(messages, min(s.timeout, 12), s.model_name())
+        except antigravity_cli.AntigravityError as error:
+            raise LLMError(str(error)) from error
     body = {"model": s.model_name(), "messages": messages, "temperature": 0.2, "max_tokens": max_tokens,
             "stream": False}
     if "qwen3" in s.model_name().lower() and s.provider == "groq":
@@ -395,6 +492,13 @@ def chat(s: Settings, messages: list[dict], max_tokens: int = 1024) -> str:
 
 
 def list_models(s: Settings) -> list[str]:
+    if s.provider == "codex_cli":
+        try:
+            return codex_cli.list_models()
+        except (codex_cli.CodexError, OSError, ValueError, KeyError) as e:
+            raise LLMError("無法取得 GPT 模型清單，請確認登入與網路") from e
+    if s.provider == "claude_cli":
+        return [m["value"] for m in claude_models() if isinstance(m.get("value"), str)]
     req = urllib.request.Request(s.url() + "/models", headers={"User-Agent": "VoiceInput"})
     if s.api_key:
         req.add_header("Authorization", f"Bearer {s.api_key}")
@@ -407,6 +511,33 @@ def list_models(s: Settings) -> list[str]:
         raise LLMError(str(getattr(e, "reason", e))) from e
     ids = [m.get("id", "") for m in data.get("data", []) if isinstance(m, dict)]
     return sorted(i.removeprefix("models/") for i in ids if i)
+
+
+def claude_models() -> list[dict]:
+    """Official CLI initialization catalog; no model inference or API key."""
+    import os
+    import subprocess
+    import tempfile
+    exe = claude_cli_path()
+    if not exe:
+        raise LLMError("找不到 Claude Code")
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE", "ANTHROPIC"))}
+    request = {"type": "control_request", "request_id": "models", "request": {"subtype": "initialize"}}
+    try:
+        with tempfile.TemporaryDirectory(prefix="voiceinput-catalog-") as folder:
+            result = subprocess.run([exe, "-p", "--input-format", "stream-json", "--output-format", "stream-json",
+                                     "--verbose", "--tools", "", "--no-session-persistence", "--strict-mcp-config",
+                                     "--setting-sources", "", "--disable-slash-commands"],
+                                    input=json.dumps(request) + "\n", capture_output=True, text=True, encoding="utf-8",
+                                    cwd=folder, env=env, timeout=15, creationflags=0x08000000)
+        for line in result.stdout.splitlines():
+            data = json.loads(line)
+            response = data.get("response", {})
+            if data.get("type") == "control_response" and response.get("request_id") == "models":
+                return response.get("response", {}).get("models", [])
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        raise LLMError("無法讀取 Claude 模型清單") from error
+    raise LLMError("Claude 未提供模型清單")
 
 
 _THINK = re.compile(r"<think>.*?</think>", re.S)
@@ -461,14 +592,22 @@ def _keep_glossary_spelling(out: str, glossary: list[str]) -> str:
 def polish(s: Settings, text: str, ctx: Context, glossary: list[str]) -> str:
     """The cleaned text. Raises LLMError when the call failed or the answer is not a cleanup of text."""
     t0 = time.monotonic()
-    key = (text, tuple(glossary[:80]), kind(ctx.app), ctx.inserting, bool(ctx.selected), s.style, s.model_name(),
-           hash(ctx.screen))
+    key = (text, tuple(glossary[:80]), ctx.app, ctx.title, ctx.before, ctx.after, ctx.selected, ctx.inserting,
+           s.style, s.provider, s.url(), s.model_name(), s.fallback_model,
+           s.flash_enabled, s.flash_model, hash(ctx.screen), hash(s.prompt))
     if key in _polished:
-        return _polished[key]
-    out = _clean(chat(s, _messages(text, ctx, glossary, s.style, cli=s.provider == "claude_cli"),
-                      max_tokens=max(256, len(text) * 3)))
-    if not plausible(text, out):
-        raise LLMError(f"回應不像整理過的逐字稿：{out[:80]}")
+        out, s.used_provider, s.used_model = _polished[key]
+        s.fallback_reason = ""
+        return out
+    def attempt(provider):
+        out = _clean(chat(provider, _messages(text, ctx, glossary, provider.style,
+                                             cli=provider.provider in ("claude_cli", "codex_cli", "antigravity_cli"),
+                                             template=provider.prompt),
+                          max_tokens=max(256, len(text) * 3)))
+        if not plausible(text, out):
+            raise LLMError("回應不像整理過的逐字稿")
+        return out
+    out = _with_fallback(s, attempt)
     out = _keep_glossary_spelling(out, glossary)
     if kind(ctx.app) == "terminal":
         out = re.sub(r"\s*\n+\s*", " ", out)     # a newline would be Enter (or a multi-line paste warning)
@@ -476,40 +615,11 @@ def polish(s: Settings, text: str, ctx: Context, glossary: list[str]) -> str:
         out = _STOP_END.sub("", out)             # in the middle of a line: no full stop or comma at the end
     # the AI's own end punctuation stays (a question mark it adds is right: the user asked for correct punctuation,
     # 2026-10-14); the chat-length rule (textfmt.drop_casual_period) takes the final 。 off short messages afterwards
-    log.info("llm %.2fs (%s): %s", time.monotonic() - t0, s.model_name(), out.replace("\n", "⏎"))
+    log.info("llm %.2fs (%s): %s", time.monotonic() - t0, s.used_model, out.replace("\n", "⏎"))
     if len(_polished) >= 32:
         _polished.pop(next(iter(_polished)))
-    _polished[key] = out
-    return out
-
-
-_INSTRUCT_SYSTEM = """你是使用者的寫作助理，接在語音輸入後面。使用者用說的給你一個指令。
-{task}
-只輸出結果文字本身：不要前言、不要解釋、不要加引號或 Markdown 標題。除非指令要求其他語言，使用繁體中文（台灣用字）與全形標點。"""
-_TASK_EDIT = "依照指令改寫【選取的文字】（例如改得更正式、更短、翻譯、修正錯字、改成條列），輸出改寫後要取代它的完整文字。"
-_TASK_WRITE = "依照指令寫出使用者要的文字（例如一封信、一段回覆、一則公告），輸出可以直接貼到游標處的內容。"
-
-
-def instruct(s: Settings, instruction: str, selected: str, ctx: Context) -> str:
-    """AI 指令: rewrite selected per a spoken instruction, or write what it asks for. Raises LLMError."""
-    t0 = time.monotonic()
-    tone = _TONE.get(kind(ctx.app), "").replace("\n10. ", "\n")
-    system = _INSTRUCT_SYSTEM.format(task=_TASK_EDIT if selected else _TASK_WRITE) + tone
-    situation = [x for x in (f"應用程式：{ctx.app}" if ctx.app else "",
-                             f"視窗標題：{ctx.title[:120]}" if ctx.title else "",
-                             f"游標前的文字：…{ctx.before[-300:]}" if ctx.before.strip() else "") if x]
-    parts = ["【情境】\n" + "\n".join(situation)] if situation else []
-    if selected:
-        parts.append("【選取的文字】\n" + selected)
-    parts.append("【指令】\n" + instruction)
-    slow = Settings(s.provider, s.base_url, s.model, s.api_key, s.style, max(s.timeout, 20.0))
-    messages = [{"role": "system", "content": system}, {"role": "user", "content": "\n\n".join(parts)}]
-    out = _clean(chat(slow, messages, max_tokens=2048))
-    if not out:
-        raise LLMError("沒有回應內容")
-    if kind(ctx.app) == "terminal":
-        out = re.sub(r"\s*\n+\s*", " ", out)
-    log.info("llm instruct %.2fs: %s -> %s", time.monotonic() - t0, instruction, out.replace("\n", "⏎")[:200])
+    if not s.fallback_reason:   # let GPT recover on the next request, including identical dictations
+        _polished[key] = (out, s.used_provider, s.used_model)
     return out
 
 

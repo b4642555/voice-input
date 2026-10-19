@@ -33,5 +33,16 @@ class CasualPeriodTests(unittest.TestCase):
                 self.assertEqual(drop_casual_period(text), expected)
 
 
+class ZhiTests(unittest.TestCase):
+    def test_zhi_before_yao_shi_you_neng_is_zhi_not_the_animal_counter(self):
+        from voiceinput.textfmt import format_text
+        self.assertEqual(format_text("隻要你來我就開心"), "只要你來我就開心")
+        self.assertEqual(format_text("他隻是路過"), "他只是路過")
+        self.assertEqual(format_text("隻有我一個人"), "只有我一個人")
+        self.assertEqual(format_text("一隻是黑的"), "一隻是黑的")      # a counter after a number
+        self.assertEqual(format_text("這隻有點胖"), "這隻有點胖")
+        self.assertEqual(format_text("我養了兩隻貓"), "我養了兩隻貓")
+
+
 if __name__ == "__main__":
     unittest.main()

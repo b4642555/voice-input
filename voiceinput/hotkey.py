@@ -36,8 +36,10 @@ class Hotkeys:
     """Calls on_down(name, time) / on_up(name, time) for the watched keys, and on_other_key(vk) for any other key
     the user presses."""
 
-    def __init__(self, on_down, on_up, on_other_key=None, on_injected_key=None):
+    def __init__(self, on_down, on_up, on_other_key=None, on_injected_key=None, mouse_gate=None):
         self.on_injected_key = on_injected_key
+        self.mouse_gate = mouse_gate         # (button name, x, y) -> False: the press is not ours, it passes through
+        self._passed = set()                 # buttons whose press went through untouched (so does their release)
         self.on_down = on_down
         self.on_up = on_up
         self.on_other_key = on_other_key
@@ -56,8 +58,16 @@ class Hotkeys:
         # Keep each physical side distinct through the gesture and its eventual replay.
         self._held &= self._names | set(self._vks.values())
 
-    def is_bound_mouse(self, msg: int, mouse_data: int) -> bool:
-        return _mouse_key(self._names, msg, mouse_data) is not None
+    def is_bound_mouse(self, msg: int, mouse_data: int, pt=None) -> bool:
+        hit = _mouse_key(self._names, msg, mouse_data)
+        if hit is None:
+            return False
+        name, down = hit
+        if name in self._passed:
+            return False
+        if down and self.mouse_gate is not None and pt is not None and not self.mouse_gate(name, pt.x, pt.y):
+            return False
+        return True
 
     def start(self) -> None:
         self._listener = keyboard.Listener(win32_event_filter=self._win32_filter)
@@ -99,6 +109,14 @@ class Hotkeys:
         hit = _mouse_key(self._names, msg, data.mouseData)
         if hit is None:
             return False   # never passed on to pynput's (unused) callbacks
+        name, down = hit
+        if down and self.mouse_gate is not None and name not in self._held and not self.mouse_gate(
+                name, data.pt.x, data.pt.y):
+            self._passed.add(name)       # not on an input box: the button does what it always does
+            return False
+        if not down and name in self._passed:
+            self._passed.discard(name)
+            return False
         self._event(*hit)
         self._mouse_listener.suppress_event()
 

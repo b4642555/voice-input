@@ -32,6 +32,13 @@ class LaughTests(unittest.TestCase):
         self.assertEqual(a("好啊", "哈哈", False), "好啊")
         self.assertEqual(a("好啊", "", True), "好啊")
 
+    def test_laugh_written_as_words_becomes_the_chosen_text_without_an_event(self):
+        a = laugh.apply
+        self.assertEqual(a("哈哈哈", "XD", False), "XD")
+        self.assertEqual(a("真的好好笑哈哈哈", "XD", False), "真的好好笑XD")
+        self.assertEqual(a("我笑聲哈哈的時候", "XD", False), "我笑聲哈哈的時候")      # in the middle: it is the user's words
+        self.assertEqual(a("今天很好", "XD", False), "今天很好")
+
     def test_heard_asks_about_the_whole_clip_and_its_tail(self):
         clip = np.zeros(16000 * 5, dtype=np.float32)
         self.assertTrue(laugh.heard(_Fake("laughter", "speech"), clip))

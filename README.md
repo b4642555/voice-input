@@ -58,8 +58,7 @@ sees your credentials, and every dictation costs a little of your own Claude quo
 or pick 「省額度」 to spend less). No Claude subscription? Paste a free API key instead (Groq or Google Gemini; or
 run Ollama locally, no key). Dictations are then cleaned up like Typeless: fillers and repeats removed, self-corrections resolved
 (「三點，不對，四點」→「四點」), spoken lists numbered, paragraphs split, tone matched to the app. If the AI is
-unreachable the plain transcript is pasted. **AI 指令**: bind it in 自訂操作 (or from the AI page), select text
-and say 「改得正式一點」/「翻成英文」, or say 「寫一封感謝信給王經理」 with nothing selected.
+unreachable the plain transcript is pasted.
 
 History (searchable, copy again), the dictionary (字典) and stats are in the main window. Set a 同步資料夾
 (OneDrive / Google Drive / Dropbox) in 設定 to share the dictionary, smart picks and history between computers.
