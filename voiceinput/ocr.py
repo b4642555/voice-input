@@ -10,11 +10,13 @@ import ctypes
 import ctypes.wintypes as wt
 import logging
 import re
+import threading
 
 log = logging.getLogger("voiceinput")
 
 _MAX_SIDE = 4000          # larger windows are skipped (OCR time grows with the area)
 _engine = None
+_one_at_a_time = threading.Lock()   # the engine refuses a second read while one runs (the window and the monitors)
 _SPACED = re.compile(r"(?<=[㐀-䶿一-鿿，。、！？：；「」（）])\s+(?=[㐀-䶿一-鿿，。、！？：；「」（）])")
 
 
@@ -58,12 +60,16 @@ _PASSES = (1.0, 2.0)   # one read missed a bold name that the next read of the s
                        # chat list): two reads, joined; ~1s in the background while the user speaks
 
 
-def _capture(hwnd: int, scale: float = None) -> tuple[int, int, bytes] | None:
-    """The window's pixels, BGRA top-down, 1.5 times larger (small chat text is read much better), unless that
-    would pass OCR's size limit."""
+def _capture(hwnd: int | None, scale: float = None, rect: tuple | None = None) -> tuple[int, int, bytes] | None:
+    """The window's pixels (or, with rect = (left, top, right, bottom), that part of the screen as it is seen),
+    BGRA top-down, 1.5 times larger (small chat text is read much better), unless that would pass OCR's size
+    limit."""
     user32, gdi32 = _gdi()
     r = wt.RECT()
-    ctypes.windll.user32.GetWindowRect(wt.HWND(hwnd), ctypes.byref(r))     # PrintWindow draws the whole rect
+    if rect is not None:
+        r.left, r.top, r.right, r.bottom = rect
+    else:
+        ctypes.windll.user32.GetWindowRect(wt.HWND(hwnd), ctypes.byref(r))     # PrintWindow draws the whole rect
     w, h = r.right - r.left, r.bottom - r.top
     if w < 40 or h < 40 or w > _MAX_SIDE or h > _MAX_SIDE:
         return None
@@ -77,7 +83,7 @@ def _capture(hwnd: int, scale: float = None) -> tuple[int, int, bytes] | None:
     old, old2 = gdi32.SelectObject(mem, bmp), gdi32.SelectObject(big, bmp2)
     try:
         # the window draws itself (PW_RENDERFULLCONTENT: also when partly covered); else copy the screen
-        if not user32.PrintWindow(hwnd, mem, 2):
+        if rect is not None or not user32.PrintWindow(hwnd, mem, 2):
             gdi32.BitBlt(mem, 0, 0, w, h, screen, r.left, r.top, 0x00CC0020)   # SRCCOPY
         gdi32.SetStretchBltMode(big, 4)                                     # HALFTONE: smooth
         gdi32.SetBrushOrgEx(big, 0, 0, None)
@@ -114,8 +120,41 @@ async def _recognize(w: int, h: int, pixels: bytes) -> str:
     writer = DataWriter()
     writer.write_bytes(pixels)
     bitmap = SoftwareBitmap.create_copy_from_buffer(writer.detach_buffer(), BitmapPixelFormat.BGRA8, w, h)
-    result = await _get_engine().recognize_async(bitmap)
+    with _one_at_a_time:
+        result = await _get_engine().recognize_async(bitmap)
     return "\n".join(_SPACED.sub("", line.text) for line in result.lines)
+
+
+def _monitors() -> list[tuple]:
+    """Every monitor's rectangle in virtual-screen pixels."""
+    out = []
+    proto = ctypes.WINFUNCTYPE(wt.BOOL, ctypes.c_void_p, ctypes.c_void_p, ctypes.POINTER(wt.RECT), ctypes.c_void_p)
+
+    def cb(_m, _dc, r, _d):
+        out.append((r.contents.left, r.contents.top, r.contents.right, r.contents.bottom))
+        return True
+    ctypes.windll.user32.EnumDisplayMonitors(None, None, proto(cb), None)
+    return out
+
+
+def screens_text() -> str:
+    """The text OCR reads on every monitor as the user sees it (the user, 2026-10-22: he may look at the window on
+    the left and speak into the box on the right, so the foreground window is not all the screen). One read per
+    monitor; pixels and text are dropped by the caller as soon as the terms are picked."""
+    try:
+        if _get_engine() is None:
+            return ""
+        out = []
+        for rect in _monitors():
+            shot = _capture(None, 1.0, rect)
+            if shot is None:
+                continue
+            out.append(asyncio.run(_recognize(*shot)))
+            del shot
+        return "\n".join(out)
+    except Exception:
+        log.exception("OCR of the screens failed")
+        return ""
 
 
 def window_text(hwnd: int | None = None) -> str:

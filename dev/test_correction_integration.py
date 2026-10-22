@@ -73,6 +73,12 @@ class LearningTests(unittest.TestCase):
         self.learn('貓米發娛樂城', 0, 2, '包你')
         self.assertEqual([w for w, _ in self.app.hotwords.bias()], ['包你'])
 
+    def test_a_single_character_change_shows_no_empty_notice(self):
+        # 2026-10-20: 呢 -> 了 showed 「」 已加入字典; only a dictionary word is announced
+        self.learn('相較之下比較便宜呢', 8, 9, '了')
+        self.assertEqual(self.toasts, [])
+        self.assertEqual(self.app.hotwords.bias(), [])
+
     def test_single_character_learns_context_without_hotword(self):
         self.learn('他在這裡',1,2,'再')
         self.assertEqual(self.app.hotwords.bias(), [])

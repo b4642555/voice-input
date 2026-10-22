@@ -293,20 +293,33 @@ class Toast(QWidget):
             return None
 
     def show_text(self, text: str, seconds: float = 4.0):
+        from PySide6.QtCore import QRect
         from PySide6.QtGui import QFontMetrics
         self._text = text
-        w = QFontMetrics(self._font).horizontalAdvance(text) + 72 + 2 * PAD
-        self.setFixedSize(min(w, 720), CH + 14 + 2 * PAD)
         spot = self._window_spot()          # near what the user is looking at: the bottom of the window in front
+        screen = spot[2] if spot is not None else (QGuiApplication.screenAt(self.cursor().pos())
+                                                    or QGuiApplication.primaryScreen())
+        g = screen.availableGeometry()
+        # nothing is cut off (the user, 2026-10-20): the capsule grows with the text, and when the text is wider than
+        # the screen it wraps onto more lines and grows taller
+        fm = QFontMetrics(self._font)
+        pad_x = 54 + 24 + 2 * PAD
+        room = max(240, g.width() - 40 - pad_x)
+        flat = fm.horizontalAdvance(text)
+        if flat <= room:
+            w, lines_h = flat + pad_x, 0
+        else:
+            w = room + pad_x
+            box = fm.boundingRect(QRect(0, 0, room, 10000), int(Qt.TextWordWrap), text)
+            lines_h = max(0, box.height() - fm.height())
+        self._extra = lines_h
+        self.setFixedSize(w, CH + 14 + 2 * PAD + lines_h)
         if spot is not None:
             cx, bottom, screen = spot
-            g = screen.availableGeometry()
             x = int(min(max(cx - self.width() / 2, g.left()), g.right() - self.width()))
             y = int(min(bottom - self.height() - 70, g.bottom() - self.height() - 20))
             self.move(x, max(g.top(), y))
         else:
-            screen = QGuiApplication.screenAt(self.cursor().pos()) or QGuiApplication.primaryScreen()
-            g = screen.availableGeometry()
             self.move(g.center().x() - self.width() // 2, g.bottom() - self.height() - 36 - H)
         self._fade.stop()
         if not self.isVisible():
@@ -332,8 +345,9 @@ class Toast(QWidget):
     def paintEvent(self, _):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        cap = QRectF(PAD, PAD, self.width() - 2 * PAD, CH + 14)
-        r = (CH + 14) / 2
+        extra = getattr(self, "_extra", 0)
+        cap = QRectF(PAD, PAD, self.width() - 2 * PAD, CH + 14 + extra)
+        r = min((CH + 14) / 2, cap.height() / 2)
         p.setPen(Qt.NoPen)
         for i in range(PAD, 0, -2):
             p.setBrush(QColor(0, 0, 0, int(26 * (1 - i / PAD) ** 2) + 2))
@@ -356,5 +370,5 @@ class Toast(QWidget):
         p.drawPolyline([QPointF(cx - 5, cy), QPointF(cx - 1.5, cy + 3.8), QPointF(cx + 5.5, cy - 4.2)])
         p.setPen(QColor(246, 247, 250))
         p.setFont(self._font)
-        p.drawText(cap.adjusted(54, 0, -22, 0), Qt.AlignVCenter | Qt.AlignLeft, self._text)
+        p.drawText(cap.adjusted(54, 0, -24, 0), Qt.AlignVCenter | Qt.AlignLeft | Qt.TextWordWrap, self._text)
         p.end()

@@ -6,6 +6,10 @@
   stop and ask before building, as many rounds as needed, with the recommended option first.
 - Don't guess between materially different designs; asking is cheaper than rebuilding.
 - Ask clarifying questions with the AskUserQuestion tool (when available); use it freely.
+- No parenthetical notes (括號補充說明) in anything the user reads (2026-10-20, the user, shown 其他（自己寫）): UI labels, hints,
+  toasts, tray and error messages, menu items, docs written for them, and chat replies. Write the detail out as its own
+  clause or after a colon, or leave it out; the user prefers short text and a shared understanding. Text meant only for a
+  model (prompts, session.md for agents) may keep them. Do not add new ones when editing; fix the ones nearby.
 - After every commit (each new feature or change), restart VoiceInput so the user is testing the new code; start it
   even if it isn't running (the user's request, 2026-10-10). PowerShell:
 
@@ -465,3 +469,4 @@ removed the same day they were built: the user corrects by selecting with the mo
 The mouse-Alt repair branch adds scoped correction learning; see `docs/manual-correction-learning.md` for the user-visible boundaries. `correction.py` owns an independent monitor and optional UIA worker; do not reuse Session.dirty as its scope. A confirmed insertion is tracked by field identity and exact outer text. Only a cached small replacement followed by Enter/Ctrl+Enter and the same field clearing may be learned. Unsupported fields and stale snapshots skip learning without blocking paste. Terminal history must never be used as a correction source.
 
 Tests must inject synthetic snapshot readers or a no-op CorrectionWatcher; the headless harness must never inspect the user's current input fields. Stores stay in temporary files. Learning UI updates are marshalled to the Qt main thread.
+

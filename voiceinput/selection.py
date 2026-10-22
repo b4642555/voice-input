@@ -506,6 +506,10 @@ def read_context(ctx: Context | None = None) -> Context:
     ctx.selection = read_selection()
     if ctx.selection is None:
         ctx.caret = read_caret()
+    from . import ocr          # imported on first need: the OCR runtime costs ~25MB once loaded
+    seen = {}               # every monitor by OCR, in the background while the window is read (the user, 2026-10-22:
+    reader = threading.Thread(target=lambda: seen.update(t=ocr.screens_text()), daemon=True)   # he may look left, speak right)
+    reader.start()
     window = _with_timeout(window_text, _WINDOW_BUDGET)    # the whole window: chat history, page, mail
     focus = visible_text()
     # a small focused field is the message being written: what the user dictated there, maybe misheard, is not
@@ -513,8 +517,9 @@ def read_context(ctx: Context | None = None) -> Context:
     draft = focus if len(focus) < _DRAFT_MAX else ""
     text = ("" if draft else focus) + "\n" + window
     if len(text.strip()) < _OCR_BELOW:
-        from . import ocr          # imported on first need: the OCR runtime costs ~25MB once loaded
         text += "\n" + ocr.window_text()
+    reader.join(_SCREENS_BUDGET)
+    text += "\n" + seen.get("t", "")
     text = screen_terms.without_draft(text, draft)
     text = screen_terms.normalize_screen(text)   # a simplified page, 臺 -> 台
     ctx.screen = _for_ai(text)     # memory only, handed to the AI as the topic (the user's request); cleared after use
@@ -543,7 +548,8 @@ def _for_ai(text: str) -> str:
 
 _OCR_BELOW = 300         # characters of readable text under which the window is read by OCR
 _DRAFT_MAX = 1000         # a focused field shorter than this is an input box (its text is the draft)
-_WINDOW_BUDGET = 1.2      # seconds; a window that takes longer to read is skipped (the dictation must not wait)
+_SCREENS_BUDGET = 3.0     # seconds to wait for the OCR of all monitors
+_WINDOW_BUDGET = 1.2     # seconds; a window that takes longer to read is skipped (the dictation must not wait)
 _WINDOW_ELEMENTS = 4000
 
 

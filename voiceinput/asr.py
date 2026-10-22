@@ -167,12 +167,19 @@ class Recognizer:
         spec = self.hotword_spec(hotwords) if hotwords and self.supports_hotwords else ""
         audio = audio.astype(np.float32, copy=False)
         chunks = _audio_chunks(audio) if self.key == "xasr" else (audio,)
-        result, count = "", 0
+        result, count, offset = "", 0, 0.0
+        self.last_tokens = []   # (token, seconds from the start of audio) of this call, for VA's word timing
         for chunk in chunks:
             stream = self._rec.create_stream(spec) if spec else self._rec.create_stream()
             stream.accept_waveform(SAMPLE_RATE, chunk)
             self._rec.decode_stream(stream)
-            text = self._clean(stream.result.text)
+            res = stream.result
+            for tok, at in zip(getattr(res, "tokens", []) or [], getattr(res, "timestamps", []) or []):
+                tok = tok.replace("▁", " ").strip()
+                if tok:
+                    self.last_tokens.append((tok, round(offset + float(at), 2)))
+            offset += chunk.size / SAMPLE_RATE
+            text = self._clean(res.text)
             if result and text and result[-1].isascii() and text[0].isascii():
                 result += " "
             result += text

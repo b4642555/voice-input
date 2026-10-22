@@ -34,7 +34,7 @@ from PySide6.QtCore import QLockFile, QObject, QPointF, QRectF, Qt, QTimer, Sign
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
-from . import autostart, candidates, edit, laugh, llm, models, paths, rules, screen_terms, sync, techterms
+from . import autostart, candidates, edit, laugh, llm, models, paths, pause, rules, screen_terms, sync, techterms, uiterms
 from .asr import SAMPLE_RATE, Recognizer
 from .audio import Recorder
 from .config import Config
@@ -220,6 +220,7 @@ class App(QObject):
         self.hotkeys.start()
         self._mouse = self._watch_mouse()
         self.worker.submit(self._load_model_job)
+        self._api = None
         # self.bg.submit(self._load_second_job)
         candidates.preload()   # the disfluency pass uses the dictionary
         self._warm_ai()
@@ -316,8 +317,9 @@ class App(QObject):
     def _voice_job(self, rec, audio, press, phrases):
         try:
             raw = rec.recognize(audio, _bias([(w, _COMMAND_SCORE) for w in phrases]))
-            body, said = rules.split_trailing(format_text(raw, False), phrases)
-            if said:
+            heard = format_text(raw, False)
+            body, said = rules.split_trailing(heard, phrases)
+            if said and (not body.strip(_TEXT_STRIP) or pause.after_pause(audio, _tail_chars(heard, body))):
                 self.main.emit(lambda: self._voice_stop(press, said))
         except Exception:
             log.exception("listening for 送出 failed")
@@ -778,6 +780,21 @@ class App(QObject):
         return (rule.steps[i + 1:] if i is not None else []) + list(press.trailing or [])
 
     # --- transcription ---
+    def _api_transcribe(self, audio):
+        """An utterance from another app (api.py, VA): recognized with the hotwords and formatted like a
+        dictation, on the worker thread so it never runs alongside one."""
+        def job():
+            # feedback on a screen: interface and game design words on top of the user's hotwords (uiterms)
+            raw = self.recognizer.recognize(audio, _bias(self.hotwords.bias() + uiterms.bias()))
+            log.info("api asr: %s", raw)
+            tokens = [(to_traditional(tok), at) for tok, at in getattr(self.recognizer, "last_tokens", [])]
+            text = format_text(raw, False)
+            fixed, n = uiterms.fix(text)
+            if n:
+                log.info("api ui terms: %s -> %s", text, fixed)
+            return fixed, to_traditional(raw), tokens
+        return self.worker.submit(job).result(timeout=120)
+
     def _transcribe_job(self, rec, audio, press: _Press, hwnd):
         stamp = time.strftime("%H:%M:%S")
         t0, raw = time.monotonic(), ""
@@ -829,6 +846,14 @@ class App(QObject):
             phrases = [r.phrase for r in self.cfg.rules if r.enabled and r.source == rules.SPEECH
                        and not rules.problems(r, self.cfg.rules)]
             body, said = rules.split_trailing(formatted, phrases)
+            if said and body.strip(_TEXT_STRIP) and audio is not None:
+                m = pause.measure(audio)
+                log.info("command at the end: pause before it %s, last stretch %s, %d characters",
+                         "none" if m is None or m[0] is None else f"{m[0]:.2f}s", "-" if m is None else f"{m[1]:.2f}s",
+                         _tail_chars(formatted, body))
+            if said and body.strip(_TEXT_STRIP) and audio is not None                     and not pause.after_pause(audio, _tail_chars(formatted, body)):
+                log.info("%s at the end without a pause before it: kept as text", "、".join(said))
+                body, said = formatted, []         # 我說的那個送出: no pause, so it is what was said (the user, 2026-10-19)
             tail_ops = [rules.pick(rules.candidates(self.cfg.rules, rules.SPEECH, ph), selected, press.dictated)
                         for ph in said]
             if said and all(op is not None for op in tail_ops):
@@ -1037,6 +1062,10 @@ class App(QObject):
     def _hotword_error(self, word: str) -> str:
         if self.recognizer is None:
             return "模型載入中，請稍後再加入熱詞。"
+        if re.fullmatch(r"[㐀-䶿一-鿿A-Za-z0-9 .\-+#]+", word):
+            # a rare character the recognizer's vocabulary lacks (蓁 in 宜蓁, 2026-10-22) only means the word cannot
+            # bias recognition (hotword_spec leaves it out); the AI's glossary and the screen fixes still use it
+            return ""
         if not self.recognizer.hotword_spec([(word, 1)]):
             return "目前模型無法辨識此詞的部分字元，請移除符號或調整文字。"
         return ""
@@ -1060,16 +1089,20 @@ class App(QObject):
                                         and re.fullmatch(r"[㐀-䶿一-鿿]", change.new))
                                        or (is_latin(change.old) and is_latin(change.new))):
                 saved = self.memory.record(change.text, change.start, change.end, change.new)
+            added_word = False
             if word and hotword_eligible(word) and not self._hotword_error(word):
                 added = self.hotwords.add(word)
+                added_word = bool(added)
                 log.info("manual correction: hotword add %s, the list has %d words", "ok" if added else "refused",
                          len(self.hotwords.items))
                 saved = added or saved
             elif word:
-                log.info("manual correction: hotword not added (%s)",
-                         "not eligible" if not hotword_eligible(word) else self._hotword_error(word))
+                log.info("manual correction: hotword not added (%s) %r %s",
+                         "not eligible" if not hotword_eligible(word) else self._hotword_error(word), word,
+                         " ".join(f"U+{ord(c):04X}" for c in word))
             if saved:
-                learned.append(word.strip())
+                if added_word:
+                    learned.append(word.strip())      # only a dictionary word is announced: a single character is not
                 log.info("manual correction learned: %r -> %r", change.old, change.new)
                 self.record.emit({"time": time.strftime("%H:%M:%S"), "asr": "", "asr_s": None,
                                   "fmt": "", "edit": f"手動修正學習：{change.old} → {change.new}"})
@@ -1292,6 +1325,11 @@ def _forget_screen(press):
         ctx.screen = ""
     except Exception:
         pass
+
+
+def _tail_chars(text: str, body: str) -> int:
+    """Characters of what follows body in text (the commands said at the end, marks left out)."""
+    return len(re.sub(r"[\s\W_]+", "", text[len(body):]))
 
 
 def _bias(words: list[tuple[str, float]]) -> list[tuple[str, float]]:
